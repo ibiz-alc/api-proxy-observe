@@ -67,6 +67,26 @@ curl -X POST http://localhost:3000/api/upload \
 - ไม่แนบไฟล์ → ตอบ `400` พร้อมข้อความ error
 - ทุกการอัปโหลดถูกบันทึกเข้า hook ด้วย — เห็นใน**แท็บ Inspector และ Mobile Files แบบ real-time** และดาวน์โหลดไฟล์กลับได้ผ่าน `url` ที่ตอบกลับ
 
+### ดึง lat/lng/address ของรูปเป็น JSON (สำหรับ mobile)
+
+response ของ `/api/upload` แต่ละไฟล์มี `metadataUrl` มาให้ — มือถือเอาไปดึง lat/lng/address ตรงๆ ได้ (ไม่ต้องแกะ EXIF เอง):
+
+```
+GET /api/requests/:id/files/:index/metadata
+→ {
+  "ok": true,
+  "metadata": {
+    "latitude": 13.7515, "longitude": 100.4937,
+    "address": "ถนนสนามไชย, แขวงพระบรมมหาราชวัง, เขตพระนคร, กรุงเทพมหานคร, 10200, ประเทศไทย",
+    "dateTaken": "2025-12-25T07:30:00.000Z", "camera": "Apple iPhone 15 Pro"
+  }
+}
+```
+
+- `?address=0` = ข้ามการหาที่อยู่ (เร็วขึ้น ไม่ต้องต่อเน็ต คืนแค่ lat/lng)
+- `/api/upload` เองก็คืน `address` มาในผลลัพธ์เลย (ใส่ `?address=0` เพื่อข้ามได้เช่นกัน)
+- address มาจาก OpenStreetMap Nominatim — server ต้องต่ออินเทอร์เน็ต
+
 ## Deploy ขึ้น server
 
 รันได้ทุกที่ที่มี Node.js 18 ขึ้นไป:

@@ -101,6 +101,43 @@ app.all(/^\/hook(\/.*)?$/, hookParsers, (req, res) => {
   res.json({ ok: true, id, receivedAt: entry.time });
 });
 
+// ================= อ่าน metadata ของรูป (ใช้ร่วมกันหลาย endpoint) =================
+// reverse geocode พิกัด -> ที่อยู่ ผ่าน OpenStreetMap Nominatim (ต้องต่ออินเทอร์เน็ต + ส่ง User-Agent)
+async function reverseGeocode(lat, lon) {
+  const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&accept-language=th`;
+  const resp = await fetch(url, {
+    headers: { 'User-Agent': 'ApiTester/1.0 (local testing tool)' },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!resp.ok) throw new Error(`Nominatim ตอบกลับ ${resp.status}`);
+  const data = await resp.json();
+  return data.display_name || null;
+}
+
+// อ่าน EXIF จาก buffer แล้วคืนเฉพาะข้อมูลสำคัญ (ถ้า withAddress=true จะ reverse geocode หาที่อยู่ให้ด้วย)
+async function extractImageMetadata(buffer, { withAddress = false } = {}) {
+  const meta = await exifr.parse(buffer, { gps: true, exif: true, tiff: true });
+  if (!meta) return null;
+  const result = {
+    dateTaken: meta.DateTimeOriginal || meta.CreateDate || meta.ModifyDate || null,
+    latitude: meta.latitude ?? null,
+    longitude: meta.longitude ?? null,
+    address: null,
+    camera: [meta.Make, meta.Model].filter(Boolean).join(' ') || null,
+    width: meta.ExifImageWidth || meta.ImageWidth || null,
+    height: meta.ExifImageHeight || meta.ImageHeight || null,
+    imageDescription: meta.ImageDescription || null,
+  };
+  if (withAddress && result.latitude != null && result.longitude != null) {
+    try {
+      result.address = await reverseGeocode(result.latitude, result.longitude);
+    } catch (err) {
+      result.addressError = err.message;
+    }
+  }
+  return result;
+}
+
 // ================= API สำหรับหน้าเว็บ =================
 app.get('/api/requests', (req, res) => {
   res.json(requests);
@@ -120,6 +157,25 @@ app.get('/api/requests/:id/files/:index', (req, res) => {
   res.setHeader('Content-Type', file.mimetype || 'application/octet-stream');
   res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file.originalname)}"`);
   res.send(file.buffer);
+});
+
+// อ่าน metadata (lat/lng/address/วันที่/กล้อง) ของไฟล์รูปที่รับไว้ เป็น JSON
+// ?address=0 เพื่อข้ามการหาที่อยู่ (เร็วขึ้น ไม่ต้องต่อเน็ต)
+app.get('/api/requests/:id/files/:index/metadata', async (req, res) => {
+  const files = fileBuffers.get(req.params.id);
+  const file = files && files[Number(req.params.index)];
+  if (!file) return res.status(404).json({ ok: false, error: 'file not found' });
+  if (!file.mimetype || !file.mimetype.startsWith('image/')) {
+    return res.status(400).json({ ok: false, error: 'ไฟล์นี้ไม่ใช่รูปภาพ' });
+  }
+  const withAddress = req.query.address !== '0';
+  try {
+    const metadata = await extractImageMetadata(file.buffer, { withAddress });
+    if (!metadata) return res.json({ ok: true, name: file.originalname, metadata: null, note: 'รูปนี้ไม่มี EXIF metadata ฝังอยู่' });
+    res.json({ ok: true, name: file.originalname, mimetype: file.mimetype, size: file.buffer.length, metadata });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 // ================= Proxy (MITM) API =================
@@ -180,23 +236,12 @@ app.post('/api/upload', upload.any(), async (req, res) => {
       mimetype: f.mimetype,
       size: f.size,
       url: `/api/requests/${id}/files/${i}`,
+      metadataUrl: `/api/requests/${id}/files/${i}/metadata`,
     };
     if (f.mimetype && f.mimetype.startsWith('image/')) {
       try {
-        const meta = await exifr.parse(f.buffer, { gps: true, exif: true, tiff: true });
-        if (meta) {
-          detail.metadata = {
-            dateTaken: meta.DateTimeOriginal || meta.CreateDate || meta.ModifyDate || null,
-            latitude: meta.latitude ?? null,
-            longitude: meta.longitude ?? null,
-            camera: [meta.Make, meta.Model].filter(Boolean).join(' ') || null,
-            width: meta.ExifImageWidth || meta.ImageWidth || null,
-            height: meta.ExifImageHeight || meta.ImageHeight || null,
-            imageDescription: meta.ImageDescription || null,
-          };
-        } else {
-          detail.metadata = null; // รูปไม่มี EXIF ฝังอยู่
-        }
+        // withAddress: reverse geocode หาที่อยู่ให้ด้วย (ข้ามได้ด้วย ?address=0)
+        detail.metadata = await extractImageMetadata(f.buffer, { withAddress: req.query.address !== '0' });
       } catch (err) {
         detail.metadata = null;
         detail.metadataError = err.message;
