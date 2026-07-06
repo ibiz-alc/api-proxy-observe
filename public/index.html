@@ -13,6 +13,7 @@
       <button class="tab-btn active" data-tab="inspector">📥 Inspector (รับข้อมูล)</button>
       <button class="tab-btn" data-tab="sender">📤 Sender (ส่งข้อมูล)</button>
       <button class="tab-btn" data-tab="image">🖼️ Image Metadata</button>
+      <button class="tab-btn" data-tab="mobile">📱 Mobile Files</button>
     </nav>
   </header>
 
@@ -80,6 +81,26 @@
       </section>
       <section id="image-meta">
         <p class="empty-msg">เลือกรูปภาพเพื่อดู metadata (วันที่ถ่าย, พิกัด GPS, ที่อยู่, ข้อมูลกล้อง)</p>
+      </section>
+    </div>
+  </main>
+
+  <!-- ============ Mobile Files ============ -->
+  <main id="tab-mobile" class="tab">
+    <div class="mobile-send-box">
+      <strong>📤 แนบรูปจากเครื่องนี้:</strong>
+      <input type="file" id="mobile-files" accept="image/*" multiple />
+      <input type="text" id="mobile-note" placeholder="ข้อความ/หมายเหตุ (ไม่บังคับ)" />
+      <button id="mobile-upload-btn" class="primary">ส่ง ▶</button>
+      <span id="mobile-upload-status" class="hint"></span>
+      <span class="hint">เปิดหน้านี้จากมือถือในวง LAN เดียวกัน (URL เดียวกัน) แล้วแนบรูป — รูปจะเด้งขึ้นทุกจอที่เปิดแท็บนี้ทันที หรือให้ mobile app ยิง multipart มาที่ <code id="mobile-hook-url"></code></span>
+    </div>
+    <div class="inspector-layout">
+      <aside id="mobile-gallery">
+        <p class="empty-msg">ยังไม่มีไฟล์ส่งเข้ามา<br/>แนบรูปจากมือถือแล้วจะแสดงที่นี่ทันที</p>
+      </aside>
+      <section id="mobile-detail">
+        <p class="empty-msg">เลือกไฟล์จากรายการด้านซ้ายเพื่อดูรายละเอียดและ metadata</p>
       </section>
     </div>
   </main>

@@ -7,6 +7,7 @@ Web สำหรับทดสอบการรับ-ส่งข้อมู
 1. **📥 Inspector (รับข้อมูล)** — ยิง request จากระบบอื่นมาที่ `/hook` (รองรับทุก method และทุก path ย่อย เช่น `/hook/order/create`) แล้วดู headers, query, body, ไฟล์แนบ ได้ทันทีแบบ real-time
 2. **📤 Sender (ส่งข้อมูล)** — กรอก URL / method / headers / body (JSON หรือ form-data พร้อมไฟล์) ส่งไปทดสอบ API อื่น แล้วดู response ที่ได้กลับมา (ส่งผ่าน server จึงไม่ติด CORS)
 3. **🖼️ Image Metadata** — เลือกรูปจากเครื่อง (คลิกหรือลากวาง) เพื่ออ่าน EXIF: วันที่ถ่าย, พิกัด GPS, ที่อยู่ (reverse geocode ผ่าน OpenStreetMap ต้องต่ออินเทอร์เน็ต), ข้อมูลกล้อง, และ metadata ทั้งหมด พร้อมลิงก์เปิด Google Maps
+4. **📱 Mobile Files** — แนบรูปจากมือถือ (เปิดหน้าเว็บผ่าน IP วง LAN เดียวกัน หรือให้ mobile app ยิง multipart มาที่ `/hook/mobile-upload`) แล้วฝั่ง web เห็นทันทีว่าแนบไฟล์อะไรมา: รูปตัวอย่าง, ชื่อ/ขนาดไฟล์, IP กับ User-Agent ของผู้ส่ง, หมายเหตุ และ metadata ของรูปครบชุด (วันที่ถ่าย, GPS, ที่อยู่, กล้อง)
 
 ## วิธีใช้งาน
 

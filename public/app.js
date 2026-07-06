@@ -132,6 +132,7 @@ function renderDetail(r) {
 async function loadRequests() {
   allRequests = await (await fetch('/api/requests')).json();
   renderList();
+  renderMobileGallery();
 }
 
 const events = new EventSource('/api/events');
@@ -140,12 +141,16 @@ events.addEventListener('request', (e) => {
   allRequests.unshift(entry);
   if (allRequests.length > 200) allRequests.pop();
   renderList();
+  renderMobileGallery();
 });
 events.addEventListener('clear', () => {
   allRequests = [];
   selectedId = null;
+  selectedMobileId = null;
   renderList();
+  renderMobileGallery();
   detailEl.innerHTML = '<p class="empty-msg">เลือก request จากรายการด้านซ้ายเพื่อดูรายละเอียด</p>';
+  document.getElementById('mobile-detail').innerHTML = '<p class="empty-msg">เลือกไฟล์จากรายการด้านซ้ายเพื่อดูรายละเอียดและ metadata</p>';
 });
 
 loadRequests();
@@ -305,26 +310,25 @@ async function reverseGeocode(lat, lon) {
   return data.display_name || null;
 }
 
-async function handleImage(file) {
-  imagePreview.src = URL.createObjectURL(file);
-  imagePreview.style.display = 'block';
-  imageMetaEl.innerHTML = '<p class="empty-msg">⏳ กำลังอ่าน metadata...</p>';
+// อ่าน EXIF จาก blob/file แล้ววาดผลลัพธ์ลงใน container — ใช้ร่วมกันทั้งแท็บ Image และ Mobile Files
+async function renderImageMetadata(container, blob, info) {
+  container.innerHTML = '<p class="empty-msg">⏳ กำลังอ่าน metadata...</p>';
 
   let meta;
   try {
-    meta = await exifr.parse(file, { gps: true, exif: true, tiff: true, xmp: true, iptc: true });
+    meta = await exifr.parse(blob, { gps: true, exif: true, tiff: true, xmp: true, iptc: true });
   } catch (err) {
-    imageMetaEl.innerHTML = `<p class="empty-msg">อ่าน metadata ไม่ได้: ${err.message}</p>`;
+    container.innerHTML = `<p class="empty-msg">อ่าน metadata ไม่ได้: ${err.message}</p>`;
     return;
   }
 
-  imageMetaEl.innerHTML = '';
+  container.innerHTML = '';
   const highlight = el('div', { class: 'meta-highlight' });
-  imageMetaEl.appendChild(el('div', { class: 'section-title', text: 'ข้อมูลสำคัญ' }));
-  imageMetaEl.appendChild(highlight);
+  container.appendChild(el('div', { class: 'section-title', text: 'ข้อมูลสำคัญ' }));
+  container.appendChild(highlight);
 
   // ---- ไฟล์ ----
-  highlight.appendChild(metaCard('🗂️ ไฟล์', `${file.name} • ${(file.size / 1024).toFixed(1)} KB • ${file.type || 'ไม่ทราบชนิด'}`));
+  highlight.appendChild(metaCard('🗂️ ไฟล์', `${info.name} • ${(info.size / 1024).toFixed(1)} KB • ${info.type || 'ไม่ทราบชนิด'}`));
 
   if (!meta) {
     highlight.appendChild(metaCard('ℹ️ ผลการอ่าน', 'รูปนี้ไม่มี metadata ฝังอยู่ (อาจถูกลบตอนส่งผ่านแอปแชท หรือถูก export ใหม่)'));
@@ -367,7 +371,7 @@ async function handleImage(file) {
   }
 
   // ---- Metadata ทั้งหมด ----
-  imageMetaEl.appendChild(el('div', { class: 'section-title', text: 'Metadata ทั้งหมด' }));
+  container.appendChild(el('div', { class: 'section-title', text: 'Metadata ทั้งหมด' }));
   const flat = {};
   for (const [k, v] of Object.entries(meta)) {
     if (v instanceof Date) flat[k] = fmtDate(v);
@@ -375,5 +379,114 @@ async function handleImage(file) {
     else if (Array.isArray(v)) flat[k] = v.join(', ');
     else flat[k] = v;
   }
-  imageMetaEl.appendChild(kvTable(flat));
+  container.appendChild(kvTable(flat));
 }
+
+async function handleImage(file) {
+  imagePreview.src = URL.createObjectURL(file);
+  imagePreview.style.display = 'block';
+  await renderImageMetadata(imageMetaEl, file, { name: file.name, size: file.size, type: file.type });
+}
+
+// ================= Mobile Files =================
+const MOBILE_HOOK = '/hook/mobile-upload';
+const mobileGalleryEl = document.getElementById('mobile-gallery');
+const mobileDetailEl = document.getElementById('mobile-detail');
+const mobileStatusEl = document.getElementById('mobile-upload-status');
+let selectedMobileId = null;
+
+document.getElementById('mobile-hook-url').textContent = location.origin + MOBILE_HOOK;
+
+function mobileEntries() {
+  return allRequests.filter((r) => r.path.startsWith(MOBILE_HOOK) && r.files && r.files.length);
+}
+
+function renderMobileGallery() {
+  const entries = mobileEntries();
+  mobileGalleryEl.innerHTML = '';
+  if (!entries.length) {
+    mobileGalleryEl.appendChild(el('p', { class: 'empty-msg', html: 'ยังไม่มีไฟล์ส่งเข้ามา<br/>แนบรูปจากมือถือแล้วจะแสดงที่นี่ทันที' }));
+    return;
+  }
+  for (const r of entries) {
+    const firstImage = r.files.find((f) => f.mimetype && f.mimetype.startsWith('image/'));
+    const item = el('div', { class: 'req-item gallery-item' + (r.id === selectedMobileId ? ' selected' : '') });
+    if (firstImage) {
+      item.appendChild(el('img', { class: 'thumb', src: `/api/requests/${r.id}/files/${firstImage.index}`, alt: firstImage.name }));
+    } else {
+      item.appendChild(el('span', { class: 'thumb-placeholder', text: '📄' }));
+    }
+    const note = r.body && r.body.note ? r.body.note : '';
+    const names = r.files.map((f) => f.name).join(', ');
+    item.appendChild(el('div', { class: 'gallery-info' }, [
+      el('div', { class: 'req-path', text: names }),
+      el('div', { class: 'req-time', text: `${fmtTime(r.time)} • ${r.files.length} ไฟล์${note ? ' • ' + note : ''}` }),
+    ]));
+    item.addEventListener('click', () => {
+      selectedMobileId = r.id;
+      renderMobileGallery();
+      renderMobileDetail(r);
+    });
+    mobileGalleryEl.appendChild(item);
+  }
+}
+
+async function renderMobileDetail(r) {
+  mobileDetailEl.innerHTML = '';
+  mobileDetailEl.appendChild(el('div', { class: 'detail-header' }, [
+    el('strong', { text: `📱 ไฟล์แนบ ${r.files.length} รายการ` }),
+    el('span', { class: 'req-time', text: `${new Date(r.time).toLocaleString('th-TH')} • จาก ${r.ip}` }),
+  ]));
+
+  const info = {
+    'เวลาที่ส่ง': new Date(r.time).toLocaleString('th-TH'),
+    'ส่งจาก (IP)': r.ip,
+    'อุปกรณ์ (User-Agent)': r.headers['user-agent'] || '-',
+  };
+  if (r.body && r.body.note) info['หมายเหตุ'] = r.body.note;
+  mobileDetailEl.appendChild(el('div', { class: 'section-title', text: 'ข้อมูลผู้ส่ง' }));
+  mobileDetailEl.appendChild(kvTable(info));
+
+  for (const f of r.files) {
+    const url = `/api/requests/${r.id}/files/${f.index}`;
+    mobileDetailEl.appendChild(el('div', { class: 'section-title', text: `ไฟล์: ${f.name} (${(f.size / 1024).toFixed(1)} KB)` }));
+    if (f.mimetype && f.mimetype.startsWith('image/')) {
+      mobileDetailEl.appendChild(el('img', { class: 'mobile-image-preview', src: url, alt: f.name }));
+      const metaContainer = el('div');
+      mobileDetailEl.appendChild(metaContainer);
+      try {
+        const blob = await (await fetch(url)).blob();
+        await renderImageMetadata(metaContainer, blob, { name: f.name, size: f.size, type: f.mimetype });
+      } catch (err) {
+        metaContainer.innerHTML = `<p class="empty-msg">โหลดไฟล์เพื่ออ่าน metadata ไม่ได้: ${err.message}</p>`;
+      }
+    } else {
+      const chip = el('div', { class: 'file-chip' });
+      chip.appendChild(el('div', { html: `<a href="${url}" target="_blank">${f.name}</a> — ${f.mimetype} • ${(f.size / 1024).toFixed(1)} KB` }));
+      mobileDetailEl.appendChild(chip);
+    }
+  }
+}
+
+document.getElementById('mobile-upload-btn').addEventListener('click', async () => {
+  const filesInput = document.getElementById('mobile-files');
+  const noteInput = document.getElementById('mobile-note');
+  if (!filesInput.files.length) {
+    mobileStatusEl.textContent = '⚠️ กรุณาเลือกรูปก่อน';
+    return;
+  }
+  mobileStatusEl.textContent = '⏳ กำลังส่ง...';
+  try {
+    const fd = new FormData();
+    if (noteInput.value.trim()) fd.append('note', noteInput.value.trim());
+    for (const f of filesInput.files) fd.append('image', f);
+    const resp = await fetch(MOBILE_HOOK, { method: 'POST', body: fd });
+    if (!resp.ok) throw new Error(`server ตอบกลับ ${resp.status}`);
+    mobileStatusEl.textContent = '✅ ส่งแล้ว';
+    filesInput.value = '';
+    noteInput.value = '';
+    setTimeout(() => { mobileStatusEl.textContent = ''; }, 3000);
+  } catch (err) {
+    mobileStatusEl.textContent = `❌ ส่งไม่สำเร็จ: ${err.message}`;
+  }
+});
