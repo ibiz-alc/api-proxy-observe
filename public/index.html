@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>API Tester</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>🧪 API Tester</h1>
+    <nav>
+      <button class="tab-btn active" data-tab="inspector">📥 Inspector (รับข้อมูล)</button>
+      <button class="tab-btn" data-tab="sender">📤 Sender (ส่งข้อมูล)</button>
+      <button class="tab-btn" data-tab="image">🖼️ Image Metadata</button>
+    </nav>
+  </header>
+
+  <!-- ============ Inspector ============ -->
+  <main id="tab-inspector" class="tab active">
+    <div class="hook-info">
+      <span>ส่งข้อมูลมาทดสอบได้ที่:</span>
+      <code id="hook-url"></code>
+      <button id="copy-hook" title="คัดลอก URL">📋 คัดลอก</button>
+      <span class="hint">(รับทุก method: GET, POST, PUT, DELETE ฯลฯ และทุก path ย่อย เช่น /hook/order/create)</span>
+      <button id="clear-requests" class="danger">🗑️ ล้างทั้งหมด</button>
+    </div>
+    <div class="inspector-layout">
+      <aside id="request-list">
+        <p class="empty-msg">ยังไม่มี request เข้ามา<br/>ลองยิงข้อมูลมาที่ hook URL ด้านบน</p>
+      </aside>
+      <section id="request-detail">
+        <p class="empty-msg">เลือก request จากรายการด้านซ้ายเพื่อดูรายละเอียด</p>
+      </section>
+    </div>
+  </main>
+
+  <!-- ============ Sender ============ -->
+  <main id="tab-sender" class="tab">
+    <div class="sender-layout">
+      <section class="sender-form">
+        <div class="row">
+          <select id="send-method">
+            <option>GET</option><option>POST</option><option>PUT</option>
+            <option>PATCH</option><option>DELETE</option><option>HEAD</option>
+          </select>
+          <input type="text" id="send-url" placeholder="https://example.com/api/endpoint" />
+          <button id="send-btn" class="primary">ส่ง ▶</button>
+        </div>
+        <label>Headers (บรรทัดละ 1 รายการ รูปแบบ <code>Key: Value</code>)</label>
+        <textarea id="send-headers" rows="3" placeholder="Authorization: Bearer xxx&#10;X-Custom-Header: value"></textarea>
+        <label>Body</label>
+        <div class="row body-type">
+          <label><input type="radio" name="body-type" value="none" checked /> ไม่มี</label>
+          <label><input type="radio" name="body-type" value="json" /> JSON</label>
+          <label><input type="radio" name="body-type" value="form" /> Form data / ไฟล์แนบ</label>
+        </div>
+        <textarea id="send-body-json" rows="8" placeholder='{"name": "test", "value": 123}' style="display:none"></textarea>
+        <div id="send-body-form" style="display:none">
+          <div id="form-fields"></div>
+          <button id="add-text-field" type="button">+ เพิ่มข้อความ</button>
+          <button id="add-file-field" type="button">+ เพิ่มไฟล์</button>
+        </div>
+      </section>
+      <section id="send-result">
+        <p class="empty-msg">ผลลัพธ์ response จะแสดงที่นี่</p>
+      </section>
+    </div>
+  </main>
+
+  <!-- ============ Image Metadata ============ -->
+  <main id="tab-image" class="tab">
+    <div class="image-layout">
+      <section class="image-pick">
+        <label class="file-drop" id="image-drop">
+          <input type="file" id="image-input" accept="image/*" hidden />
+          <span>📂 คลิกเพื่อเลือกรูป หรือลากรูปมาวางที่นี่</span>
+        </label>
+        <img id="image-preview" style="display:none" alt="preview" />
+      </section>
+      <section id="image-meta">
+        <p class="empty-msg">เลือกรูปภาพเพื่อดู metadata (วันที่ถ่าย, พิกัด GPS, ที่อยู่, ข้อมูลกล้อง)</p>
+      </section>
+    </div>
+  </main>
+
+  <script src="/vendor/exifr.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
