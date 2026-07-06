@@ -26,6 +26,34 @@ curl -X POST http://localhost:3000/hook/test \
   -d '{"hello": "world"}'
 ```
 
+## Upload API (สำหรับทดสอบอัปโหลดไฟล์)
+
+`POST /api/upload` — ส่งเป็น `multipart/form-data` แนบไฟล์กี่ไฟล์ก็ได้ (ตั้งชื่อ field อะไรก็ได้) พร้อม text field อื่นๆ เช่น `note`
+
+```bash
+curl -X POST http://localhost:3000/api/upload \
+  -F 'note=ทดสอบอัปโหลด' \
+  -F 'image=@photo.jpg'
+```
+
+ตอบกลับเป็น JSON: รายละเอียดไฟล์ + `metadata` ของรูป (วันที่ถ่าย, พิกัด GPS, กล้อง, ขนาดภาพ, ImageDescription) เอาไปตรวจความถูกต้องใน test ได้ทันที:
+
+```json
+{
+  "ok": true,
+  "id": "…",
+  "fields": { "note": "ทดสอบอัปโหลด" },
+  "files": [{
+    "name": "photo.jpg", "mimetype": "image/jpeg", "size": 1142,
+    "url": "/api/requests/…/files/0",
+    "metadata": { "dateTaken": "…", "latitude": 13.75, "longitude": 100.49, "camera": "Apple iPhone 15 Pro" }
+  }]
+}
+```
+
+- ไม่แนบไฟล์ → ตอบ `400` พร้อมข้อความ error
+- ทุกการอัปโหลดถูกบันทึกเข้า hook ด้วย — เห็นใน**แท็บ Inspector และ Mobile Files แบบ real-time** และดาวน์โหลดไฟล์กลับได้ผ่าน `url` ที่ตอบกลับ
+
 ## Deploy ขึ้น server
 
 รันได้ทุกที่ที่มี Node.js 18 ขึ้นไป:

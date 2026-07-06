@@ -2,6 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const crypto = require('crypto');
+const exifr = require('exifr');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -128,6 +129,77 @@ app.get('/api/events', (req, res) => {
   req.on('close', () => {
     clearInterval(keepAlive);
     sseClients.delete(res);
+  });
+});
+
+// ================= Upload API (สำหรับทดสอบอัปโหลดไฟล์) =================
+// POST /api/upload — multipart/form-data แนบไฟล์กี่ตัวก็ได้ (field ชื่ออะไรก็ได้) + text field อื่นๆ
+// ตอบกลับรายละเอียดไฟล์ + metadata ของรูป และบันทึกเข้า hook ให้เห็นใน Inspector/Mobile Files ทันที
+app.post('/api/upload', upload.any(), async (req, res) => {
+  const uploadedFiles = req.files || [];
+  if (!uploadedFiles.length) {
+    return res.status(400).json({ ok: false, error: 'ไม่พบไฟล์แนบ กรุณาส่งเป็น multipart/form-data พร้อมไฟล์อย่างน้อย 1 ไฟล์' });
+  }
+
+  const id = crypto.randomUUID();
+  const time = new Date().toISOString();
+
+  const fileDetails = await Promise.all(uploadedFiles.map(async (f, i) => {
+    const detail = {
+      index: i,
+      field: f.fieldname,
+      name: f.originalname,
+      mimetype: f.mimetype,
+      size: f.size,
+      url: `/api/requests/${id}/files/${i}`,
+    };
+    if (f.mimetype && f.mimetype.startsWith('image/')) {
+      try {
+        const meta = await exifr.parse(f.buffer, { gps: true, exif: true, tiff: true });
+        if (meta) {
+          detail.metadata = {
+            dateTaken: meta.DateTimeOriginal || meta.CreateDate || meta.ModifyDate || null,
+            latitude: meta.latitude ?? null,
+            longitude: meta.longitude ?? null,
+            camera: [meta.Make, meta.Model].filter(Boolean).join(' ') || null,
+            width: meta.ExifImageWidth || meta.ImageWidth || null,
+            height: meta.ExifImageHeight || meta.ImageHeight || null,
+            imageDescription: meta.ImageDescription || null,
+          };
+        } else {
+          detail.metadata = null; // รูปไม่มี EXIF ฝังอยู่
+        }
+      } catch (err) {
+        detail.metadata = null;
+        detail.metadataError = err.message;
+      }
+    }
+    return detail;
+  }));
+
+  // บันทึกเข้า hook store เพื่อให้แสดงใน Inspector และ Mobile Files แบบ real-time
+  const entry = {
+    id,
+    time,
+    method: req.method,
+    path: req.originalUrl,
+    ip: req.ip,
+    contentType: req.headers['content-type'] || null,
+    headers: req.headers,
+    query: req.query,
+    body: Object.keys(req.body || {}).length ? req.body : null,
+    files: fileDetails.map(({ index, field, name, mimetype, size }) => ({ index, field, name, mimetype, size })),
+  };
+  addEntry(entry, uploadedFiles.map((f) => ({
+    buffer: f.buffer, mimetype: f.mimetype, originalname: f.originalname,
+  })));
+
+  res.json({
+    ok: true,
+    id,
+    receivedAt: time,
+    fields: entry.body,
+    files: fileDetails,
   });
 });
 

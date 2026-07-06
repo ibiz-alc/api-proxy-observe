@@ -491,8 +491,10 @@ let selectedMobileId = null;
 
 document.getElementById('mobile-hook-url').textContent = location.origin + MOBILE_HOOK;
 
+const UPLOAD_PATHS = [MOBILE_HOOK, '/api/upload'];
+
 function mobileEntries() {
-  return allRequests.filter((r) => r.path.startsWith(MOBILE_HOOK) && r.files && r.files.length);
+  return allRequests.filter((r) => UPLOAD_PATHS.some((p) => r.path.startsWith(p)) && r.files && r.files.length);
 }
 
 function renderMobileGallery() {
