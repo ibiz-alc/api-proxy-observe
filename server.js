@@ -150,12 +150,28 @@ app.delete('/api/requests', (req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/api/requests/:id/files/:index', (req, res) => {
+app.get('/api/requests/:id/files/:index', async (req, res) => {
   const files = fileBuffers.get(req.params.id);
   const file = files && files[Number(req.params.index)];
   if (!file) return res.status(404).json({ error: 'file not found' });
   res.setHeader('Content-Type', file.mimetype || 'application/octet-stream');
   res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file.originalname)}"`);
+
+  // แนบ lat/lng/address มากับตัวภาพเลย ผ่าน response headers (มือถืออ่านได้ในรีเควสต์เดียว)
+  // ค่าที่เป็นภาษาไทย/ข้อความ ต้อง URL-encode เพราะ HTTP header รองรับแค่ ASCII
+  if (file.mimetype && file.mimetype.startsWith('image/')) {
+    try {
+      const meta = await extractImageMetadata(file.buffer, { withAddress: req.query.address === '1' });
+      if (meta) {
+        res.setHeader('Access-Control-Expose-Headers', 'X-Image-Latitude, X-Image-Longitude, X-Image-Address, X-Image-Date, X-Image-Camera');
+        if (meta.latitude != null) res.setHeader('X-Image-Latitude', String(meta.latitude));
+        if (meta.longitude != null) res.setHeader('X-Image-Longitude', String(meta.longitude));
+        if (meta.dateTaken) res.setHeader('X-Image-Date', new Date(meta.dateTaken).toISOString());
+        if (meta.camera) res.setHeader('X-Image-Camera', encodeURIComponent(meta.camera));
+        if (meta.address) res.setHeader('X-Image-Address', encodeURIComponent(meta.address));
+      }
+    } catch { /* อ่าน metadata ไม่ได้ ก็ส่งแค่รูป */ }
+  }
   res.send(file.buffer);
 });
 

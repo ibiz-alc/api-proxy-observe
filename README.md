@@ -87,6 +87,20 @@ GET /api/requests/:id/files/:index/metadata
 - `/api/upload` เองก็คืน `address` มาในผลลัพธ์เลย (ใส่ `?address=0` เพื่อข้ามได้เช่นกัน)
 - address มาจาก OpenStreetMap Nominatim — server ต้องต่ออินเทอร์เน็ต
 
+### lat/lng มากับตัวภาพเลย (response headers)
+
+เวลาดึงรูปที่ `GET /api/requests/:id/files/:index` server แนบ metadata มาใน headers ด้วย — มือถือโหลดรูปครั้งเดียวได้ทั้งภาพ (body) และพิกัด (headers):
+
+| Header | ค่า |
+|---|---|
+| `X-Image-Latitude` | `13.7515` |
+| `X-Image-Longitude` | `100.4937` |
+| `X-Image-Date` | ISO date |
+| `X-Image-Camera` | URL-encoded (ต้อง `decodeURIComponent`) |
+| `X-Image-Address` | URL-encoded — ใส่ `?address=1` ถึงจะมี (ต้องต่อเน็ต) |
+
+lat/lng/date/camera มาเสมอ (เร็ว) ส่วน address ใส่ `?address=1` เพื่อขอเพิ่ม ค่าที่เป็นข้อความ URL-encode ไว้ (HTTP header รองรับแค่ ASCII) ฝั่งมือถือ decode ด้วย `decodeURIComponent()`
+
 ## Deploy ขึ้น server
 
 รันได้ทุกที่ที่มี Node.js 18 ขึ้นไป:
