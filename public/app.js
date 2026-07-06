@@ -122,7 +122,29 @@ function renderDetail(r) {
       const chip = el('div', { class: 'file-chip' });
       chip.appendChild(el('div', { html: `<a href="${url}" target="_blank">${f.name}</a> — ${f.mimetype} • ${(f.size / 1024).toFixed(1)} KB (field: ${f.field})` }));
       if (f.mimetype && f.mimetype.startsWith('image/')) {
-        chip.appendChild(el('img', { src: url, alt: f.name }));
+        const img = el('img', { src: url, alt: f.name, title: 'คลิกเพื่อดู metadata ของภาพ' });
+        const metaBtn = el('button', { class: 'meta-toggle-btn', type: 'button', text: '🔍 ดู metadata ของภาพ' });
+        const metaContainer = el('div', { class: 'inline-meta', style: 'display:none' });
+        let loaded = false;
+        const toggleMeta = async () => {
+          const isHidden = metaContainer.style.display === 'none';
+          metaContainer.style.display = isHidden ? 'block' : 'none';
+          metaBtn.textContent = isHidden ? '🔽 ซ่อน metadata' : '🔍 ดู metadata ของภาพ';
+          if (isHidden && !loaded) {
+            loaded = true;
+            try {
+              const blob = await (await fetch(url)).blob();
+              await renderImageMetadata(metaContainer, blob, { name: f.name, size: f.size, type: f.mimetype });
+            } catch (err) {
+              metaContainer.innerHTML = `<p class="empty-msg">โหลดไฟล์เพื่ออ่าน metadata ไม่ได้: ${err.message}</p>`;
+            }
+          }
+        };
+        img.addEventListener('click', toggleMeta);
+        metaBtn.addEventListener('click', toggleMeta);
+        chip.appendChild(img);
+        chip.appendChild(metaBtn);
+        chip.appendChild(metaContainer);
       }
       detailEl.appendChild(chip);
     }
