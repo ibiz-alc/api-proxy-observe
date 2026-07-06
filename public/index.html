@@ -14,6 +14,7 @@
       <button class="tab-btn" data-tab="sender">📤 Sender (ส่งข้อมูล)</button>
       <button class="tab-btn" data-tab="image">🖼️ Image Metadata</button>
       <button class="tab-btn" data-tab="mobile">📱 Mobile Files</button>
+      <button class="tab-btn" data-tab="proxy">🌐 Proxy</button>
     </nav>
   </header>
 
@@ -101,6 +102,36 @@
       </aside>
       <section id="mobile-detail">
         <p class="empty-msg">เลือกไฟล์จากรายการด้านซ้ายเพื่อดูรายละเอียดและ metadata</p>
+      </section>
+    </div>
+  </main>
+
+  <!-- ============ Proxy (MITM) ============ -->
+  <main id="tab-proxy" class="tab">
+    <div class="hook-info">
+      <span>ตั้ง HTTP Proxy บนอุปกรณ์ชี้มาที่</span>
+      <code id="proxy-addr"></code>
+      <button id="proxy-cert-btn">📥 ดาวน์โหลด CA cert</button>
+      <button id="proxy-help-btn">❓ วิธีติดตั้ง</button>
+      <button id="clear-flows" class="danger">🗑️ ล้างทั้งหมด</button>
+    </div>
+    <div id="proxy-help" class="proxy-help" style="display:none">
+      <strong>วิธีทำให้เห็นเนื้อใน HTTPS:</strong>
+      <ol>
+        <li>บนมือถือ ตั้งค่า Wi-Fi → HTTP Proxy → Manual → Server = <code id="proxy-ip"></code>, Port = <code id="proxy-port"></code></li>
+        <li>เปิดเบราว์เซอร์บนมือถือ ดาวน์โหลด CA cert จาก <code id="proxy-cert-url"></code></li>
+        <li><strong>iOS:</strong> Settings → General → VPN &amp; Device Management → ติดตั้ง profile → จากนั้น Settings → General → About → Certificate Trust Settings → เปิด "Enable Full Trust" ให้ cert นี้</li>
+        <li><strong>Android:</strong> Settings → Security → Install a certificate → CA certificate (แอปบางตัวต้องตั้ง network_security_config เพิ่มถึงจะเชื่อ user CA)</li>
+        <li>เสร็จแล้วเปิดแอป/เว็บบนมือถือ ทราฟฟิกจะโผล่ด้านล่างแบบ real-time</li>
+      </ol>
+      <p class="hint">⚠️ CA cert นี้ให้เครื่องเชื่อ proxy ของเราถอดรหัส HTTPS ได้ ใช้เฉพาะบนอุปกรณ์ทดสอบของคุณเอง และถอนการติดตั้งเมื่อเลิกใช้</p>
+    </div>
+    <div class="inspector-layout">
+      <aside id="flow-list">
+        <p class="empty-msg">ยังไม่มีทราฟฟิกผ่าน proxy<br/>ตั้ง proxy บนอุปกรณ์แล้วเปิดแอป/เว็บ</p>
+      </aside>
+      <section id="flow-detail">
+        <p class="empty-msg">เลือก flow จากรายการด้านซ้ายเพื่อดู request/response</p>
       </section>
     </div>
   </main>

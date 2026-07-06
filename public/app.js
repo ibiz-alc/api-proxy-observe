@@ -174,6 +174,19 @@ events.addEventListener('clear', () => {
   detailEl.innerHTML = '<p class="empty-msg">เลือก request จากรายการด้านซ้ายเพื่อดูรายละเอียด</p>';
   document.getElementById('mobile-detail').innerHTML = '<p class="empty-msg">เลือกไฟล์จากรายการด้านซ้ายเพื่อดูรายละเอียดและ metadata</p>';
 });
+events.addEventListener('proxy', (e) => {
+  const flow = JSON.parse(e.data);
+  allFlows.unshift(flow);
+  if (allFlows.length > 300) allFlows.pop();
+  renderFlowList();
+  if (flow.id === selectedFlowId) renderFlowDetail(flow);
+});
+events.addEventListener('proxy-clear', () => {
+  allFlows = [];
+  selectedFlowId = null;
+  renderFlowList();
+  flowDetailEl.innerHTML = '<p class="empty-msg">เลือก flow จากรายการด้านซ้ายเพื่อดู request/response</p>';
+});
 
 loadRequests();
 
@@ -289,6 +302,96 @@ document.getElementById('send-btn').addEventListener('click', async () => {
     renderSendResult({ ok: false, durationMs: 0, error: err.message });
   }
 });
+
+// ================= Proxy (MITM) =================
+const flowListEl = document.getElementById('flow-list');
+const flowDetailEl = document.getElementById('flow-detail');
+let allFlows = [];
+let selectedFlowId = null;
+
+(async function initProxy() {
+  const info = await (await fetch('/api/proxy/info')).json();
+  const host = location.hostname;
+  document.getElementById('proxy-addr').textContent = `${host}:${info.proxyPort}`;
+  document.getElementById('proxy-ip').textContent = host;
+  document.getElementById('proxy-port').textContent = info.proxyPort;
+  document.getElementById('proxy-cert-url').textContent = `${location.origin}/api/proxy/cert`;
+  allFlows = await (await fetch('/api/proxy/flows')).json();
+  renderFlowList();
+})();
+
+document.getElementById('proxy-cert-btn').addEventListener('click', () => {
+  window.location.href = '/api/proxy/cert';
+});
+document.getElementById('proxy-help-btn').addEventListener('click', () => {
+  const help = document.getElementById('proxy-help');
+  help.style.display = help.style.display === 'none' ? 'block' : 'none';
+});
+document.getElementById('clear-flows').addEventListener('click', async () => {
+  await fetch('/api/proxy/flows', { method: 'DELETE' });
+});
+
+function statusClass(status) {
+  if (!status) return 'status-err';
+  return `status-${Math.floor(status / 100)}xx`;
+}
+
+function renderFlowList() {
+  flowListEl.innerHTML = '';
+  if (!allFlows.length) {
+    flowListEl.appendChild(el('p', { class: 'empty-msg', html: 'ยังไม่มีทราฟฟิกผ่าน proxy<br/>ตั้ง proxy บนอุปกรณ์แล้วเปิดแอป/เว็บ' }));
+    return;
+  }
+  for (const f of allFlows) {
+    const statusText = f.error ? 'ERR' : (f.status || '...');
+    const item = el('div', { class: 'req-item' + (f.id === selectedFlowId ? ' selected' : '') }, [
+      methodBadge(f.method),
+      el('span', { class: `status-badge ${statusClass(f.status)}`, text: String(statusText) }),
+      el('span', { class: 'req-path', text: f.host + f.path, title: f.url }),
+      el('span', { class: 'req-time', text: f.durationMs != null ? f.durationMs + 'ms' : '' }),
+    ]);
+    item.addEventListener('click', () => {
+      selectedFlowId = f.id;
+      renderFlowList();
+      renderFlowDetail(f);
+    });
+    flowListEl.appendChild(item);
+  }
+}
+
+function renderFlowDetail(f) {
+  flowDetailEl.innerHTML = '';
+  flowDetailEl.appendChild(el('div', { class: 'detail-header' }, [
+    methodBadge(f.method),
+    f.error
+      ? el('span', { class: 'status-badge status-err', text: 'ERROR' })
+      : el('span', { class: `status-badge ${statusClass(f.status)}`, text: `${f.status} ${f.statusText || ''}` }),
+    el('span', { class: 'req-time', text: `${f.durationMs != null ? f.durationMs + ' ms • ' : ''}${new Date(f.time).toLocaleString('th-TH')}` }),
+  ]));
+  flowDetailEl.appendChild(el('div', { class: 'section-title', text: 'URL' }));
+  flowDetailEl.appendChild(el('pre', { class: 'code-block', text: f.url }));
+
+  if (f.error) {
+    flowDetailEl.appendChild(el('div', { class: 'section-title', text: 'Error' }));
+    flowDetailEl.appendChild(el('pre', { class: 'code-block', text: f.error }));
+  }
+
+  flowDetailEl.appendChild(el('div', { class: 'section-title', text: 'Request Headers' }));
+  flowDetailEl.appendChild(kvTable(f.reqHeaders || {}));
+  if (f.reqBody) {
+    flowDetailEl.appendChild(el('div', { class: 'section-title', text: 'Request Body' }));
+    flowDetailEl.appendChild(el('pre', { class: 'code-block', text: prettyBody(f.reqBody) }));
+  }
+
+  if (f.resHeaders) {
+    flowDetailEl.appendChild(el('div', { class: 'section-title', text: 'Response Headers' }));
+    flowDetailEl.appendChild(kvTable(f.resHeaders));
+  }
+  if (f.resBody) {
+    flowDetailEl.appendChild(el('div', { class: 'section-title', text: 'Response Body' }));
+    flowDetailEl.appendChild(el('pre', { class: 'code-block', text: prettyBody(f.resBody) }));
+  }
+}
 
 // ================= Image Metadata =================
 const imageInput = document.getElementById('image-input');

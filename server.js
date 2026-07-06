@@ -3,9 +3,12 @@ const multer = require('multer');
 const path = require('path');
 const crypto = require('crypto');
 const exifr = require('exifr');
+const { startProxy } = require('./proxy');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const PROXY_PORT = process.env.PROXY_PORT || 8080;
+const CA_DIR = path.join(__dirname, '.proxy-ca');
 
 // ================= In-memory store =================
 const MAX_REQUESTS = 200;
@@ -17,6 +20,10 @@ function broadcast(event, data) {
   const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const res of sseClients) res.write(msg);
 }
+
+// เก็บ flow ที่ proxy ดักได้ (แยกจาก hook requests)
+const proxyStore = { flows: [] };
+let proxyCaPath = null;
 
 function addEntry(entry, files) {
   requests.unshift(entry);
@@ -113,6 +120,27 @@ app.get('/api/requests/:id/files/:index', (req, res) => {
   res.setHeader('Content-Type', file.mimetype || 'application/octet-stream');
   res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file.originalname)}"`);
   res.send(file.buffer);
+});
+
+// ================= Proxy (MITM) API =================
+app.get('/api/proxy/flows', (req, res) => {
+  res.json(proxyStore.flows);
+});
+
+app.delete('/api/proxy/flows', (req, res) => {
+  proxyStore.flows.length = 0;
+  broadcast('proxy-clear', {});
+  res.json({ ok: true });
+});
+
+app.get('/api/proxy/info', (req, res) => {
+  res.json({ proxyPort: PROXY_PORT, caReady: !!proxyCaPath });
+});
+
+// ดาวน์โหลด CA cert เพื่อเอาไปติดตั้งบนอุปกรณ์
+app.get('/api/proxy/cert', (req, res) => {
+  if (!proxyCaPath) return res.status(503).send('CA ยังไม่พร้อม');
+  res.download(proxyCaPath, 'api-tester-ca.pem');
 });
 
 // SSE stream ให้หน้าเว็บอัปเดต real-time
@@ -270,3 +298,18 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`API Tester รันอยู่ที่ http://localhost:${PORT}`);
   console.log(`Hook endpoint: http://localhost:${PORT}/hook (รับทุก method ทุก path ย่อย)`);
 });
+
+startProxy({
+  port: PROXY_PORT,
+  caDir: CA_DIR,
+  store: proxyStore,
+  onFlow: (flow) => broadcast('proxy', flow),
+})
+  .then(({ caPath }) => {
+    proxyCaPath = caPath;
+    console.log(`MITM Proxy รันอยู่ที่พอร์ต ${PROXY_PORT} (ตั้ง proxy บนอุปกรณ์ชี้มาที่ IP เครื่องนี้:${PROXY_PORT})`);
+    console.log(`CA cert: ${caPath} — ดาวน์โหลดผ่าน http://localhost:${PORT}/api/proxy/cert`);
+  })
+  .catch((err) => {
+    console.error('เริ่ม MITM proxy ไม่สำเร็จ:', err.message);
+  });
