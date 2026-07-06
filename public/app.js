@@ -324,6 +324,57 @@ function fmtDate(d) {
   return date.toLocaleString('th-TH', { dateStyle: 'full', timeStyle: 'medium' });
 }
 
+// EXIF ImageDescription ตามสเปคเป็น ASCII แต่หลายแอปเขียนเป็น UTF-8 หรือ TIS-620 (ไทย)
+// exifr decode เป็น UTF-8 อย่างเดียว ถ้าเจอ � (แสดงเป็น ?????) ต้องดึง bytes ดิบมา decode ใหม่
+function extractIfd0AsciiTag(buffer, wantedTag) {
+  const buf = new DataView(buffer);
+  if (buf.getUint16(0) !== 0xffd8) return null; // ไม่ใช่ JPEG
+  let off = 2;
+  while (off + 4 < buf.byteLength) {
+    const marker = buf.getUint16(off);
+    const size = buf.getUint16(off + 2);
+    if (marker === 0xffe1 && buf.getUint32(off + 4) === 0x45786966) { // APP1 'Exif'
+      const tiff = off + 10;
+      const little = buf.getUint16(tiff) === 0x4949; // 'II' = little endian
+      const ifdOff = buf.getUint32(tiff + 4, little);
+      const count = buf.getUint16(tiff + ifdOff, little);
+      for (let i = 0; i < count; i++) {
+        const e = tiff + ifdOff + 2 + i * 12;
+        if (buf.getUint16(e, little) === wantedTag) {
+          const n = buf.getUint32(e + 4, little);
+          const valOff = n <= 4 ? e + 8 : tiff + buf.getUint32(e + 8, little);
+          let bytes = new Uint8Array(buffer, valOff, n);
+          while (bytes.length && bytes[bytes.length - 1] === 0) bytes = bytes.subarray(0, bytes.length - 1);
+          return bytes;
+        }
+      }
+      return null;
+    }
+    if ((marker & 0xff00) !== 0xff00) return null;
+    off += 2 + size;
+  }
+  return null;
+}
+
+async function fixTextEncoding(blob, meta, key, tagId) {
+  const value = meta[key];
+  if (typeof value !== 'string' || !value.includes('�')) return;
+  try {
+    const buffer = await blob.slice(0, 512 * 1024).arrayBuffer();
+    const raw = extractIfd0AsciiTag(buffer, tagId);
+    if (!raw) return;
+    for (const enc of ['utf-8', 'windows-874']) {
+      try {
+        const text = new TextDecoder(enc, { fatal: true }).decode(raw);
+        if (!text.includes('�')) {
+          meta[key] = text;
+          return;
+        }
+      } catch { /* ลอง encoding ถัดไป */ }
+    }
+  } catch { /* อ่านไม่ได้ก็ใช้ค่าเดิมจาก exifr */ }
+}
+
 async function reverseGeocode(lat, lon) {
   const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&accept-language=th`;
   const resp = await fetch(url);
@@ -344,6 +395,13 @@ async function renderImageMetadata(container, blob, info) {
     return;
   }
 
+  if (meta) {
+    // ซ่อมข้อความไทยที่ decode ผิด (แสดงเป็น ?????) ใน tag ข้อความของ IFD0
+    await fixTextEncoding(blob, meta, 'ImageDescription', 0x010e);
+    await fixTextEncoding(blob, meta, 'Artist', 0x013b);
+    await fixTextEncoding(blob, meta, 'Copyright', 0x8298);
+  }
+
   container.innerHTML = '';
   const highlight = el('div', { class: 'meta-highlight' });
   container.appendChild(el('div', { class: 'section-title', text: 'ข้อมูลสำคัญ' }));
@@ -355,6 +413,20 @@ async function renderImageMetadata(container, blob, info) {
   if (!meta) {
     highlight.appendChild(metaCard('ℹ️ ผลการอ่าน', 'รูปนี้ไม่มี metadata ฝังอยู่ (อาจถูกลบตอนส่งผ่านแอปแชท หรือถูก export ใหม่)'));
     return;
+  }
+
+  // ---- คำอธิบายภาพ ----
+  if (meta.ImageDescription) {
+    const desc = String(meta.ImageDescription);
+    const card = metaCard('📝 คำอธิบายภาพ (ImageDescription)', desc);
+    if (/\?{3,}/.test(desc)) {
+      // bytes ในไฟล์เป็นตัว '?' จริงๆ — แอปที่เขียน EXIF แทนที่ตัวอักษรไทยตอนบันทึก กู้คืนไม่ได้
+      card.appendChild(el('div', {
+        class: 'meta-label',
+        text: '⚠️ ข้อความส่วนที่เป็น ? ถูกแทนที่ตั้งแต่ตอนแอปต้นทางเขียนไฟล์ (EXIF tag นี้รองรับเฉพาะ ASCII ในบางไลบรารี) — ต้องแก้ที่แอปที่เขียน EXIF',
+      }));
+    }
+    highlight.appendChild(card);
   }
 
   // ---- วันที่ถ่าย ----
