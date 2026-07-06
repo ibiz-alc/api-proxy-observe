@@ -303,6 +303,79 @@ document.getElementById('send-btn').addEventListener('click', async () => {
   }
 });
 
+// ================= URL Metadata =================
+const urlInput = document.getElementById('url-input');
+const urlPreview = document.getElementById('url-preview');
+const urlMetaEl = document.getElementById('url-meta');
+
+async function readUrlMetadata() {
+  const url = urlInput.value.trim();
+  if (!url) {
+    urlMetaEl.innerHTML = '<p class="empty-msg">กรุณาวาง URL รูปก่อน</p>';
+    return;
+  }
+  const withAddress = document.getElementById('url-address').checked;
+  urlPreview.src = url;
+  urlPreview.style.display = 'block';
+  urlPreview.onerror = () => { urlPreview.style.display = 'none'; };
+  urlMetaEl.innerHTML = '<p class="empty-msg">⏳ กำลังดึงรูปและอ่าน metadata...</p>';
+
+  let data;
+  try {
+    const resp = await fetch(`/api/url-metadata?url=${encodeURIComponent(url)}&address=${withAddress ? '1' : '0'}`);
+    data = await resp.json();
+  } catch (err) {
+    urlMetaEl.innerHTML = `<p class="empty-msg">เรียก API ไม่สำเร็จ: ${err.message}</p>`;
+    return;
+  }
+
+  if (!data.ok) {
+    urlMetaEl.innerHTML = `<p class="empty-msg">อ่านไม่ได้: ${data.error}</p>`;
+    return;
+  }
+
+  urlMetaEl.innerHTML = '';
+  const highlight = el('div', { class: 'meta-highlight' });
+  urlMetaEl.appendChild(el('div', { class: 'section-title', text: 'ข้อมูลสำคัญ' }));
+  urlMetaEl.appendChild(highlight);
+
+  highlight.appendChild(metaCard('🗂️ ไฟล์', `${(data.size / 1024).toFixed(1)} KB • ${data.contentType}`));
+
+  const m = data.metadata;
+  if (!m) {
+    highlight.appendChild(metaCard('ℹ️ ผลการอ่าน', 'รูปนี้ไม่มี EXIF metadata ฝังอยู่ (อาจถูกลบตอนส่งผ่านแอปแชท หรือ export ใหม่)'));
+    return;
+  }
+
+  if (m.imageDescription) highlight.appendChild(metaCard('📝 คำอธิบายภาพ', String(m.imageDescription)));
+  highlight.appendChild(metaCard('📅 วันที่ถ่าย', m.dateTaken ? fmtDate(m.dateTaken) : 'ไม่พบข้อมูลวันที่'));
+  if (m.camera) highlight.appendChild(metaCard('📷 กล้อง / อุปกรณ์', m.camera));
+  if (m.width && m.height) highlight.appendChild(metaCard('📐 ขนาดภาพ', `${m.width} × ${m.height} พิกเซล`));
+
+  if (m.latitude != null && m.longitude != null) {
+    const lat = m.latitude.toFixed(6);
+    const lon = m.longitude.toFixed(6);
+    highlight.appendChild(metaCard('📍 พิกัด GPS (Location)', el('div', {
+      html: `${lat}, ${lon}<br/><a href="https://www.google.com/maps?q=${lat},${lon}" target="_blank">🗺️ เปิดใน Google Maps</a>`,
+    })));
+    if (m.address) highlight.appendChild(metaCard('🏠 ที่อยู่ (Address)', m.address));
+    else if (m.addressError) highlight.appendChild(metaCard('🏠 ที่อยู่ (Address)', `หาที่อยู่ไม่สำเร็จ: ${m.addressError}`));
+  } else {
+    highlight.appendChild(metaCard('📍 พิกัด GPS (Location)', 'ไม่พบข้อมูลพิกัดในรูปนี้'));
+  }
+
+  urlMetaEl.appendChild(el('div', { class: 'section-title', text: 'Metadata (สรุป)' }));
+  const flat = {};
+  for (const [k, v] of Object.entries(m)) {
+    if (v == null) continue;
+    flat[k] = k === 'dateTaken' ? fmtDate(v) : String(v);
+  }
+  urlMetaEl.appendChild(kvTable(flat));
+}
+
+document.getElementById('url-read-btn').addEventListener('click', readUrlMetadata);
+urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') readUrlMetadata(); });
+
 // ================= Proxy (MITM) =================
 const flowListEl = document.getElementById('flow-list');
 const flowDetailEl = document.getElementById('flow-detail');

@@ -194,6 +194,29 @@ app.get('/api/requests/:id/files/:index/metadata', async (req, res) => {
   }
 });
 
+// อ่าน metadata ของรูปจาก URL ใดก็ได้ (server ดึงรูปมาแกะให้ เลี่ยงปัญหา CORS ฝั่ง browser)
+app.get('/api/url-metadata', async (req, res) => {
+  const url = req.query.url;
+  if (!url) return res.status(400).json({ ok: false, error: 'กรุณาระบุ ?url=' });
+  const withAddress = req.query.address !== '0';
+  try {
+    const resp = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    if (!resp.ok) return res.json({ ok: false, error: `ปลายทางตอบกลับ ${resp.status} ${resp.statusText}` });
+    const contentType = resp.headers.get('content-type') || '';
+    if (!contentType.startsWith('image/')) {
+      return res.json({ ok: false, error: `URL นี้ไม่ใช่รูปภาพ (Content-Type: ${contentType || 'ไม่ทราบ'})` });
+    }
+    const buffer = Buffer.from(await resp.arrayBuffer());
+    let metadata = null;
+    try {
+      metadata = await extractImageMetadata(buffer, { withAddress });
+    } catch { /* รูปไม่มี EXIF */ }
+    res.json({ ok: true, contentType, size: buffer.length, metadata });
+  } catch (err) {
+    res.json({ ok: false, error: err.cause ? `${err.message}: ${err.cause.message || err.cause.code}` : err.message });
+  }
+});
+
 // ================= Proxy (MITM) API =================
 app.get('/api/proxy/flows', (req, res) => {
   res.json(proxyStore.flows);
