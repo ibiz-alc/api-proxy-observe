@@ -7,7 +7,7 @@ const { startProxy } = require('./proxy');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const PROXY_PORT = process.env.PROXY_PORT || 8080;
+const PROXY_PORT = process.env.PROXY_PORT || 9099;
 const CA_DIR = path.join(__dirname, '.proxy-ca');
 
 // ================= In-memory store =================

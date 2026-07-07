@@ -32,13 +32,13 @@ curl -X POST http://localhost:3000/hook/test \
 แท็บ Proxy ทำตัวเป็น HTTP proxy ดักดูทราฟฟิกจริงจากอุปกรณ์ (รวมถึงถอดรหัส HTTPS)
 
 **วิธีใช้:**
-1. บนอุปกรณ์ (มือถือ) ตั้ง Wi-Fi → HTTP Proxy → Manual → Server = IP เครื่องนี้, Port = `8080` (ตั้งผ่าน `PROXY_PORT` ได้)
+1. บนอุปกรณ์ (มือถือ) ตั้ง Wi-Fi → HTTP Proxy → Manual → Server = IP เครื่องนี้, Port = `9099` (ตั้งผ่าน `PROXY_PORT` ได้)
 2. เปิดเบราว์เซอร์บนอุปกรณ์ โหลด CA cert จาก `http://<IP>:3000/api/proxy/cert` แล้วติดตั้ง + ตั้งค่าให้เชื่อ (iOS: Certificate Trust Settings / Android: Install CA certificate)
 3. เปิดแอป/เว็บบนอุปกรณ์ → ทราฟฟิกโผล่ในแท็บ Proxy แบบ real-time คลิกดู request/response headers + body ได้
 
 > ⚠️ CA cert ให้ proxy ถอดรหัส HTTPS ได้ ใช้เฉพาะบนอุปกรณ์ทดสอบของคุณเอง และถอนการติดตั้งเมื่อเลิกใช้
 
-พอร์ต proxy (`8080`) แยกจากหน้าเว็บ (`3000`) — CA เก็บใน `.proxy-ca/` (ถูก gitignore)
+พอร์ต proxy (`9099`) แยกจากหน้าเว็บ (`3000`) — CA เก็บใน `.proxy-ca/` (ถูก gitignore)
 
 ## Upload API (สำหรับทดสอบอัปโหลดไฟล์)
 
