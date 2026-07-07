@@ -119,7 +119,12 @@ const upload = multer({
   limits: { fileSize: 25 * 1024 * 1024, files: 10 },
 });
 
-app.use(express.static(path.join(__dirname, 'public')));
+// ปิด cache ของไฟล์ static เพื่อให้ browser โหลดโค้ดใหม่เสมอ (กันปัญหา app.js ค้าง cache)
+app.use(express.static(path.join(__dirname, 'public'), {
+  etag: false,
+  lastModified: false,
+  setHeaders: (res) => res.setHeader('Cache-Control', 'no-store'),
+}));
 app.get('/vendor/exifr.js', (req, res) => {
   res.sendFile(require.resolve('exifr/dist/full.umd.js'));
 });
