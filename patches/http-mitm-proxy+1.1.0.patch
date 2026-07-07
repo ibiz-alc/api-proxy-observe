@@ -1,8 +1,20 @@
 diff --git a/node_modules/http-mitm-proxy/dist/lib/proxy.js b/node_modules/http-mitm-proxy/dist/lib/proxy.js
-index e896595..e94934d 100644
+index e896595..d7347af 100644
 --- a/node_modules/http-mitm-proxy/dist/lib/proxy.js
 +++ b/node_modules/http-mitm-proxy/dist/lib/proxy.js
-@@ -361,7 +361,7 @@ class Proxy {
+@@ -136,7 +136,10 @@ class Proxy {
+         });
+         httpsServer.timeout = this.timeout;
+         httpsServer.on("error", this._onError.bind(this, "HTTPS_SERVER_ERROR", null));
+-        httpsServer.on("clientError", this._onError.bind(this, "HTTPS_CLIENT_ERROR", null));
++        httpsServer.on("clientError", (err, tlsSocket) => {
++            this._onError("HTTPS_CLIENT_ERROR", null, err);
++            if (typeof this.onBlockedTls === "function") this.onBlockedTls(err, tlsSocket);
++        });
+         httpsServer.on("connect", this._onHttpServerConnect.bind(this));
+         httpsServer.on("request", this._onHttpServerRequest.bind(this, true));
+         const self = this;
+@@ -361,7 +364,7 @@ class Proxy {
          function makeConnection(port) {
              const conn = net_1.default.connect({
                  port,

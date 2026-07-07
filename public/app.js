@@ -218,8 +218,12 @@ events.addEventListener('clear', () => {
 });
 events.addEventListener('proxy', (e) => {
   const flow = JSON.parse(e.data);
-  allFlows.unshift(flow);
-  if (allFlows.length > 300) allFlows.pop();
+  const idx = allFlows.findIndex((x) => x.id === flow.id);
+  if (idx >= 0) allFlows[idx] = flow;        // upsert (blocked entry อัปเดต count)
+  else {
+    allFlows.unshift(flow);
+    if (allFlows.length > 300) allFlows.pop();
+  }
   renderProxy();
   if (flow.id === selectedFlowId) renderFlowDetail(flow);
 });
@@ -549,13 +553,16 @@ function renderFlowTable() {
   }
   for (const f of flows) {
     const statusText = f.error ? 'ERR' : (f.status || '...');
-    const topRow = [
-      methodBadge(f.method),
-      el('span', { class: `status-badge ${statusClass(f.status)}`, text: String(statusText) }),
-    ];
+    const topRow = [methodBadge(f.method)];
+    if (f.blocked) {
+      topRow.push(el('span', { class: 'blocked-badge', title: f.error || '', text: '🔒 BLOCKED' }));
+      if (f.blockedCount > 1) topRow.push(el('span', { class: 'blocked-count', text: `×${f.blockedCount}` }));
+    } else {
+      topRow.push(el('span', { class: `status-badge ${statusClass(f.status)}`, text: String(statusText) }));
+    }
     if (f.mapped) topRow.push(el('span', { class: 'map-badge', title: 'ถูก Map Local override', text: '🎯 MAP' }));
-    topRow.push(el('span', { class: 'flow-item-meta', text: `${fmtTime(f.time)} · ${f.durationMs != null ? f.durationMs + 'ms' : '–'} · ${fmtSize(f.resSize)}` }));
-    const item = el('div', { class: 'flow-item' + (f.id === selectedFlowId ? ' selected' : '') + (f.mapped ? ' mapped' : '') }, [
+    topRow.push(el('span', { class: 'flow-item-meta', text: f.blocked ? 'cert pinning' : `${fmtTime(f.time)} · ${f.durationMs != null ? f.durationMs + 'ms' : '–'} · ${fmtSize(f.resSize)}` }));
+    const item = el('div', { class: 'flow-item' + (f.id === selectedFlowId ? ' selected' : '') + (f.mapped ? ' mapped' : '') + (f.blocked ? ' blocked' : '') }, [
       el('div', { class: 'flow-item-top' }, topRow),
       el('div', { class: 'flow-item-url', title: f.url }, [
         el('span', { class: 'scheme-dot', text: f.scheme === 'https' ? '🔒 ' : '🌐 ' }),

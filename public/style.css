@@ -450,6 +450,17 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
   padding: 1px 5px;
 }
 .flow-item.mapped { border-left: 3px solid var(--green); }
+.blocked-badge {
+  background: rgba(248, 113, 113, 0.15);
+  color: var(--red);
+  border: 1px solid var(--red);
+  border-radius: 5px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  padding: 1px 5px;
+}
+.blocked-count { color: var(--red); font-size: 0.72rem; font-weight: 600; }
+.flow-item.blocked { border-left: 3px solid var(--red); opacity: 0.85; }
 .flow-item-url { font-size: 0.84rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scheme-dot { font-size: 0.75rem; }
 

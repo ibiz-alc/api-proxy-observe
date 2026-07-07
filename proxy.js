@@ -44,6 +44,51 @@ function startProxy({ port, caDir, store, onFlow, matchMapLocal }) {
   const proxy = new Proxy();
   proxy.use(Proxy.gunzip); // คลาย gzip/deflate ของ response ให้อ่าน body ได้
 
+  // TLS handshake ล้มเพราะ client ไม่เชื่อ CA (มักเป็น certificate pinning)
+  // บันทึกเป็น entry "blocked" ให้เห็นในลิสต์ (dedupe ต่อ host+device เพราะ retry เยอะ)
+  const blockedMap = new Map();
+  proxy.onBlockedTls = (err, tlsSocket) => {
+    const host = (tlsSocket && tlsSocket.servername) || '(unknown host)';
+    const device = ((tlsSocket && tlsSocket.remoteAddress) || '').replace(/^::ffff:/, '') || 'unknown';
+    const key = `${device}|${host}`;
+    const existing = blockedMap.get(key);
+    if (existing) {
+      existing.blockedCount += 1;
+      existing.time = new Date().toISOString();
+      onFlow(existing);
+      return;
+    }
+    const flow = {
+      id: crypto.randomUUID(),
+      time: new Date().toISOString(),
+      scheme: 'https',
+      device,
+      userAgent: null,
+      method: 'CONNECT',
+      host,
+      path: '',
+      url: `https://${host}`,
+      reqHeaders: {},
+      reqBody: null,
+      reqSize: 0,
+      status: null,
+      statusText: null,
+      resHeaders: null,
+      resBody: null,
+      resContentType: null,
+      resSize: 0,
+      durationMs: null,
+      mapped: false,
+      blocked: true,
+      blockedCount: 1,
+      error: 'TLS ถูกปฏิเสธ: client ไม่เชื่อ CA (มักเป็น certificate pinning) — proxy ถอดรหัส/ดักไม่ได้',
+    };
+    blockedMap.set(key, flow);
+    store.flows.unshift(flow);
+    while (store.flows.length > MAX_FLOWS) store.flows.pop();
+    onFlow(flow);
+  };
+
   proxy.onError((ctx, err, errorKind) => {
     // ctx อาจเป็น null ตอน handshake ล้มเหลว
     if (!ctx || !ctx.clientToProxyRequest) return;
