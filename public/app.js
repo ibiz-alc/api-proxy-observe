@@ -157,6 +157,17 @@ function renderDetail(r) {
     detailEl.appendChild(bodyBlock(r.body));
   }
 
+  // response ที่ได้กลับมา (เฉพาะ entry ที่มาจาก Sender)
+  if (r.senderResponse) {
+    if (r.senderResponse.error) {
+      detailEl.appendChild(el('div', { class: 'section-title', text: '↙ Response (จาก Sender)' }));
+      detailEl.appendChild(el('pre', { class: 'code-block', text: 'ERROR: ' + r.senderResponse.error }));
+    } else {
+      detailEl.appendChild(el('div', { class: 'section-title', text: `↙ Response (จาก Sender) — HTTP ${r.senderResponse.status}` }));
+      detailEl.appendChild(r.senderResponse.body ? bodyBlock(r.senderResponse.body) : el('pre', { class: 'code-block', text: '(response ว่าง)' }));
+    }
+  }
+
   if (r.files && r.files.length) {
     detailEl.appendChild(el('div', { class: 'section-title', text: `ไฟล์แนบ (${r.files.length})` }));
     for (const f of r.files) {
