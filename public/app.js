@@ -549,12 +549,14 @@ function renderFlowTable() {
   }
   for (const f of flows) {
     const statusText = f.error ? 'ERR' : (f.status || '...');
-    const item = el('div', { class: 'flow-item' + (f.id === selectedFlowId ? ' selected' : '') }, [
-      el('div', { class: 'flow-item-top' }, [
-        methodBadge(f.method),
-        el('span', { class: `status-badge ${statusClass(f.status)}`, text: String(statusText) }),
-        el('span', { class: 'flow-item-meta', text: `${fmtTime(f.time)} · ${f.durationMs != null ? f.durationMs + 'ms' : '–'} · ${fmtSize(f.resSize)}` }),
-      ]),
+    const topRow = [
+      methodBadge(f.method),
+      el('span', { class: `status-badge ${statusClass(f.status)}`, text: String(statusText) }),
+    ];
+    if (f.mapped) topRow.push(el('span', { class: 'map-badge', title: 'ถูก Map Local override', text: '🎯 MAP' }));
+    topRow.push(el('span', { class: 'flow-item-meta', text: `${fmtTime(f.time)} · ${f.durationMs != null ? f.durationMs + 'ms' : '–'} · ${fmtSize(f.resSize)}` }));
+    const item = el('div', { class: 'flow-item' + (f.id === selectedFlowId ? ' selected' : '') + (f.mapped ? ' mapped' : '') }, [
+      el('div', { class: 'flow-item-top' }, topRow),
       el('div', { class: 'flow-item-url', title: f.url }, [
         el('span', { class: 'scheme-dot', text: f.scheme === 'https' ? '🔒 ' : '🌐 ' }),
         el('span', { text: f.host + f.path }),

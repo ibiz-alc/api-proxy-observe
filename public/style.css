@@ -440,6 +440,16 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .flow-item-top { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .flow-item-top .status-badge { font-size: 0.7rem; padding: 1px 6px; }
 .flow-item-meta { color: var(--muted); font-size: 0.74rem; margin-left: auto; white-space: nowrap; }
+.map-badge {
+  background: rgba(74, 222, 128, 0.15);
+  color: var(--green);
+  border: 1px solid var(--green);
+  border-radius: 5px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  padding: 1px 5px;
+}
+.flow-item.mapped { border-left: 3px solid var(--green); }
 .flow-item-url { font-size: 0.84rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scheme-dot { font-size: 0.75rem; }
 
