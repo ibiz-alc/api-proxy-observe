@@ -68,14 +68,28 @@ function syntaxHighlightJson(jsonStr) {
   );
 }
 
-// สร้าง <pre> โชว์ body: ถ้าเป็น JSON จะจัดสีให้, ไม่ใช่ก็เป็นข้อความธรรมดา
+// ปุ่ม copy เล็กๆ มุมขวาบนของ code block
+function copyButton(getText) {
+  const btn = el('button', { class: 'copy-btn', type: 'button', text: '📋 Copy', title: 'คัดลอก' });
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(getText());
+    btn.textContent = '✅ Copied';
+    setTimeout(() => { btn.textContent = '📋 Copy'; }, 1200);
+  });
+  return btn;
+}
+
+// สร้างกล่องโชว์ body: ถ้าเป็น JSON จะจัดสีให้, ไม่ใช่ก็เป็นข้อความธรรมดา + ปุ่ม copy มุมขวาบน
 function bodyBlock(raw) {
   const text = prettyBody(raw);
   if (text == null || text === '') return el('pre', { class: 'code-block', text: '(ไม่มี body)' });
   let isJson = false;
   try { JSON.parse(typeof raw === 'object' ? JSON.stringify(raw) : raw); isJson = true; } catch { isJson = false; }
-  if (isJson) return el('pre', { class: 'code-block json', html: syntaxHighlightJson(text) });
-  return el('pre', { class: 'code-block', text });
+  const pre = isJson
+    ? el('pre', { class: 'code-block json', html: syntaxHighlightJson(text) })
+    : el('pre', { class: 'code-block', text });
+  return el('div', { class: 'code-wrap' }, [copyButton(() => text), pre]);
 }
 
 function fmtTime(iso) {

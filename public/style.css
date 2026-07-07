@@ -210,6 +210,26 @@ pre.code-block {
   line-height: 1.55;
 }
 
+/* code block + ปุ่ม copy มุมขวาบน */
+.code-wrap { position: relative; }
+.copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.72rem;
+  padding: 3px 8px;
+  border-radius: 6px;
+  opacity: 0.65;
+}
+.code-wrap:hover .copy-btn { opacity: 1; }
+.copy-btn:hover { color: var(--accent); border-color: var(--accent); }
+.code-wrap .code-block { padding-top: 30px; }
+.detail-pane-body .code-wrap .code-block { padding: 26px 0 0; }
+
 /* JSON syntax highlight */
 pre.code-block.json { color: #cbd5e1; }
 .json-key {
