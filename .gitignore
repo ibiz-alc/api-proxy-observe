@@ -1,3 +1,4 @@
 node_modules/
 .DS_Store
 .proxy-ca/
+map-local.json

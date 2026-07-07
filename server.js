@@ -1,6 +1,7 @@
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
 const crypto = require('crypto');
 const exifr = require('exifr');
 const { startProxy } = require('./proxy');
@@ -9,6 +10,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const PROXY_PORT = process.env.PROXY_PORT || 9099;
 const CA_DIR = path.join(__dirname, '.proxy-ca');
+const MAP_LOCAL_FILE = path.join(__dirname, 'map-local.json');
 
 // ================= In-memory store =================
 const MAX_REQUESTS = 200;
@@ -24,6 +26,82 @@ function broadcast(event, data) {
 // เก็บ flow ที่ proxy ดักได้ (แยกจาก hook requests)
 const proxyStore = { flows: [] };
 let proxyCaPath = null;
+
+// ================= Map Local (mock rules) =================
+let mapRules = [];
+try {
+  if (fs.existsSync(MAP_LOCAL_FILE)) mapRules = JSON.parse(fs.readFileSync(MAP_LOCAL_FILE, 'utf8'));
+} catch (err) {
+  console.error('โหลด map-local.json ไม่ได้:', err.message);
+}
+function saveMapRules() {
+  try {
+    fs.writeFileSync(MAP_LOCAL_FILE, JSON.stringify(mapRules, null, 2));
+  } catch (err) {
+    console.error('บันทึก map-local.json ไม่ได้:', err.message);
+  }
+}
+
+// แปลง pattern -> ตัวเช็ค: มี * = wildcard (.*), ไม่มี * = ตรวจแบบ "มีคำนี้อยู่" (contains)
+function patternMatches(pattern, url) {
+  if (!pattern) return false;
+  if (pattern.includes('*')) {
+    const re = new RegExp(pattern.split('*').map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*'));
+    return re.test(url);
+  }
+  return url.includes(pattern);
+}
+
+// หา rule ที่ตรง (เจาะจง/ไม่มี * มาก่อน แล้ว pattern ยาวกว่าชนะ)
+function findMapRule(method, url) {
+  const matched = mapRules.filter((r) =>
+    r.enabled !== false &&
+    (!r.method || r.method === 'ANY' || r.method === method) &&
+    patternMatches(r.urlPattern, url));
+  if (!matched.length) return null;
+  matched.sort((a, b) =>
+    (a.urlPattern.includes('*') - b.urlPattern.includes('*')) ||
+    (b.urlPattern.length - a.urlPattern.length));
+  return matched[0];
+}
+
+app.get('/api/maplocal', (req, res) => res.json(mapRules));
+
+app.post('/api/maplocal', express.json({ limit: '5mb' }), (req, res) => {
+  const b = req.body || {};
+  const rule = {
+    id: crypto.randomUUID(),
+    enabled: b.enabled !== false,
+    name: b.name || '',
+    method: b.method || 'ANY',
+    urlPattern: b.urlPattern || '',
+    status: Number(b.status) || 200,
+    contentType: b.contentType || 'application/json',
+    body: b.body != null ? String(b.body) : '',
+  };
+  mapRules.unshift(rule);
+  saveMapRules();
+  res.json({ ok: true, rule });
+});
+
+app.put('/api/maplocal/:id', express.json({ limit: '5mb' }), (req, res) => {
+  const rule = mapRules.find((r) => r.id === req.params.id);
+  if (!rule) return res.status(404).json({ ok: false, error: 'ไม่พบ rule' });
+  const b = req.body || {};
+  for (const k of ['enabled', 'name', 'method', 'urlPattern', 'contentType', 'body']) {
+    if (b[k] !== undefined) rule[k] = k === 'body' ? String(b[k]) : b[k];
+  }
+  if (b.status !== undefined) rule.status = Number(b.status) || 200;
+  saveMapRules();
+  res.json({ ok: true, rule });
+});
+
+app.delete('/api/maplocal/:id', (req, res) => {
+  const before = mapRules.length;
+  mapRules = mapRules.filter((r) => r.id !== req.params.id);
+  saveMapRules();
+  res.json({ ok: true, removed: before - mapRules.length });
+});
 
 function addEntry(entry, files) {
   requests.unshift(entry);
@@ -388,6 +466,7 @@ startProxy({
   caDir: CA_DIR,
   store: proxyStore,
   onFlow: (flow) => broadcast('proxy', flow),
+  matchMapLocal: findMapRule,
 })
   .then(({ caPath }) => {
     proxyCaPath = caPath;

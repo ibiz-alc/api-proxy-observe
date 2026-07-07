@@ -50,6 +50,34 @@ function methodBadge(method) {
   return el('span', { class: `method-badge method-${cls}`, text: method });
 }
 
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ใส่สีให้ JSON: key / string / number / boolean / null คนละสี เน้น key ให้อ่านง่าย
+function syntaxHighlightJson(jsonStr) {
+  return escapeHtml(jsonStr).replace(
+    /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false)\b|\bnull\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
+    (match) => {
+      let cls = 'json-num';
+      if (/^"/.test(match)) cls = /:$/.test(match) ? 'json-key' : 'json-str';
+      else if (/true|false/.test(match)) cls = 'json-bool';
+      else if (/null/.test(match)) cls = 'json-null';
+      return `<span class="${cls}">${match}</span>`;
+    },
+  );
+}
+
+// สร้าง <pre> โชว์ body: ถ้าเป็น JSON จะจัดสีให้, ไม่ใช่ก็เป็นข้อความธรรมดา
+function bodyBlock(raw) {
+  const text = prettyBody(raw);
+  if (text == null || text === '') return el('pre', { class: 'code-block', text: '(ไม่มี body)' });
+  let isJson = false;
+  try { JSON.parse(typeof raw === 'object' ? JSON.stringify(raw) : raw); isJson = true; } catch { isJson = false; }
+  if (isJson) return el('pre', { class: 'code-block json', html: syntaxHighlightJson(text) });
+  return el('pre', { class: 'code-block', text });
+}
+
 function fmtTime(iso) {
   return new Date(iso).toLocaleTimeString('th-TH', { hour12: false });
 }
@@ -112,7 +140,7 @@ function renderDetail(r) {
   const bodyText = prettyBody(r.body);
   if (bodyText) {
     detailEl.appendChild(el('div', { class: 'section-title', text: `Body ${r.contentType ? `(${r.contentType.split(';')[0]})` : ''}` }));
-    detailEl.appendChild(el('pre', { class: 'code-block', text: bodyText }));
+    detailEl.appendChild(bodyBlock(r.body));
   }
 
   if (r.files && r.files.length) {
@@ -246,7 +274,7 @@ function renderSendResult(result) {
   sendResultEl.appendChild(el('div', { class: 'section-title', text: 'Response Headers' }));
   sendResultEl.appendChild(kvTable(result.headers));
   sendResultEl.appendChild(el('div', { class: 'section-title', text: 'Response Body' }));
-  sendResultEl.appendChild(el('pre', { class: 'code-block', text: prettyBody(result.body) || '(ว่าง)' }));
+  sendResultEl.appendChild(result.body ? bodyBlock(result.body) : el('pre', { class: 'code-block', text: '(ว่าง)' }));
 }
 
 document.getElementById('send-btn').addEventListener('click', async () => {
@@ -564,7 +592,7 @@ function renderFlowDetail(f) {
   const reqRawText = `${f.method} ${f.path} HTTP/1.1\n${headersToRaw(f.reqHeaders)}${f.reqBody ? '\n\n' + prettyBody(f.reqBody) : ''}`;
   const reqTabs = {
     Header: kvTable(f.reqHeaders || {}),
-    Body: el('pre', { class: 'code-block', text: f.reqBody ? prettyBody(f.reqBody) : '(ไม่มี body)' }),
+    Body: bodyBlock(f.reqBody),
     Raw: el('pre', { class: 'code-block', text: reqRawText }),
   };
   const reqHeadline = el('span', { class: 'detail-url', text: `${f.method} ${f.url}`, title: f.url });
@@ -576,7 +604,7 @@ function renderFlowDetail(f) {
     : `HTTP/1.1 ${f.status || ''} ${f.statusText || ''}\n${headersToRaw(f.resHeaders)}${f.resBody ? '\n\n' + prettyBody(f.resBody) : ''}`;
   const resTabs = {
     Header: kvTable(f.resHeaders || {}),
-    Body: el('pre', { class: 'code-block', text: f.error ? `ERROR: ${f.error}` : (f.resBody ? prettyBody(f.resBody) : '(ไม่มี body)') }),
+    Body: f.error ? el('pre', { class: 'code-block', text: `ERROR: ${f.error}` }) : bodyBlock(f.resBody),
     Raw: el('pre', { class: 'code-block', text: resRawText }),
   };
   const resHeadline = f.error

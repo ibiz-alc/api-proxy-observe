@@ -206,7 +206,23 @@ pre.code-block {
   font-size: 0.85rem;
   white-space: pre-wrap;
   word-break: break-word;
+  font-family: ui-monospace, Menlo, Monaco, monospace;
+  line-height: 1.55;
 }
+
+/* JSON syntax highlight */
+pre.code-block.json { color: #cbd5e1; }
+.json-key {
+  color: #7dd3fc;              /* ฟ้าสว่าง — key เด่นสุด */
+  font-weight: 600;
+  background: rgba(125, 211, 252, 0.08);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+.json-str { color: #86efac; }   /* เขียว — string */
+.json-num { color: #fca5a5; }    /* แดงอ่อน — number */
+.json-bool { color: #fcd34d; font-weight: 600; }  /* เหลือง — boolean */
+.json-null { color: #94a3b8; font-style: italic; } /* เทา — null */
 
 .file-chip {
   display: inline-block;

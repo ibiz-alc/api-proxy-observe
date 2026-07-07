@@ -40,7 +40,7 @@ function capChunks(chunks, limit) {
  * @param {object} opts.store      { flows: [], clients: Set } แชร์กับ web server
  * @param {function} opts.onFlow   callback(flow) เรียกเมื่อ flow เสร็จ (ใช้ broadcast)
  */
-function startProxy({ port, caDir, store, onFlow }) {
+function startProxy({ port, caDir, store, onFlow, matchMapLocal }) {
   const proxy = new Proxy();
   proxy.use(Proxy.gunzip); // คลาย gzip/deflate ของ response ให้อ่าน body ได้
 
@@ -94,10 +94,35 @@ function startProxy({ port, caDir, store, onFlow }) {
       durationMs: null,
       error: null,
       _startedAt: Date.now(),
+      mapped: false,
       _reqChunks: [],
       _resChunks: [],
     };
     ctx.__flow = flow;
+
+    // ---- Map Local: ถ้าตรงกฎ ตอบ response ปลอมทันที ไม่ยิงไปเซิร์ฟเวอร์จริง ----
+    const rule = matchMapLocal ? matchMapLocal(flow.method, flow.url) : null;
+    if (rule) {
+      const body = rule.body != null ? String(rule.body) : '';
+      const status = rule.status || 200;
+      const contentType = rule.contentType || 'application/json';
+      flow.mapped = true;
+      flow.status = status;
+      flow.statusText = 'Map Local';
+      flow.resContentType = contentType;
+      flow.resHeaders = { 'content-type': contentType, 'x-api-tester': 'map-local' };
+      flow.resBody = body;
+      flow.resSize = Buffer.byteLength(body);
+      flow.durationMs = 0;
+      finalize(flow);
+      ctx.proxyToClientResponse.writeHead(status, {
+        'Content-Type': contentType,
+        'X-Api-Tester': 'map-local',
+        'Access-Control-Allow-Origin': '*',
+      });
+      ctx.proxyToClientResponse.end(body);
+      return; // ไม่เรียก callback = ไม่ forward ไปเซิร์ฟเวอร์จริง
+    }
 
     ctx.onRequestData((ctx, chunk, cb) => {
       flow._reqChunks.push(chunk);
