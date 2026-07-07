@@ -1,5 +1,14 @@
 /* global exifr */
 
+// ngrok-free แทรกหน้าเตือน (interstitial) กับ request ที่ไม่มี header นี้ ทำให้ API คืน HTML แทน JSON
+// ครอบ fetch ให้แนบ header เสมอ เพื่อให้ใช้งานผ่าน ngrok ได้เหมือน local
+const _origFetch = window.fetch.bind(window);
+window.fetch = (url, opts = {}) => {
+  const headers = new Headers(opts.headers || {});
+  headers.set('ngrok-skip-browser-warning', 'true');
+  return _origFetch(url, { ...opts, headers });
+};
+
 // ================= Tab switching =================
 document.querySelectorAll('.tab-btn').forEach((btn) => {
   btn.addEventListener('click', () => {
@@ -1114,3 +1123,30 @@ document.getElementById('maplocal-add').addEventListener('click', () => {
 });
 
 loadMapRules();
+
+// ================= Polling fallback (สำหรับ ngrok ที่ SSE อาจไม่ push) =================
+// SSE (EventSource) ใส่ header ngrok-skip เองไม่ได้ ถ้าเปิดผ่าน ngrok แล้ว real-time ไม่มา
+// จึง poll ซ้ำเบาๆ และ re-render เฉพาะตอนข้อมูลเปลี่ยนจริง (กันจอกระพริบ)
+let _lastFlowSig = '';
+let _lastReqSig = '';
+setInterval(async () => {
+  try {
+    const flows = await (await fetch('/api/proxy/flows')).json();
+    const sig = `${flows.length}:${flows[0]?.id || ''}:${flows[0]?.blockedCount || ''}`;
+    if (sig !== _lastFlowSig) {
+      _lastFlowSig = sig;
+      allFlows = flows;
+      renderProxy();
+    }
+  } catch { /* ignore */ }
+  try {
+    const reqs = await (await fetch('/api/requests')).json();
+    const sig = `${reqs.length}:${reqs[0]?.id || ''}`;
+    if (sig !== _lastReqSig) {
+      _lastReqSig = sig;
+      allRequests = reqs;
+      renderList();
+      renderMobileGallery();
+    }
+  } catch { /* ignore */ }
+}, 4000);
