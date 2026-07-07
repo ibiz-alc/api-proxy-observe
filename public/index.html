@@ -133,6 +133,11 @@
       <button id="proxy-help-btn">❓ วิธีติดตั้ง</button>
       <button id="clear-flows" class="danger">🗑️ ล้างทั้งหมด</button>
     </div>
+    <div class="hook-info">
+      <input type="text" id="flow-filter" placeholder="🔍 กรอง URL / host / path (เช่น api, .json, example.com)" style="flex:1" />
+      <select id="flow-device"><option value="">ทุก device</option></select>
+      <label class="hint"><input type="checkbox" id="flow-group" checked /> จัดกลุ่มตาม device / host</label>
+    </div>
     <div id="proxy-help" class="proxy-help" style="display:none">
       <strong>วิธีทำให้เห็นเนื้อใน HTTPS:</strong>
       <ol>

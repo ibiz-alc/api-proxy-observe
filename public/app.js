@@ -404,31 +404,120 @@ document.getElementById('clear-flows').addEventListener('click', async () => {
   await fetch('/api/proxy/flows', { method: 'DELETE' });
 });
 
+// ---- filter / group state ----
+let flowFilter = '';
+let flowDevice = '';
+let flowGroup = true;
+const collapsedGroups = new Set();
+
+document.getElementById('flow-filter').addEventListener('input', (e) => {
+  flowFilter = e.target.value.trim().toLowerCase();
+  renderFlowList();
+});
+document.getElementById('flow-device').addEventListener('change', (e) => {
+  flowDevice = e.target.value;
+  renderFlowList();
+});
+document.getElementById('flow-group').addEventListener('change', (e) => {
+  flowGroup = e.target.checked;
+  renderFlowList();
+});
+
 function statusClass(status) {
   if (!status) return 'status-err';
   return `status-${Math.floor(status / 100)}xx`;
 }
 
+// กรองตามข้อความ (url/host/path) และ device ที่เลือก
+function filteredFlows() {
+  return allFlows.filter((f) => {
+    if (flowDevice && f.device !== flowDevice) return false;
+    if (flowFilter && !(`${f.url} ${f.method}`.toLowerCase().includes(flowFilter))) return false;
+    return true;
+  });
+}
+
+// อัปเดตรายการ device ใน dropdown ให้ตรงกับ flow ที่มีอยู่
+function renderDeviceOptions() {
+  const sel = document.getElementById('flow-device');
+  const devices = [...new Set(allFlows.map((f) => f.device))];
+  const current = sel.value;
+  sel.innerHTML = '<option value="">ทุก device</option>';
+  for (const d of devices) {
+    const count = allFlows.filter((f) => f.device === d).length;
+    sel.appendChild(el('option', { value: d, text: `${d} (${count})` }));
+  }
+  if (devices.includes(current)) sel.value = current;
+}
+
+function makeFlowItem(f) {
+  const statusText = f.error ? 'ERR' : (f.status || '...');
+  const item = el('div', { class: 'req-item' + (f.id === selectedFlowId ? ' selected' : '') }, [
+    methodBadge(f.method),
+    el('span', { class: `status-badge ${statusClass(f.status)}`, text: String(statusText) }),
+    el('span', { class: 'req-path', text: f.path, title: f.url }),
+    el('span', { class: 'req-time', text: f.durationMs != null ? f.durationMs + 'ms' : '' }),
+  ]);
+  item.addEventListener('click', () => {
+    selectedFlowId = f.id;
+    renderFlowList();
+    renderFlowDetail(f);
+  });
+  return item;
+}
+
+function makeGroupHeader(label, count, key, level) {
+  const collapsed = collapsedGroups.has(key);
+  const header = el('div', { class: `flow-group-header level-${level}` }, [
+    el('span', { class: 'flow-group-caret', text: collapsed ? '▶' : '▼' }),
+    el('span', { class: 'flow-group-label', text: label }),
+    el('span', { class: 'flow-group-count', text: String(count) }),
+  ]);
+  header.addEventListener('click', () => {
+    if (collapsedGroups.has(key)) collapsedGroups.delete(key);
+    else collapsedGroups.add(key);
+    renderFlowList();
+  });
+  return header;
+}
+
 function renderFlowList() {
+  renderDeviceOptions();
   flowListEl.innerHTML = '';
-  if (!allFlows.length) {
-    flowListEl.appendChild(el('p', { class: 'empty-msg', html: 'ยังไม่มีทราฟฟิกผ่าน proxy<br/>ตั้ง proxy บนอุปกรณ์แล้วเปิดแอป/เว็บ' }));
+  const flows = filteredFlows();
+  if (!flows.length) {
+    const msg = allFlows.length
+      ? 'ไม่มี flow ตรงกับเงื่อนไขที่กรอง'
+      : 'ยังไม่มีทราฟฟิกผ่าน proxy<br/>ตั้ง proxy บนอุปกรณ์แล้วเปิดแอป/เว็บ';
+    flowListEl.appendChild(el('p', { class: 'empty-msg', html: msg }));
     return;
   }
-  for (const f of allFlows) {
-    const statusText = f.error ? 'ERR' : (f.status || '...');
-    const item = el('div', { class: 'req-item' + (f.id === selectedFlowId ? ' selected' : '') }, [
-      methodBadge(f.method),
-      el('span', { class: `status-badge ${statusClass(f.status)}`, text: String(statusText) }),
-      el('span', { class: 'req-path', text: f.host + f.path, title: f.url }),
-      el('span', { class: 'req-time', text: f.durationMs != null ? f.durationMs + 'ms' : '' }),
-    ]);
-    item.addEventListener('click', () => {
-      selectedFlowId = f.id;
-      renderFlowList();
-      renderFlowDetail(f);
-    });
-    flowListEl.appendChild(item);
+
+  if (!flowGroup) {
+    for (const f of flows) flowListEl.appendChild(makeFlowItem(f));
+    return;
+  }
+
+  // จัดกลุ่ม: device -> host -> flows (คงลำดับใหม่สุดอยู่บน)
+  const byDevice = new Map();
+  for (const f of flows) {
+    if (!byDevice.has(f.device)) byDevice.set(f.device, new Map());
+    const byHost = byDevice.get(f.device);
+    if (!byHost.has(f.host)) byHost.set(f.host, []);
+    byHost.get(f.host).push(f);
+  }
+
+  for (const [device, byHost] of byDevice) {
+    const deviceKey = `dev:${device}`;
+    const deviceCount = [...byHost.values()].reduce((n, arr) => n + arr.length, 0);
+    flowListEl.appendChild(makeGroupHeader(`📱 ${device}`, deviceCount, deviceKey, 0));
+    if (collapsedGroups.has(deviceKey)) continue;
+    for (const [host, arr] of byHost) {
+      const hostKey = `${deviceKey}|host:${host}`;
+      flowListEl.appendChild(makeGroupHeader(host, arr.length, hostKey, 1));
+      if (collapsedGroups.has(hostKey)) continue;
+      for (const f of arr) flowListEl.appendChild(makeFlowItem(f));
+    }
   }
 }
 
@@ -443,6 +532,9 @@ function renderFlowDetail(f) {
   ]));
   flowDetailEl.appendChild(el('div', { class: 'section-title', text: 'URL' }));
   flowDetailEl.appendChild(el('pre', { class: 'code-block', text: f.url }));
+
+  flowDetailEl.appendChild(el('div', { class: 'section-title', text: 'Device' }));
+  flowDetailEl.appendChild(kvTable({ 'IP': f.device || '-', 'User-Agent': f.userAgent || '-' }));
 
   if (f.error) {
     flowDetailEl.appendChild(el('div', { class: 'section-title', text: 'Error' }));

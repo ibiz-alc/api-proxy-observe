@@ -69,10 +69,15 @@ function startProxy({ port, caDir, store, onFlow }) {
     const req = ctx.clientToProxyRequest;
     const host = req.headers.host || (ctx.proxyToServerRequestOptions && ctx.proxyToServerRequestOptions.host) || '?';
     const scheme = ctx.isSSL ? 'https' : 'http';
+    // IP ของอุปกรณ์ที่ยิงผ่าน proxy (ตัด prefix ::ffff: ของ IPv4-mapped ออก)
+    const rawIp = (req.socket && req.socket.remoteAddress) || '';
+    const device = rawIp.replace(/^::ffff:/, '') || 'unknown';
     const flow = {
       id: crypto.randomUUID(),
       time: new Date().toISOString(),
       scheme,
+      device,
+      userAgent: req.headers['user-agent'] || null,
       method: req.method,
       host,
       path: req.url,
