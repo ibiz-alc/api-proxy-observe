@@ -178,14 +178,14 @@ events.addEventListener('proxy', (e) => {
   const flow = JSON.parse(e.data);
   allFlows.unshift(flow);
   if (allFlows.length > 300) allFlows.pop();
-  renderFlowList();
+  renderProxy();
   if (flow.id === selectedFlowId) renderFlowDetail(flow);
 });
 events.addEventListener('proxy-clear', () => {
   allFlows = [];
   selectedFlowId = null;
-  renderFlowList();
-  flowDetailEl.innerHTML = '<p class="empty-msg">เลือก flow จากรายการด้านซ้ายเพื่อดู request/response</p>';
+  renderProxy();
+  flowDetailEl.innerHTML = '<p class="empty-msg">เลือกแถวด้านบนเพื่อดู Request / Response</p>';
 });
 
 loadRequests();
@@ -376,11 +376,23 @@ async function readUrlMetadata() {
 document.getElementById('url-read-btn').addEventListener('click', readUrlMetadata);
 urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') readUrlMetadata(); });
 
-// ================= Proxy (MITM) =================
-const flowListEl = document.getElementById('flow-list');
+// ================= Proxy (MITM) — Proxyman-style =================
+const flowTbody = document.getElementById('flow-tbody');
+const flowEmptyEl = document.getElementById('flow-empty');
 const flowDetailEl = document.getElementById('flow-detail');
+const deviceTreeBody = document.getElementById('device-tree-body');
 let allFlows = [];
 let selectedFlowId = null;
+
+// filter state
+let flowFilter = '';
+let flowField = 'url';   // url | host | path
+let flowMatch = 'contains'; // contains | equals
+let selDevice = '';      // '' = ทุก device
+let selHost = '';        // '' = ทุก host (ใน device ที่เลือก)
+// sub-tabs ของ detail
+let reqTab = 'Header';
+let resTab = 'Body';
 
 (async function initProxy() {
   const info = await (await fetch('/api/proxy/info')).json();
@@ -390,7 +402,7 @@ let selectedFlowId = null;
   document.getElementById('proxy-port').textContent = info.proxyPort;
   document.getElementById('proxy-cert-url').textContent = `${location.origin}/api/proxy/cert`;
   allFlows = await (await fetch('/api/proxy/flows')).json();
-  renderFlowList();
+  renderProxy();
 })();
 
 document.getElementById('proxy-cert-btn').addEventListener('click', () => {
@@ -403,24 +415,17 @@ document.getElementById('proxy-help-btn').addEventListener('click', () => {
 document.getElementById('clear-flows').addEventListener('click', async () => {
   await fetch('/api/proxy/flows', { method: 'DELETE' });
 });
-
-// ---- filter / group state ----
-let flowFilter = '';
-let flowDevice = '';
-let flowGroup = true;
-const collapsedGroups = new Set();
-
 document.getElementById('flow-filter').addEventListener('input', (e) => {
   flowFilter = e.target.value.trim().toLowerCase();
-  renderFlowList();
+  renderFlowTable();
 });
-document.getElementById('flow-device').addEventListener('change', (e) => {
-  flowDevice = e.target.value;
-  renderFlowList();
+document.getElementById('flow-field').addEventListener('change', (e) => {
+  flowField = e.target.value;
+  renderFlowTable();
 });
-document.getElementById('flow-group').addEventListener('change', (e) => {
-  flowGroup = e.target.checked;
-  renderFlowList();
+document.getElementById('flow-match').addEventListener('change', (e) => {
+  flowMatch = e.target.value;
+  renderFlowTable();
 });
 
 function statusClass(status) {
@@ -428,134 +433,163 @@ function statusClass(status) {
   return `status-${Math.floor(status / 100)}xx`;
 }
 
-// กรองตามข้อความ (url/host/path) และ device ที่เลือก
+function fmtSize(bytes) {
+  if (!bytes) return '–';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1024 / 1024).toFixed(2) + ' MB';
+}
+
+// กรองตาม field/ข้อความ และ device/host ที่เลือกจาก tree
 function filteredFlows() {
   return allFlows.filter((f) => {
-    if (flowDevice && f.device !== flowDevice) return false;
-    if (flowFilter && !(`${f.url} ${f.method}`.toLowerCase().includes(flowFilter))) return false;
+    if (selDevice && f.device !== selDevice) return false;
+    if (selHost && f.host !== selHost) return false;
+    if (flowFilter) {
+      const hay = (f[flowField] || '').toLowerCase();
+      if (flowMatch === 'equals' ? hay !== flowFilter : !hay.includes(flowFilter)) return false;
+    }
     return true;
   });
 }
 
-// อัปเดตรายการ device ใน dropdown ให้ตรงกับ flow ที่มีอยู่
-function renderDeviceOptions() {
-  const sel = document.getElementById('flow-device');
-  const devices = [...new Set(allFlows.map((f) => f.device))];
-  const current = sel.value;
-  sel.innerHTML = '<option value="">ทุก device</option>';
-  for (const d of devices) {
-    const count = allFlows.filter((f) => f.device === d).length;
-    sel.appendChild(el('option', { value: d, text: `${d} (${count})` }));
-  }
-  if (devices.includes(current)) sel.value = current;
-}
-
-function makeFlowItem(f) {
-  const statusText = f.error ? 'ERR' : (f.status || '...');
-  const item = el('div', { class: 'req-item' + (f.id === selectedFlowId ? ' selected' : '') }, [
-    methodBadge(f.method),
-    el('span', { class: `status-badge ${statusClass(f.status)}`, text: String(statusText) }),
-    el('span', { class: 'req-path', text: f.path, title: f.url }),
-    el('span', { class: 'req-time', text: f.durationMs != null ? f.durationMs + 'ms' : '' }),
+// ---- device tree (ซ้าย) ----
+function renderDeviceTree() {
+  deviceTreeBody.innerHTML = '';
+  const allItem = el('div', { class: 'tree-item tree-device' + (!selDevice ? ' active' : '') }, [
+    el('span', { class: 'tree-label', text: '🌐 ทุก device' }),
+    el('span', { class: 'tree-count', text: String(allFlows.length) }),
   ]);
-  item.addEventListener('click', () => {
-    selectedFlowId = f.id;
-    renderFlowList();
-    renderFlowDetail(f);
-  });
-  return item;
-}
+  allItem.addEventListener('click', () => { selDevice = ''; selHost = ''; renderProxy(); });
+  deviceTreeBody.appendChild(allItem);
 
-function makeGroupHeader(label, count, key, level) {
-  const collapsed = collapsedGroups.has(key);
-  const header = el('div', { class: `flow-group-header level-${level}` }, [
-    el('span', { class: 'flow-group-caret', text: collapsed ? '▶' : '▼' }),
-    el('span', { class: 'flow-group-label', text: label }),
-    el('span', { class: 'flow-group-count', text: String(count) }),
-  ]);
-  header.addEventListener('click', () => {
-    if (collapsedGroups.has(key)) collapsedGroups.delete(key);
-    else collapsedGroups.add(key);
-    renderFlowList();
-  });
-  return header;
-}
-
-function renderFlowList() {
-  renderDeviceOptions();
-  flowListEl.innerHTML = '';
-  const flows = filteredFlows();
-  if (!flows.length) {
-    const msg = allFlows.length
-      ? 'ไม่มี flow ตรงกับเงื่อนไขที่กรอง'
-      : 'ยังไม่มีทราฟฟิกผ่าน proxy<br/>ตั้ง proxy บนอุปกรณ์แล้วเปิดแอป/เว็บ';
-    flowListEl.appendChild(el('p', { class: 'empty-msg', html: msg }));
-    return;
-  }
-
-  if (!flowGroup) {
-    for (const f of flows) flowListEl.appendChild(makeFlowItem(f));
-    return;
-  }
-
-  // จัดกลุ่ม: device -> host -> flows (คงลำดับใหม่สุดอยู่บน)
   const byDevice = new Map();
-  for (const f of flows) {
+  for (const f of allFlows) {
     if (!byDevice.has(f.device)) byDevice.set(f.device, new Map());
     const byHost = byDevice.get(f.device);
-    if (!byHost.has(f.host)) byHost.set(f.host, []);
-    byHost.get(f.host).push(f);
+    byHost.set(f.host, (byHost.get(f.host) || 0) + 1);
   }
 
-  for (const [device, byHost] of byDevice) {
-    const deviceKey = `dev:${device}`;
-    const deviceCount = [...byHost.values()].reduce((n, arr) => n + arr.length, 0);
-    flowListEl.appendChild(makeGroupHeader(`📱 ${device}`, deviceCount, deviceKey, 0));
-    if (collapsedGroups.has(deviceKey)) continue;
-    for (const [host, arr] of byHost) {
-      const hostKey = `${deviceKey}|host:${host}`;
-      flowListEl.appendChild(makeGroupHeader(host, arr.length, hostKey, 1));
-      if (collapsedGroups.has(hostKey)) continue;
-      for (const f of arr) flowListEl.appendChild(makeFlowItem(f));
+  for (const [device, hosts] of byDevice) {
+    const total = [...hosts.values()].reduce((a, b) => a + b, 0);
+    const devItem = el('div', { class: 'tree-item tree-device' + (selDevice === device && !selHost ? ' active' : '') }, [
+      el('span', { class: 'tree-label', text: '📱 ' + device }),
+      el('span', { class: 'tree-count', text: String(total) }),
+    ]);
+    devItem.addEventListener('click', () => { selDevice = device; selHost = ''; renderProxy(); });
+    deviceTreeBody.appendChild(devItem);
+    // hosts ของ device นี้ (แสดงเมื่อ device ถูกเลือก)
+    if (selDevice === device) {
+      for (const [host, count] of hosts) {
+        const hostItem = el('div', { class: 'tree-item tree-host' + (selHost === host ? ' active' : '') }, [
+          el('span', { class: 'tree-label', text: host }),
+          el('span', { class: 'tree-count', text: String(count) }),
+        ]);
+        hostItem.addEventListener('click', (ev) => { ev.stopPropagation(); selHost = selHost === host ? '' : host; renderProxy(); });
+        deviceTreeBody.appendChild(hostItem);
+      }
     }
   }
 }
 
+// ---- ตาราง flow (บน) ----
+function renderFlowTable() {
+  const flows = filteredFlows();
+  document.getElementById('flow-count-label').textContent =
+    `${flows.length} / ${allFlows.length} รายการ`;
+  flowTbody.innerHTML = '';
+  flowEmptyEl.style.display = flows.length ? 'none' : 'block';
+  if (!flows.length) {
+    flowEmptyEl.innerHTML = allFlows.length
+      ? 'ไม่มี flow ตรงกับเงื่อนไขที่กรอง'
+      : 'ยังไม่มีทราฟฟิกผ่าน proxy<br/>ตั้ง proxy บนอุปกรณ์แล้วเปิดแอป/เว็บ';
+    return;
+  }
+  for (const f of flows) {
+    const statusText = f.error ? 'ERR' : (f.status || '...');
+    const tr = el('tr', { class: 'flow-row' + (f.id === selectedFlowId ? ' selected' : '') }, [
+      el('td', { class: 'col-url', title: f.url }, [
+        el('span', { class: 'scheme-dot ' + (f.scheme === 'https' ? 'https' : 'http'), text: f.scheme === 'https' ? '🔒' : '🌐' }),
+        el('span', { text: ' ' + f.url }),
+      ]),
+      el('td', { class: 'col-client', text: f.device }),
+      el('td', { class: 'col-method' }, [methodBadge(f.method)]),
+      el('td', { class: 'col-status' }, [el('span', { class: `status-badge ${statusClass(f.status)}`, text: String(statusText) })]),
+      el('td', { class: 'col-time', text: fmtTime(f.time) }),
+      el('td', { class: 'col-dur', text: f.durationMs != null ? f.durationMs + ' ms' : '–' }),
+      el('td', { class: 'col-size', text: fmtSize(f.resSize) }),
+    ]);
+    tr.addEventListener('click', () => {
+      selectedFlowId = f.id;
+      renderFlowTable();
+      renderFlowDetail(f);
+    });
+    flowTbody.appendChild(tr);
+  }
+}
+
+function renderProxy() {
+  renderDeviceTree();
+  renderFlowTable();
+}
+
+function headersToRaw(headers) {
+  return Object.entries(headers || {}).map(([k, v]) => `${k}: ${v}`).join('\n');
+}
+
+// สร้างแผงครึ่งหนึ่ง (Request หรือ Response) พร้อม sub-tabs Header / Body / Raw
+function buildDetailPane(title, headline, tabs, activeTab, onTab) {
+  const pane = el('div', { class: 'detail-pane' });
+  const head = el('div', { class: 'detail-pane-head' }, [
+    el('span', { class: 'detail-pane-title', text: title }),
+    headline || el('span'),
+  ]);
+  pane.appendChild(head);
+  const tabBar = el('div', { class: 'detail-subtabs' });
+  for (const name of Object.keys(tabs)) {
+    const btn = el('button', { class: 'subtab-btn' + (name === activeTab ? ' active' : ''), text: name });
+    btn.addEventListener('click', () => onTab(name));
+    tabBar.appendChild(btn);
+  }
+  pane.appendChild(tabBar);
+  const body = el('div', { class: 'detail-pane-body' });
+  body.appendChild(tabs[activeTab]);
+  pane.appendChild(body);
+  return pane;
+}
+
 function renderFlowDetail(f) {
   flowDetailEl.innerHTML = '';
-  flowDetailEl.appendChild(el('div', { class: 'detail-header' }, [
-    methodBadge(f.method),
-    f.error
-      ? el('span', { class: 'status-badge status-err', text: 'ERROR' })
-      : el('span', { class: `status-badge ${statusClass(f.status)}`, text: `${f.status} ${f.statusText || ''}` }),
-    el('span', { class: 'req-time', text: `${f.durationMs != null ? f.durationMs + ' ms • ' : ''}${new Date(f.time).toLocaleString('th-TH')}` }),
-  ]));
-  flowDetailEl.appendChild(el('div', { class: 'section-title', text: 'URL' }));
-  flowDetailEl.appendChild(el('pre', { class: 'code-block', text: f.url }));
 
-  flowDetailEl.appendChild(el('div', { class: 'section-title', text: 'Device' }));
-  flowDetailEl.appendChild(kvTable({ 'IP': f.device || '-', 'User-Agent': f.userAgent || '-' }));
+  // ----- Request pane -----
+  const reqRawText = `${f.method} ${f.path} HTTP/1.1\n${headersToRaw(f.reqHeaders)}${f.reqBody ? '\n\n' + prettyBody(f.reqBody) : ''}`;
+  const reqTabs = {
+    Header: kvTable(f.reqHeaders || {}),
+    Body: el('pre', { class: 'code-block', text: f.reqBody ? prettyBody(f.reqBody) : '(ไม่มี body)' }),
+    Raw: el('pre', { class: 'code-block', text: reqRawText }),
+  };
+  const reqHeadline = el('span', { class: 'detail-url', text: `${f.method} ${f.url}`, title: f.url });
+  const reqPane = buildDetailPane('Request', reqHeadline, reqTabs, reqTab, (name) => { reqTab = name; renderFlowDetail(f); });
 
-  if (f.error) {
-    flowDetailEl.appendChild(el('div', { class: 'section-title', text: 'Error' }));
-    flowDetailEl.appendChild(el('pre', { class: 'code-block', text: f.error }));
-  }
+  // ----- Response pane -----
+  const resRawText = f.error
+    ? f.error
+    : `HTTP/1.1 ${f.status || ''} ${f.statusText || ''}\n${headersToRaw(f.resHeaders)}${f.resBody ? '\n\n' + prettyBody(f.resBody) : ''}`;
+  const resTabs = {
+    Header: kvTable(f.resHeaders || {}),
+    Body: el('pre', { class: 'code-block', text: f.error ? `ERROR: ${f.error}` : (f.resBody ? prettyBody(f.resBody) : '(ไม่มี body)') }),
+    Raw: el('pre', { class: 'code-block', text: resRawText }),
+  };
+  const resHeadline = f.error
+    ? el('span', { class: 'status-badge status-err', text: 'ERROR' })
+    : el('span', {}, [
+      el('span', { class: `status-badge ${statusClass(f.status)}`, text: `${f.status || ''} ${f.statusText || ''}` }),
+      el('span', { class: 'detail-meta', text: `  ${f.durationMs != null ? f.durationMs + ' ms · ' : ''}${fmtSize(f.resSize)}` }),
+    ]);
+  const resPane = buildDetailPane('Response', resHeadline, resTabs, resTab, (name) => { resTab = name; renderFlowDetail(f); });
 
-  flowDetailEl.appendChild(el('div', { class: 'section-title', text: 'Request Headers' }));
-  flowDetailEl.appendChild(kvTable(f.reqHeaders || {}));
-  if (f.reqBody) {
-    flowDetailEl.appendChild(el('div', { class: 'section-title', text: 'Request Body' }));
-    flowDetailEl.appendChild(el('pre', { class: 'code-block', text: prettyBody(f.reqBody) }));
-  }
-
-  if (f.resHeaders) {
-    flowDetailEl.appendChild(el('div', { class: 'section-title', text: 'Response Headers' }));
-    flowDetailEl.appendChild(kvTable(f.resHeaders));
-  }
-  if (f.resBody) {
-    flowDetailEl.appendChild(el('div', { class: 'section-title', text: 'Response Body' }));
-    flowDetailEl.appendChild(el('pre', { class: 'code-block', text: prettyBody(f.resBody) }));
-  }
+  const split = el('div', { class: 'detail-split' }, [reqPane, resPane]);
+  flowDetailEl.appendChild(split);
 }
 
 // ================= Image Metadata =================

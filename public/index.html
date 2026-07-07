@@ -133,10 +133,18 @@
       <button id="proxy-help-btn">❓ วิธีติดตั้ง</button>
       <button id="clear-flows" class="danger">🗑️ ล้างทั้งหมด</button>
     </div>
-    <div class="hook-info">
-      <input type="text" id="flow-filter" placeholder="🔍 กรอง URL / host / path (เช่น api, .json, example.com)" style="flex:1" />
-      <select id="flow-device"><option value="">ทุก device</option></select>
-      <label class="hint"><input type="checkbox" id="flow-group" checked /> จัดกลุ่มตาม device / host</label>
+    <div class="proxy-filterbar">
+      <select id="flow-field">
+        <option value="url">URL</option>
+        <option value="host">Host</option>
+        <option value="path">Path</option>
+      </select>
+      <select id="flow-match">
+        <option value="contains">Contains</option>
+        <option value="equals">Equals</option>
+      </select>
+      <input type="text" id="flow-filter" placeholder="กรอง..." />
+      <span class="flow-count-label" id="flow-count-label"></span>
     </div>
     <div id="proxy-help" class="proxy-help" style="display:none">
       <strong>วิธีทำให้เห็นเนื้อใน HTTPS:</strong>
@@ -149,13 +157,33 @@
       </ol>
       <p class="hint">⚠️ CA cert นี้ให้เครื่องเชื่อ proxy ของเราถอดรหัส HTTPS ได้ ใช้เฉพาะบนอุปกรณ์ทดสอบของคุณเอง และถอนการติดตั้งเมื่อเลิกใช้</p>
     </div>
-    <div class="inspector-layout">
-      <aside id="flow-list">
-        <p class="empty-msg">ยังไม่มีทราฟฟิกผ่าน proxy<br/>ตั้ง proxy บนอุปกรณ์แล้วเปิดแอป/เว็บ</p>
+    <div class="proxy-workspace">
+      <aside id="device-tree">
+        <div class="tree-title">Devices</div>
+        <div id="device-tree-body"></div>
       </aside>
-      <section id="flow-detail">
-        <p class="empty-msg">เลือก flow จากรายการด้านซ้ายเพื่อดู request/response</p>
-      </section>
+      <div class="proxy-main">
+        <div class="flow-table-wrap">
+          <table class="flow-table">
+            <thead>
+              <tr>
+                <th class="col-url">URL</th>
+                <th class="col-client">Client</th>
+                <th class="col-method">Method</th>
+                <th class="col-status">Status</th>
+                <th class="col-time">Time</th>
+                <th class="col-dur">Duration</th>
+                <th class="col-size">Size</th>
+              </tr>
+            </thead>
+            <tbody id="flow-tbody"></tbody>
+          </table>
+          <p id="flow-empty" class="empty-msg">ยังไม่มีทราฟฟิกผ่าน proxy<br/>ตั้ง proxy บนอุปกรณ์แล้วเปิดแอป/เว็บ</p>
+        </div>
+        <div id="flow-detail" class="flow-detail">
+          <p class="empty-msg">เลือกแถวด้านบนเพื่อดู Request / Response</p>
+        </div>
+      </div>
     </div>
   </main>
 

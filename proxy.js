@@ -84,11 +84,13 @@ function startProxy({ port, caDir, store, onFlow }) {
       url: `${scheme}://${host}${req.url}`,
       reqHeaders: req.headers,
       reqBody: null,
+      reqSize: 0,
       status: null,
       statusText: null,
       resHeaders: null,
       resBody: null,
       resContentType: null,
+      resSize: 0,
       durationMs: null,
       error: null,
       _startedAt: Date.now(),
@@ -99,6 +101,7 @@ function startProxy({ port, caDir, store, onFlow }) {
 
     ctx.onRequestData((ctx, chunk, cb) => {
       flow._reqChunks.push(chunk);
+      flow.reqSize += chunk.length;
       return cb(null, chunk);
     });
     ctx.onRequestEnd((ctx, cb) => {
@@ -114,6 +117,7 @@ function startProxy({ port, caDir, store, onFlow }) {
       flow.resContentType = resp.headers['content-type'] || null;
       ctx.onResponseData((ctx, chunk, cb2) => {
         flow._resChunks.push(chunk);
+        flow.resSize += chunk.length;
         return cb2(null, chunk);
       });
       ctx.onResponseEnd((ctx, cb2) => {
