@@ -124,7 +124,8 @@ function startProxy({ port, caDir, store, onFlow }) {
   });
 
   return new Promise((resolve, reject) => {
-    proxy.listen({ port, sslCaDir: caDir }, (err) => {
+    // host: '0.0.0.0' = เปิดรับจากทุก interface เพื่อให้อุปกรณ์ในวง LAN (มือถือ) ต่อ proxy ได้
+    proxy.listen({ port, host: '0.0.0.0', sslCaDir: caDir }, (err) => {
       if (err) return reject(err);
       resolve({ proxy, caPath: path.join(caDir, 'certs', 'ca.pem') });
     });
