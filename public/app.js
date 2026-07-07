@@ -377,7 +377,7 @@ document.getElementById('url-read-btn').addEventListener('click', readUrlMetadat
 urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') readUrlMetadata(); });
 
 // ================= Proxy (MITM) — Proxyman-style =================
-const flowTbody = document.getElementById('flow-tbody');
+const flowListBody = document.getElementById('flow-list-body');
 const flowEmptyEl = document.getElementById('flow-empty');
 const flowDetailEl = document.getElementById('flow-detail');
 const deviceTreeBody = document.getElementById('device-tree-body');
@@ -492,12 +492,12 @@ function renderDeviceTree() {
   }
 }
 
-// ---- ตาราง flow (บน) ----
+// ---- รายการ URL (ซ้ายบน) ----
 function renderFlowTable() {
   const flows = filteredFlows();
   document.getElementById('flow-count-label').textContent =
-    `${flows.length} / ${allFlows.length} รายการ`;
-  flowTbody.innerHTML = '';
+    `${flows.length} / ${allFlows.length}`;
+  flowListBody.innerHTML = '';
   flowEmptyEl.style.display = flows.length ? 'none' : 'block';
   if (!flows.length) {
     flowEmptyEl.innerHTML = allFlows.length
@@ -507,24 +507,23 @@ function renderFlowTable() {
   }
   for (const f of flows) {
     const statusText = f.error ? 'ERR' : (f.status || '...');
-    const tr = el('tr', { class: 'flow-row' + (f.id === selectedFlowId ? ' selected' : '') }, [
-      el('td', { class: 'col-url', title: f.url }, [
-        el('span', { class: 'scheme-dot ' + (f.scheme === 'https' ? 'https' : 'http'), text: f.scheme === 'https' ? '🔒' : '🌐' }),
-        el('span', { text: ' ' + f.url }),
+    const item = el('div', { class: 'flow-item' + (f.id === selectedFlowId ? ' selected' : '') }, [
+      el('div', { class: 'flow-item-top' }, [
+        methodBadge(f.method),
+        el('span', { class: `status-badge ${statusClass(f.status)}`, text: String(statusText) }),
+        el('span', { class: 'flow-item-meta', text: `${fmtTime(f.time)} · ${f.durationMs != null ? f.durationMs + 'ms' : '–'} · ${fmtSize(f.resSize)}` }),
       ]),
-      el('td', { class: 'col-client', text: f.device }),
-      el('td', { class: 'col-method' }, [methodBadge(f.method)]),
-      el('td', { class: 'col-status' }, [el('span', { class: `status-badge ${statusClass(f.status)}`, text: String(statusText) })]),
-      el('td', { class: 'col-time', text: fmtTime(f.time) }),
-      el('td', { class: 'col-dur', text: f.durationMs != null ? f.durationMs + ' ms' : '–' }),
-      el('td', { class: 'col-size', text: fmtSize(f.resSize) }),
+      el('div', { class: 'flow-item-url', title: f.url }, [
+        el('span', { class: 'scheme-dot', text: f.scheme === 'https' ? '🔒 ' : '🌐 ' }),
+        el('span', { text: f.host + f.path }),
+      ]),
     ]);
-    tr.addEventListener('click', () => {
+    item.addEventListener('click', () => {
       selectedFlowId = f.id;
       renderFlowTable();
       renderFlowDetail(f);
     });
-    flowTbody.appendChild(tr);
+    flowListBody.appendChild(item);
   }
 }
 

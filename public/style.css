@@ -358,15 +358,56 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .proxy-filterbar input { flex: 1; }
 .flow-count-label { color: var(--muted); font-size: 0.82rem; white-space: nowrap; }
 
-/* workspace 3-pane */
+/* workspace: ซ้าย (URL บน + Device ล่าง) | กลาง (detail) */
 .proxy-workspace {
   display: grid;
-  grid-template-columns: 240px 1fr;
+  grid-template-columns: 360px 1fr;
   gap: 10px;
   height: calc(100vh - 190px);
 }
+.proxy-left {
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  gap: 10px;
+  min-height: 0;
+}
+.proxy-left > * { min-height: 0; }
 
-/* device tree */
+/* รายการ URL (ซ้ายบน) */
+.flow-list-wrap {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow-y: auto;
+  position: relative;
+}
+.pane-title {
+  position: sticky;
+  top: 0;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  z-index: 1;
+}
+.pane-title .flow-count-label { text-transform: none; letter-spacing: 0; margin-left: 6px; }
+.flow-item {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.flow-item:hover { background: var(--panel-2); }
+.flow-item.selected { background: #1e3a5f; }
+.flow-item-top { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.flow-item-top .status-badge { font-size: 0.7rem; padding: 1px 6px; }
+.flow-item-meta { color: var(--muted); font-size: 0.74rem; margin-left: auto; white-space: nowrap; }
+.flow-item-url { font-size: 0.84rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scheme-dot { font-size: 0.75rem; }
+
+/* device tree (ซ้ายล่าง) */
 #device-tree {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -396,40 +437,7 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .tree-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tree-count { background: var(--bg); color: var(--muted); border-radius: 10px; padding: 0 8px; font-size: 0.72rem; }
 
-/* main = table (top) + detail (bottom) */
-.proxy-main { display: grid; grid-template-rows: 1fr 1fr; gap: 10px; min-width: 0; }
-.flow-table-wrap {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  overflow: auto;
-  position: relative;
-}
-.flow-table { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
-.flow-table thead th {
-  position: sticky;
-  top: 0;
-  background: var(--panel-2);
-  color: var(--muted);
-  text-align: left;
-  font-weight: 600;
-  padding: 7px 10px;
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap;
-  z-index: 1;
-}
-.flow-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
-.flow-row { cursor: pointer; }
-.flow-row:hover { background: var(--panel-2); }
-.flow-row.selected { background: #1e3a5f; }
-.col-url { max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
-.col-url span { vertical-align: middle; }
-.scheme-dot { font-size: 0.75rem; }
-.col-client { color: var(--muted); }
-.col-status .status-badge { font-size: 0.72rem; padding: 1px 7px; }
-.col-time, .col-dur, .col-size { color: var(--muted); font-variant-numeric: tabular-nums; }
-
-/* detail split */
+/* detail split (กลาง) */
 .flow-detail {
   background: var(--panel);
   border: 1px solid var(--border);
