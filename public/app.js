@@ -915,3 +915,130 @@ document.getElementById('mobile-upload-btn').addEventListener('click', async () 
     mobileStatusEl.textContent = `❌ ส่งไม่สำเร็จ: ${err.message}`;
   }
 });
+
+// ================= Map Local =================
+const mapListEl = document.getElementById('maplocal-list');
+const mapEditorEl = document.getElementById('maplocal-editor');
+let mapRulesData = [];
+let selectedRuleId = null;
+
+async function loadMapRules() {
+  mapRulesData = await (await fetch('/api/maplocal')).json();
+  renderMapList();
+}
+
+function renderMapList() {
+  mapListEl.innerHTML = '';
+  if (!mapRulesData.length) {
+    mapListEl.appendChild(el('p', { class: 'empty-msg', html: 'ยังไม่มีกฎ<br/>กด "เพิ่มกฎ" เพื่อสร้าง' }));
+    return;
+  }
+  for (const r of mapRulesData) {
+    const item = el('div', { class: 'map-item' + (r.id === selectedRuleId ? ' selected' : '') }, [
+      el('span', { class: 'map-dot ' + (r.enabled !== false ? 'on' : 'off'), text: r.enabled !== false ? '●' : '○' }),
+      el('div', { class: 'map-item-body' }, [
+        el('div', { class: 'map-item-name', text: r.name || r.urlPattern || '(ยังไม่ตั้งชื่อ)' }),
+        el('div', { class: 'map-item-sub', text: `${r.method || 'ANY'} · ${r.urlPattern || '—'} · ${r.status || 200}` }),
+      ]),
+    ]);
+    item.addEventListener('click', () => { selectedRuleId = r.id; renderMapList(); renderMapEditor(r); });
+    mapListEl.appendChild(item);
+  }
+}
+
+function renderMapEditor(rule) {
+  mapEditorEl.innerHTML = '';
+  const isNew = !rule.id;
+  const field = (label, node) => {
+    mapEditorEl.appendChild(el('label', { class: 'map-label', text: label }));
+    mapEditorEl.appendChild(node);
+    return node;
+  };
+
+  const enabled = el('input', { type: 'checkbox' });
+  enabled.checked = rule.enabled !== false;
+  const enableRow = el('label', { class: 'map-enable' }, [enabled, el('span', { text: ' เปิดใช้งานกฎนี้' })]);
+  mapEditorEl.appendChild(enableRow);
+
+  const name = field('ชื่อกฎ (ไว้จำ)', el('input', { type: 'text', value: rule.name || '', placeholder: 'เช่น mock license-types' }));
+
+  const method = el('select');
+  for (const m of ['ANY', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE']) {
+    const opt = el('option', { value: m, text: m });
+    if ((rule.method || 'ANY') === m) opt.selected = true;
+    method.appendChild(opt);
+  }
+  field('Method', method);
+
+  const pattern = field('URL pattern (มี * = wildcard, ไม่มี * = ตรวจแบบ "มีคำนี้")',
+    el('input', { type: 'text', value: rule.urlPattern || '', placeholder: 'เช่น /api/master-data/license-types หรือ /user/*' }));
+
+  const status = field('HTTP status', el('input', { type: 'text', value: String(rule.status || 200) }));
+  const contentType = field('Content-Type', el('input', { type: 'text', value: rule.contentType || 'application/json' }));
+  const body = field('Response body', el('textarea', { rows: '12', placeholder: '{"key": "value"}' }));
+  body.value = rule.body || '';
+
+  const jsonHint = el('span', { class: 'hint', text: '' });
+  const validateJson = () => {
+    if ((contentType.value || '').includes('json') && body.value.trim()) {
+      try { JSON.parse(body.value); jsonHint.textContent = '✅ JSON ถูกต้อง'; jsonHint.style.color = 'var(--green)'; }
+      catch (e) { jsonHint.textContent = '⚠️ JSON ไม่ถูกต้อง: ' + e.message; jsonHint.style.color = 'var(--yellow)'; }
+    } else jsonHint.textContent = '';
+  };
+  body.addEventListener('input', validateJson);
+  contentType.addEventListener('input', validateJson);
+  validateJson();
+  mapEditorEl.appendChild(jsonHint);
+
+  const collect = () => ({
+    enabled: enabled.checked,
+    name: name.value.trim(),
+    method: method.value,
+    urlPattern: pattern.value.trim(),
+    status: status.value.trim(),
+    contentType: contentType.value.trim(),
+    body: body.value,
+  });
+
+  const status2 = el('span', { class: 'hint' });
+  const saveBtn = el('button', { class: 'primary', text: isNew ? 'สร้างกฎ' : 'บันทึก' });
+  saveBtn.addEventListener('click', async () => {
+    const data = collect();
+    if (!data.urlPattern) { status2.textContent = '⚠️ กรุณาใส่ URL pattern'; return; }
+    const url = isNew ? '/api/maplocal' : `/api/maplocal/${rule.id}`;
+    const resp = await (await fetch(url, {
+      method: isNew ? 'POST' : 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })).json();
+    if (resp.ok) {
+      status2.textContent = '✅ บันทึกแล้ว';
+      selectedRuleId = resp.rule.id;
+      await loadMapRules();
+      renderMapEditor(resp.rule);
+    } else {
+      status2.textContent = '❌ ' + (resp.error || 'บันทึกไม่สำเร็จ');
+    }
+  });
+
+  const btnRow = el('div', { class: 'map-btn-row' }, [saveBtn, status2]);
+  if (!isNew) {
+    const delBtn = el('button', { class: 'danger', text: '🗑️ ลบกฎ' });
+    delBtn.addEventListener('click', async () => {
+      await fetch(`/api/maplocal/${rule.id}`, { method: 'DELETE' });
+      selectedRuleId = null;
+      await loadMapRules();
+      mapEditorEl.innerHTML = '<p class="empty-msg">เลือกกฎจากด้านซ้าย หรือกด "เพิ่มกฎ" เพื่อสร้างใหม่</p>';
+    });
+    btnRow.appendChild(delBtn);
+  }
+  mapEditorEl.appendChild(btnRow);
+}
+
+document.getElementById('maplocal-add').addEventListener('click', () => {
+  selectedRuleId = null;
+  renderMapList();
+  renderMapEditor({ enabled: true, method: 'ANY', status: 200, contentType: 'application/json', body: '' });
+});
+
+loadMapRules();

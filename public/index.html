@@ -16,6 +16,7 @@
       <button class="tab-btn" data-tab="url">🔗 URL Metadata</button>
       <button class="tab-btn" data-tab="mobile">📱 Mobile Files</button>
       <button class="tab-btn" data-tab="proxy">🌐 Proxy</button>
+      <button class="tab-btn" data-tab="maplocal">🎯 Map Local</button>
     </nav>
   </header>
 
@@ -171,6 +172,22 @@
       <div id="flow-detail" class="flow-detail">
         <p class="empty-msg">เลือก URL จากด้านซ้ายเพื่อดู Request / Response</p>
       </div>
+    </div>
+  </main>
+
+  <!-- ============ Map Local ============ -->
+  <main id="tab-maplocal" class="tab">
+    <div class="hook-info">
+      <span>🎯 กำหนดให้ request ที่ผ่าน proxy ตรงกับ pattern ตอบ response ปลอมที่ตั้งไว้ (mock โดยไม่แตะเซิร์ฟเวอร์จริง)</span>
+      <button id="maplocal-add" class="primary">+ เพิ่มกฎ</button>
+    </div>
+    <div class="maplocal-layout">
+      <aside id="maplocal-list">
+        <p class="empty-msg">ยังไม่มีกฎ<br/>กด "เพิ่มกฎ" เพื่อสร้าง</p>
+      </aside>
+      <section id="maplocal-editor">
+        <p class="empty-msg">เลือกกฎจากด้านซ้าย หรือกด "เพิ่มกฎ" เพื่อสร้างใหม่</p>
+      </section>
     </div>
   </main>
 

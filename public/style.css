@@ -488,6 +488,51 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .detail-pane-body .code-block { margin: 0; border: none; background: transparent; padding: 0; }
 .detail-pane-body table.kv td:first-child { width: 160px; }
 
+/* ---------- Map Local ---------- */
+.maplocal-layout {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 14px;
+  height: calc(100vh - 160px);
+}
+#maplocal-list {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow-y: auto;
+}
+.map-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.map-item:hover { background: var(--panel-2); }
+.map-item.selected { background: #1e3a5f; }
+.map-dot { font-size: 0.7rem; margin-top: 3px; }
+.map-dot.on { color: var(--green); }
+.map-dot.off { color: var(--muted); }
+.map-item-body { flex: 1; overflow: hidden; }
+.map-item-name { font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-item-sub { color: var(--muted); font-size: 0.76rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+#maplocal-editor {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow-y: auto;
+  padding: 16px;
+}
+.map-label { display: block; color: var(--muted); font-size: 0.82rem; margin: 12px 0 4px; }
+#maplocal-editor input[type="text"],
+#maplocal-editor select,
+#maplocal-editor textarea { width: 100%; }
+#maplocal-editor textarea { font-family: ui-monospace, Menlo, monospace; }
+.map-enable { display: flex; align-items: center; gap: 8px; color: var(--text); }
+.map-btn-row { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+
 /* ---------- Mobile Files ---------- */
 .mobile-send-box {
   display: flex;

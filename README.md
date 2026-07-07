@@ -40,6 +40,18 @@ curl -X POST http://localhost:3000/hook/test \
 
 พอร์ต proxy (`9099`) แยกจากหน้าเว็บ (`3000`) — CA เก็บใน `.proxy-ca/` (ถูก gitignore)
 
+## 🎯 Map Local (mock response ผ่าน proxy)
+
+แท็บ Map Local — กำหนดกฎว่าเมื่อ request ที่วิ่งผ่าน proxy ตรงกับ pattern ให้ **ตอบ response ปลอมที่เราตั้งไว้แทน** โดยไม่แตะเซิร์ฟเวอร์จริง (เหมือน "Map Local" ของ Proxyman) เหมาะกับทดสอบ mobile เพราะ app ชี้ proxy อยู่แล้ว ไม่ต้องแก้ base URL
+
+**การตั้งกฎ (ผ่านหน้าเว็บ):** method + URL pattern + status + content-type + response body
+- **URL pattern** — ถ้ามี `*` = wildcard (เช่น `/user/*` แมตช์ทุก id), ถ้าไม่มี `*` = ตรวจแบบ "มีคำนี้อยู่ใน URL" (เช่น `/license-types`)
+- กฎที่เจาะจงกว่า (ไม่มี `*` / pattern ยาวกว่า) ชนะกฎ wildcard
+- เปิด/ปิดแต่ละกฎได้ เก็บลง `map-local.json` (คงอยู่หลัง restart)
+- flow ที่ถูก mock จะมี response header `X-Api-Tester: map-local`
+
+REST API: `GET/POST /api/maplocal`, `PUT/DELETE /api/maplocal/:id`
+
 ## Upload API (สำหรับทดสอบอัปโหลดไฟล์)
 
 `POST /api/upload` — ส่งเป็น `multipart/form-data` แนบไฟล์กี่ไฟล์ก็ได้ (ตั้งชื่อ field อะไรก็ได้) พร้อม text field อื่นๆ เช่น `note`
