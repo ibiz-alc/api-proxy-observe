@@ -579,7 +579,8 @@ function headersToRaw(headers) {
 }
 
 // สร้างแผงครึ่งหนึ่ง (Request หรือ Response) พร้อม sub-tabs Header / Body / Raw
-function buildDetailPane(title, headline, tabs, activeTab, onTab) {
+// extra = element เสริมชิดขวาของแถบแท็บ (เช่น ปุ่ม Map Local)
+function buildDetailPane(title, headline, tabs, activeTab, onTab, extra) {
   const pane = el('div', { class: 'detail-pane' });
   const head = el('div', { class: 'detail-pane-head' }, [
     el('span', { class: 'detail-pane-title', text: title }),
@@ -592,11 +593,29 @@ function buildDetailPane(title, headline, tabs, activeTab, onTab) {
     btn.addEventListener('click', () => onTab(name));
     tabBar.appendChild(btn);
   }
+  if (extra) tabBar.appendChild(extra);
   pane.appendChild(tabBar);
   const body = el('div', { class: 'detail-pane-body' });
   body.appendChild(tabs[activeTab]);
   pane.appendChild(body);
   return pane;
+}
+
+// เปิดแท็บ Map Local แล้ว prefill ข้อมูลจาก flow ปัจจุบัน (ไว้ override response ตัวนี้)
+function mapLocalFromFlow(f) {
+  const rule = {
+    enabled: true,
+    name: `${f.method} ${f.host}${f.path.split('?')[0]}`.slice(0, 80),
+    method: f.method,
+    urlPattern: f.path.split('?')[0] || f.url,
+    status: f.status || 200,
+    contentType: f.resContentType || 'application/json',
+    body: f.error ? '' : (prettyBody(f.resBody) || ''),
+  };
+  document.querySelector('.tab-btn[data-tab="maplocal"]').click();
+  selectedRuleId = null;
+  renderMapList();
+  renderMapEditor(rule);
 }
 
 function renderFlowDetail(f) {
@@ -610,7 +629,9 @@ function renderFlowDetail(f) {
     Raw: el('pre', { class: 'code-block', text: reqRawText }),
   };
   const reqHeadline = el('span', { class: 'detail-url', text: `${f.method} ${f.url}`, title: f.url });
-  const reqPane = buildDetailPane('Request', reqHeadline, reqTabs, reqTab, (name) => { reqTab = name; renderFlowDetail(f); });
+  const mapBtn = el('button', { class: 'maplocal-icon-btn', type: 'button', title: 'สร้าง Map Local จาก flow นี้ (prefill response)', text: '🎯 Map Local' });
+  mapBtn.addEventListener('click', () => mapLocalFromFlow(f));
+  const reqPane = buildDetailPane('Request', reqHeadline, reqTabs, reqTab, (name) => { reqTab = name; renderFlowDetail(f); }, mapBtn);
 
   // ----- Response pane -----
   const resRawText = f.error
@@ -1037,6 +1058,23 @@ function renderMapEditor(rule) {
 
   const btnRow = el('div', { class: 'map-btn-row' }, [saveBtn, status2]);
   if (!isNew) {
+    const dupBtn = el('button', { class: 'map-dup-btn', text: '⧉ Duplicate' });
+    dupBtn.addEventListener('click', async () => {
+      const data = collect();
+      data.name = (data.name || data.urlPattern) + ' (copy)';
+      const resp = await (await fetch('/api/maplocal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      })).json();
+      if (resp.ok) {
+        selectedRuleId = resp.rule.id;
+        await loadMapRules();
+        renderMapEditor(resp.rule);
+      }
+    });
+    btnRow.appendChild(dupBtn);
+
     const delBtn = el('button', { class: 'danger', text: '🗑️ ลบกฎ' });
     delBtn.addEventListener('click', async () => {
       await fetch(`/api/maplocal/${rule.id}`, { method: 'DELETE' });
