@@ -394,6 +394,26 @@ app.post('/api/upload', upload.any(), async (req, res) => {
 });
 
 // ================= Sender (ยิง request ไปทดสอบ API อื่น) =================
+// บันทึก request ที่ยิงจาก Sender เข้า hook store เพื่อให้เห็นใน Inspector ด้วย
+function logSenderRequest({ method, url, headers = {}, body = null, files = [], resultStatus, error }) {
+  const id = crypto.randomUUID();
+  const ctKey = Object.keys(headers).find((k) => k.toLowerCase() === 'content-type');
+  const entry = {
+    id,
+    time: new Date().toISOString(),
+    method,
+    path: url,
+    ip: 'sender (ยิงจากในเครื่อง)',
+    source: 'sender',
+    contentType: ctKey ? headers[ctKey] : null,
+    headers: { ...headers, 'x-sender-result': error ? `ERROR: ${error}` : `HTTP ${resultStatus}` },
+    query: {},
+    body,
+    files: files.map((f, i) => ({ index: i, field: f.field, name: f.name, mimetype: f.mimetype, size: f.size })),
+  };
+  addEntry(entry, files.map((f) => ({ buffer: f.buffer, mimetype: f.mimetype, originalname: f.name })));
+}
+
 function collectResponse(resp, bodyText, startedAt) {
   const headers = {};
   resp.headers.forEach((v, k) => { headers[k] = v; });
@@ -421,9 +441,12 @@ app.post('/api/send', express.json({ limit: '10mb' }), async (req, res) => {
     }
     const resp = await fetch(url, options);
     const text = await resp.text();
+    logSenderRequest({ method, url, headers: options.headers, body: body ?? null, resultStatus: resp.status });
     res.json(collectResponse(resp, text, startedAt));
   } catch (err) {
-    res.json({ ok: false, durationMs: Date.now() - startedAt, error: err.cause ? `${err.message}: ${err.cause.message || err.cause.code}` : err.message });
+    const msg = err.cause ? `${err.message}: ${err.cause.message || err.cause.code}` : err.message;
+    logSenderRequest({ method, url, headers: { ...headers }, body: body ?? null, error: msg });
+    res.json({ ok: false, durationMs: Date.now() - startedAt, error: msg });
   }
 });
 
@@ -439,19 +462,27 @@ app.post('/api/send-form', upload.any(), async (req, res) => {
     return res.status(400).json({ ok: false, error: 'headers ไม่ใช่ JSON ที่ถูกต้อง' });
   }
   const startedAt = Date.now();
+  const fields = {};
+  for (const [k, v] of Object.entries(req.body)) {
+    if (!k.startsWith('_')) fields[k] = v;
+  }
+  const senderFiles = (req.files || []).map((f) => ({
+    field: f.fieldname, name: f.originalname, mimetype: f.mimetype, size: f.size, buffer: f.buffer,
+  }));
   try {
     const fd = new FormData();
-    for (const [k, v] of Object.entries(req.body)) {
-      if (!k.startsWith('_')) fd.append(k, v);
-    }
+    for (const [k, v] of Object.entries(fields)) fd.append(k, v);
     for (const f of req.files || []) {
       fd.append(f.fieldname, new Blob([f.buffer], { type: f.mimetype }), f.originalname);
     }
     const resp = await fetch(targetUrl, { method, headers: extraHeaders, body: fd });
     const text = await resp.text();
+    logSenderRequest({ method, url: targetUrl, headers: extraHeaders, body: Object.keys(fields).length ? fields : null, files: senderFiles, resultStatus: resp.status });
     res.json(collectResponse(resp, text, startedAt));
   } catch (err) {
-    res.json({ ok: false, durationMs: Date.now() - startedAt, error: err.cause ? `${err.message}: ${err.cause.message || err.cause.code}` : err.message });
+    const msg = err.cause ? `${err.message}: ${err.cause.message || err.cause.code}` : err.message;
+    logSenderRequest({ method, url: targetUrl, headers: extraHeaders, body: Object.keys(fields).length ? fields : null, files: senderFiles, error: msg });
+    res.json({ ok: false, durationMs: Date.now() - startedAt, error: msg });
   }
 });
 

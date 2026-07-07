@@ -121,11 +121,11 @@ function renderList() {
     return;
   }
   for (const r of allRequests) {
-    const item = el('div', { class: 'req-item' + (r.id === selectedId ? ' selected' : '') }, [
-      methodBadge(r.method),
-      el('span', { class: 'req-path', text: r.path }),
-      el('span', { class: 'req-time', text: fmtTime(r.time) }),
-    ]);
+    const parts = [methodBadge(r.method)];
+    if (r.source === 'sender') parts.push(el('span', { class: 'sent-badge', title: 'ยิงจากแท็บ Sender', text: '↗ SENT' }));
+    parts.push(el('span', { class: 'req-path', text: r.path }));
+    parts.push(el('span', { class: 'req-time', text: fmtTime(r.time) }));
+    const item = el('div', { class: 'req-item' + (r.id === selectedId ? ' selected' : '') }, parts);
     item.addEventListener('click', () => {
       selectedId = r.id;
       renderList();

@@ -153,6 +153,16 @@ button.danger {
 .method-DELETE { background: #5f1e1e; color: var(--red); }
 .method-OTHER { background: var(--panel-2); color: var(--muted); }
 
+.sent-badge {
+  background: rgba(56, 189, 248, 0.15);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  font-size: 0.64rem;
+  font-weight: 700;
+  padding: 1px 5px;
+}
+
 .req-item .req-path {
   flex: 1;
   overflow: hidden;
