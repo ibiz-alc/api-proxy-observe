@@ -1149,4 +1149,4 @@ setInterval(async () => {
       renderMobileGallery();
     }
   } catch { /* ignore */ }
-}, 4000);
+}, 10000);

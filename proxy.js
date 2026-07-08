@@ -1,4 +1,5 @@
 const path = require('path');
+const fs = require('fs');
 const crypto = require('crypto');
 const { Proxy } = require('http-mitm-proxy');
 
@@ -144,6 +145,27 @@ function startProxy({ port, caDir, store, onFlow, matchMapLocal }) {
       _resChunks: [],
     };
     ctx.__flow = flow;
+
+    // ---- เสิร์ฟ CA cert ให้ client ที่ต่อ proxy โหลดง่ายๆ (เปิด http://apitester.ca/ ) ----
+    if (!ctx.isSSL && (host === 'apitester.ca' || /\/apitester-ca\.(pem|crt)$/.test(flow.path))) {
+      let pem = '';
+      try { pem = fs.readFileSync(path.join(caDir, 'certs', 'ca.pem')); } catch { /* ยังไม่มี */ }
+      flow.mapped = true;
+      flow.status = 200;
+      flow.statusText = 'CA cert';
+      flow.resContentType = 'application/x-x509-ca-cert';
+      flow.resBody = '(CA certificate)';
+      flow.resSize = pem.length;
+      flow.durationMs = 0;
+      finalize(flow);
+      ctx.proxyToClientResponse.writeHead(200, {
+        'Content-Type': 'application/x-x509-ca-cert',
+        'Content-Disposition': 'attachment; filename="apitester-ca.pem"',
+        'Content-Length': pem.length,
+      });
+      ctx.proxyToClientResponse.end(pem);
+      return;
+    }
 
     // ---- Map Local: ถ้าตรงกฎ ตอบ response ปลอมทันที ไม่ยิงไปเซิร์ฟเวอร์จริง ----
     const rule = matchMapLocal ? matchMapLocal(flow.method, flow.url) : null;
