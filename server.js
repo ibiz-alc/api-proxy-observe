@@ -305,6 +305,38 @@ app.get('/api/proxy/flows', (req, res) => {
   res.json(proxyStore.flows);
 });
 
+// รับ flow ที่ถอดรหัสจาก mitmproxy (ผ่าน addon) มาแสดงในแท็บ Proxy — รองรับ HTTPS/h2 เต็มรูปแบบ
+app.post('/api/proxy/ingest', express.json({ limit: '15mb' }), (req, res) => {
+  const b = req.body || {};
+  const flow = {
+    id: b.id || crypto.randomUUID(),
+    time: b.time || new Date().toISOString(),
+    scheme: b.scheme || 'https',
+    device: b.device || 'mitmproxy',
+    userAgent: b.userAgent || null,
+    method: b.method || 'GET',
+    host: b.host || '',
+    path: b.path || '',
+    url: b.url || '',
+    reqHeaders: b.reqHeaders || {},
+    reqBody: b.reqBody ?? null,
+    reqSize: b.reqSize || 0,
+    status: b.status ?? null,
+    statusText: b.statusText || '',
+    resHeaders: b.resHeaders || null,
+    resBody: b.resBody ?? null,
+    resContentType: b.resContentType || null,
+    resSize: b.resSize || 0,
+    durationMs: b.durationMs ?? null,
+    mapped: false,
+    blocked: false,
+  };
+  proxyStore.flows.unshift(flow);
+  while (proxyStore.flows.length > 300) proxyStore.flows.pop();
+  broadcast('proxy', flow);
+  res.json({ ok: true, id: flow.id });
+});
+
 app.delete('/api/proxy/flows', (req, res) => {
   proxyStore.flows.length = 0;
   broadcast('proxy-clear', {});
