@@ -4,7 +4,14 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const exifr = require('exifr');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
 const { startProxy } = require('./proxy');
+
+const execFileP = promisify(execFile);
+const ADB = process.env.ADB || 'adb';
+const MITM_PORT = 8888;
+const POSTERN_PKG = 'com.thaivivat.proxy.postern';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -341,6 +348,79 @@ app.delete('/api/proxy/flows', (req, res) => {
   proxyStore.flows.length = 0;
   broadcast('proxy-clear', {});
   res.json({ ok: true });
+});
+
+// ================= ควบคุมมือถือผ่าน adb (เชื่อม Proxy Postern จากเว็บ) =================
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function adb(args, timeout = 15000) {
+  const { stdout } = await execFileP(ADB, args, { timeout, maxBuffer: 8 * 1024 * 1024 });
+  return stdout;
+}
+
+// อ่านรายการ device ที่ต่ออยู่ + สถานะ VPN ของแต่ละเครื่อง
+async function listDevices() {
+  let out = '';
+  try { out = await adb(['devices', '-l']); } catch { return []; }
+  const devices = [];
+  for (const line of out.split('\n').slice(1)) {
+    const m = line.match(/^(\S+)\s+device\b(.*)$/);
+    if (!m) continue;
+    const serial = m[1];
+    const model = (m[2].match(/model:(\S+)/) || [])[1] || serial;
+    let connected = false;
+    try {
+      const ip = await adb(['-s', serial, 'shell', 'ip', '-br', 'addr']);
+      connected = /tun0/.test(ip);
+    } catch { /* ignore */ }
+    devices.push({ serial, model: model.replace(/_/g, ' '), connected });
+  }
+  return devices;
+}
+
+app.get('/api/devices', async (req, res) => {
+  try { res.json({ ok: true, devices: await listDevices() }); }
+  catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// เชื่อม Proxy Postern บน device ที่เลือก: reverse → เปิดแอป → กดปุ่มเชื่อมต่อ → เช็ค tun0
+app.post('/api/devices/connect', express.json(), async (req, res) => {
+  const serial = (req.body || {}).serial;
+  if (!serial) return res.status(400).json({ ok: false, error: 'ต้องระบุ serial' });
+  const S = ['-s', serial];
+  try {
+    await adb([...S, 'reverse', `tcp:${MITM_PORT}`, `tcp:${MITM_PORT}`]);
+    await adb([...S, 'shell', 'monkey', '-p', POSTERN_PKG, '-c', 'android.intent.category.LAUNCHER', '1']);
+    await sleep(2500);
+    // หาปุ่ม "เชื่อมต่อ" จาก UI
+    await adb([...S, 'shell', 'uiautomator', 'dump', '/sdcard/u.xml']);
+    const xml = await adb([...S, 'shell', 'cat', '/sdcard/u.xml']);
+    const re = /text="เชื่อมต่อ"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/;
+    const m = xml.match(re);
+    if (m) {
+      const cx = (Number(m[1]) + Number(m[3])) >> 1;
+      const cy = (Number(m[2]) + Number(m[4])) >> 1;
+      await adb([...S, 'shell', 'input', 'tap', String(cx), String(cy)]);
+      await sleep(4000);
+    }
+    const ip = await adb([...S, 'shell', 'ip', '-br', 'addr']);
+    const connected = /tun0/.test(ip);
+    res.json({ ok: true, connected, tapped: !!m });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ตัดการเชื่อมต่อ: force-stop แอป (ปิด VPN)
+app.post('/api/devices/disconnect', express.json(), async (req, res) => {
+  const serial = (req.body || {}).serial;
+  if (!serial) return res.status(400).json({ ok: false, error: 'ต้องระบุ serial' });
+  try {
+    await adb(['-s', serial, 'shell', 'am', 'force-stop', POSTERN_PKG]);
+    res.json({ ok: true, connected: false });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 app.get('/api/proxy/info', (req, res) => {

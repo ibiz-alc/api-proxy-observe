@@ -153,6 +153,13 @@
       </div>
       <div class="mode-common">ทั้ง 2 วิธี: ติดตั้ง CA ของ mitmproxy บนมือถือครั้งเดียว (ปุ่ม "ติดตั้ง CA" ในแอป) — ต้องต่อ Mac ให้ mitmproxy รันอยู่ (<code>./start.sh</code>)</div>
     </div>
+    <div class="postern-devices">
+      <div class="pd-head">
+        <span>📲 เชื่อม Proxy Postern จากเว็บ (USB)</span>
+        <button id="pd-refresh" title="รีเฟรชรายการ device">🔄 รีเฟรช</button>
+      </div>
+      <div id="pd-list"><span class="hint">กำลังโหลด device…</span></div>
+    </div>
     <div class="proxy-filterbar">
       <select id="flow-field">
         <option value="url">URL</option>

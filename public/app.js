@@ -475,6 +475,49 @@ let resTab = 'Body';
   renderProxy();
 })();
 
+// ---- ควบคุมมือถือผ่านเว็บ (เชื่อม Proxy Postern ด้วย adb) ----
+const pdListEl = document.getElementById('pd-list');
+async function renderDevices() {
+  pdListEl.innerHTML = '<span class="hint">กำลังโหลด device…</span>';
+  let data;
+  try { data = await (await fetch('/api/devices')).json(); }
+  catch { pdListEl.innerHTML = '<span class="hint">เรียก API ไม่ได้</span>'; return; }
+  const devices = (data && data.devices) || [];
+  if (!devices.length) {
+    pdListEl.innerHTML = '<span class="hint">ไม่พบ device (เสียบ USB + เปิด USB debugging) — หรือใช้ Wi-Fi เชื่อมจากแอปเอง</span>';
+    return;
+  }
+  pdListEl.innerHTML = '';
+  for (const d of devices) {
+    const row = el('div', { class: 'pd-row' }, [
+      el('span', { class: 'pd-dot ' + (d.connected ? 'on' : 'off'), text: d.connected ? '🟢' : '⚪' }),
+      el('span', { class: 'pd-name', text: `${d.model}` }),
+      el('span', { class: 'pd-serial', text: d.serial }),
+    ]);
+    const btn = el('button', {
+      class: d.connected ? 'pd-btn danger' : 'pd-btn primary',
+      text: d.connected ? 'ตัดการเชื่อมต่อ' : 'เชื่อมต่อ',
+    });
+    btn.addEventListener('click', async () => {
+      btn.disabled = true; btn.textContent = d.connected ? 'กำลังตัด…' : 'กำลังเชื่อม…';
+      const url = d.connected ? '/api/devices/disconnect' : '/api/devices/connect';
+      try {
+        const r = await (await fetch(url, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ serial: d.serial }),
+        })).json();
+        if (!r.ok) alert('ไม่สำเร็จ: ' + (r.error || ''));
+        else if (!d.connected && !r.connected) alert('กดเชื่อมแล้วแต่ VPN ยังไม่ขึ้น — ลองกดในแอป หรือดู VPN consent บนมือถือ');
+      } catch (e) { alert('error: ' + e.message); }
+      renderDevices();
+    });
+    row.appendChild(btn);
+    pdListEl.appendChild(row);
+  }
+}
+document.getElementById('pd-refresh').addEventListener('click', renderDevices);
+renderDevices();
+
 document.getElementById('proxy-cert-btn').addEventListener('click', () => {
   window.location.href = '/api/proxy/cert';
 });
