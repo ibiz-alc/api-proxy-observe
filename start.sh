@@ -25,8 +25,10 @@ if [ "$1" = "--ngrok" ]; then
   sleep 6
   curl -s http://localhost:4040/api/tunnels 2>/dev/null | node -e "try{const d=JSON.parse(require('fs').readFileSync(0));d.tunnels.forEach(t=>console.log('   '+t.name+': '+t.public_url))}catch(e){console.log('   (ngrok ยังไม่พร้อม ดู /tmp/ngrok.log)')}"
 else
-  echo "==> (ข้าม ngrok — โหมด USB) ตั้ง adb reverse:"
-  adb reverse tcp:8888 tcp:8888 2>/dev/null && echo "   adb reverse tcp:8888 -> Mac ✅" || echo "   (ไม่มี device USB — ถ้าใช้ LAN ให้มือถือชี้มาที่ <IP เครื่องนี้>:8888)"
+  echo "==> (โหมด USB + Wi-Fi — ไม่เปิด ngrok)"
+  adb reverse tcp:8888 tcp:8888 2>/dev/null && echo "   USB: adb reverse tcp:8888 -> Mac ✅ (มือถือใช้ Host 127.0.0.1)" || echo "   (ไม่มี device USB เสียบอยู่)"
+  LANIP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null)
+  [ -n "$LANIP" ] && echo "   Wi-Fi: มือถือ (วง LAN เดียวกัน) ใช้ Host $LANIP  Port 8888"
 fi
 
 echo ""
