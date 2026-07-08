@@ -519,9 +519,10 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 }
 .flow-item:hover { background: var(--panel-2); }
 .flow-item.selected { background: #1e3a5f; }
-.flow-item-top { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-.flow-item-top .status-badge { font-size: 0.7rem; padding: 1px 6px; }
-.flow-item-meta { color: var(--muted); font-size: 0.74rem; margin-left: auto; white-space: nowrap; }
+.flow-item-row { display: flex; align-items: center; gap: 8px; }
+.flow-item-row .status-badge { font-size: 0.7rem; padding: 1px 6px; }
+.flow-item-row > *:not(.flow-item-url) { flex: 0 0 auto; } /* มีแต่ URL ที่ยืด/ย่อ */
+.flow-item-meta { color: var(--muted); font-size: 0.74rem; white-space: nowrap; margin-left: auto; }
 .map-badge {
   background: rgba(74, 222, 128, 0.15);
   color: var(--green);
@@ -606,7 +607,7 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 }
 .blocked-count { color: var(--red); font-size: 0.72rem; font-weight: 600; }
 .flow-item.blocked { border-left: 3px solid var(--red); opacity: 0.85; }
-.flow-item-url { font-size: 0.84rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flow-item-url { flex: 1 1 auto; min-width: 0; font-size: 0.84rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scheme-dot { font-size: 0.75rem; }
 
 /* device tree (ซ้ายล่าง) */

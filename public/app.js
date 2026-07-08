@@ -704,24 +704,24 @@ function renderFlowTable() {
   }
   for (const f of flows) {
     const statusText = f.error ? 'ERR' : (f.status || '...');
-    const topRow = [methodBadge(f.method)];
+    const row = [methodBadge(f.method)];
     if (f.blocked) {
-      topRow.push(el('span', { class: 'blocked-badge', title: f.error || '', text: '🔒 BLOCKED' }));
-      if (f.blockedCount > 1) topRow.push(el('span', { class: 'blocked-count', text: `×${f.blockedCount}` }));
+      row.push(el('span', { class: 'blocked-badge', title: f.error || '', text: '🔒 BLOCKED' }));
+      if (f.blockedCount > 1) row.push(el('span', { class: 'blocked-count', text: `×${f.blockedCount}` }));
     } else {
-      topRow.push(el('span', { class: `status-badge ${statusClass(f.status)}`, text: String(statusText) }));
+      row.push(el('span', { class: `status-badge ${statusClass(f.status)}`, text: String(statusText) }));
     }
-    if (f.mapped) topRow.push(el('span', { class: 'map-badge', title: 'ถูก Map Local override', text: '🎯 MAP' }));
-    if (f.resIsImage || f.reqIsImage) topRow.push(el('span', { class: 'image-badge', title: 'response เป็นรูปภาพ', text: '🖼️ IMAGE' }));
-    if (f.resIsVideo || f.reqIsVideo) topRow.push(el('span', { class: 'video-badge', title: 'response เป็นวิดีโอ', text: '🎬 VIDEO' }));
-    if (f.resIsPdf || f.reqIsPdf) topRow.push(el('span', { class: 'pdf-badge', title: 'response เป็น PDF', text: '📄 PDF' }));
-    topRow.push(el('span', { class: 'flow-item-meta', text: f.blocked ? 'cert pinning' : `${fmtTime(f.time)} · ${f.durationMs != null ? f.durationMs + 'ms' : '–'} · ${fmtSize(f.resSize)}` }));
+    if (f.mapped) row.push(el('span', { class: 'map-badge', title: 'ถูก Map Local override', text: '🎯 MAP' }));
+    if (f.resIsImage || f.reqIsImage) row.push(el('span', { class: 'image-badge', title: 'response เป็นรูปภาพ', text: '🖼️' }));
+    if (f.resIsVideo || f.reqIsVideo) row.push(el('span', { class: 'video-badge', title: 'response เป็นวิดีโอ', text: '🎬' }));
+    if (f.resIsPdf || f.reqIsPdf) row.push(el('span', { class: 'pdf-badge', title: 'response เป็น PDF', text: '📄' }));
+    row.push(el('span', { class: 'flow-item-url', title: f.url }, [
+      el('span', { class: 'scheme-dot', text: f.scheme === 'https' ? '🔒 ' : '🌐 ' }),
+      el('span', { text: f.host + f.path }),
+    ]));
+    row.push(el('span', { class: 'flow-item-meta', text: f.blocked ? 'cert pinning' : `${fmtTime(f.time)} · ${f.durationMs != null ? f.durationMs + 'ms' : '–'} · ${fmtSize(f.resSize)}` }));
     const item = el('div', { class: 'flow-item' + (f.id === selectedFlowId ? ' selected' : '') + (f.mapped ? ' mapped' : '') + (f.blocked ? ' blocked' : '') }, [
-      el('div', { class: 'flow-item-top' }, topRow),
-      el('div', { class: 'flow-item-url', title: f.url }, [
-        el('span', { class: 'scheme-dot', text: f.scheme === 'https' ? '🔒 ' : '🌐 ' }),
-        el('span', { text: f.host + f.path }),
-      ]),
+      el('div', { class: 'flow-item-row' }, row),
     ]);
     item.addEventListener('click', () => {
       selectedFlowId = f.id;
