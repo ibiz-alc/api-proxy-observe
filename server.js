@@ -328,7 +328,7 @@ app.post('/api/proxy/ingest', express.json({ limit: '15mb' }), (req, res) => {
     resContentType: b.resContentType || null,
     resSize: b.resSize || 0,
     durationMs: b.durationMs ?? null,
-    mapped: false,
+    mapped: b.mapped === true,
     blocked: false,
   };
   proxyStore.flows.unshift(flow);
