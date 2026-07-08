@@ -5,3 +5,4 @@ map-local.json
 
 # แอป Android (repo แยกของตัวเอง)
 android/ProxyPostern/
+__pycache__/
