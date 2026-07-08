@@ -14,13 +14,15 @@ APITESTER = "http://127.0.0.1:3000"
 INGEST = APITESTER + "/api/proxy/ingest"
 RULES_URL = APITESTER + "/api/maplocal"
 MAX_BODY = 200 * 1024
-MAX_IMAGE = 6 * 1024 * 1024    # ส่ง image สูงสุด 6MB (ไว้โชว์รูป + EXIF)
+MAX_IMAGE = 12 * 1024 * 1024   # ส่ง image สูงสุด 12MB (ไว้โชว์รูป + EXIF) — รูปจากมือถือมักหลายMB
 MAX_VIDEO = 25 * 1024 * 1024   # ส่ง video สูงสุด 25MB (ไว้ preview) — ใหญ่กว่านี้แค่ติด tag
+MAX_PDF = 25 * 1024 * 1024     # ส่ง pdf สูงสุด 25MB (ไว้ preview)
 RULES_TTL = 3.0  # cache กฎ Map Local กี่วินาที
 
 
 _IMG_EXT = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".heic", ".heif", ".svg")
 _VID_EXT = (".mp4", ".m4v", ".mov", ".webm", ".mkv", ".avi")
+_PDF_EXT = (".pdf",)
 
 
 def _sniff_image_mime(content):
@@ -79,6 +81,12 @@ def _media(content, headers, url=""):
         if len(content) <= MAX_VIDEO:
             return base64.b64encode(content).decode("ascii"), mime, "video", False
         return None, mime, "video", True
+
+    is_pdf = content[:5] == b"%PDF-"
+    if ct == "application/pdf" or is_pdf or path.endswith(_PDF_EXT):
+        if len(content) <= MAX_PDF:
+            return base64.b64encode(content).decode("ascii"), "application/pdf", "pdf", False
+        return None, "application/pdf", "pdf", True
 
     return None, None, None, False
 

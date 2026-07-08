@@ -7,16 +7,17 @@ Proxyman-like web UI.
 ## 2026-07-08
 
 ### Proxy — media handling
-- **Video support.** Responses that are videos now show a `🎬 VIDEO` badge in
-  the flow list and an inline **Video** tab that plays the clip (`<video>`
-  player). Clips up to 25 MB are streamed for preview; larger ones are tagged
-  without a preview.
-- **Smarter image/video detection.** Media is identified by magic bytes, URL
-  extension and content-type — not content-type alone. This fixes S3 objects
-  served as `binary/octet-stream` (e.g. `.jpg`/`.mp4`) that were previously not
-  recognized. The sniffed MIME type is used when serving the bytes back so the
-  browser renders/plays them correctly.
-- **`🖼️ IMAGE` badge** added to the flow list for quick scanning.
+- **Image, video and PDF support.** Responses show a `🖼️ IMAGE`, `🎬 VIDEO` or
+  `📄 PDF` badge in the flow list and an inline preview tab: images with EXIF,
+  a `<video>` player, and an embedded PDF viewer.
+- **Media-type filter.** Filter the flow list to Image / Video / PDF (or All).
+- **Smarter detection.** Media is identified by magic bytes, URL extension and
+  content-type — not content-type alone — so S3 objects served as
+  `binary/octet-stream` (e.g. `.jpg`/`.mp4`/`.pdf`) are recognized. The sniffed
+  MIME type is used when serving bytes back so the browser renders them.
+- **Preview size caps** raised: image 12 MB (fixes large photos that could not
+  be previewed), video 25 MB, PDF 25 MB; larger files are tagged without a
+  preview.
 
 ### Proxy — layout
 - URL/flow list moved to the **top**, detail pane moved to the **bottom** with a

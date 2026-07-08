@@ -1,25 +1,33 @@
 # API Tester
 
-Web สำหรับทดสอบการรับ-ส่งข้อมูล API และอ่าน metadata ของรูปภาพ สร้างด้วย Node.js + Express
+A Node.js + Express web tool for inspecting, sending and mocking API traffic,
+reading image metadata, and MITM-decrypting a mobile app's HTTPS traffic in a
+Proxyman-like UI.
 
-## ฟีเจอร์
+## Features
 
-1. **📥 Inspector (รับข้อมูล)** — ยิง request จากระบบอื่นมาที่ `/hook` (รองรับทุก method และทุก path ย่อย เช่น `/hook/order/create`) แล้วดู headers, query, body, ไฟล์แนบ ได้ทันทีแบบ real-time
-2. **📤 Sender (ส่งข้อมูล)** — กรอก URL / method / headers / body (JSON หรือ form-data พร้อมไฟล์) ส่งไปทดสอบ API อื่น แล้วดู response ที่ได้กลับมา (ส่งผ่าน server จึงไม่ติด CORS)
-3. **🖼️ Image Metadata** — เลือกรูปจากเครื่อง (คลิกหรือลากวาง) เพื่ออ่าน EXIF: วันที่ถ่าย, พิกัด GPS, ที่อยู่ (reverse geocode ผ่าน OpenStreetMap ต้องต่ออินเทอร์เน็ต), ข้อมูลกล้อง, และ metadata ทั้งหมด พร้อมลิงก์เปิด Google Maps
-4. **🔗 URL Metadata** — วาง URL รูป (จาก hook ในระบบเราหรือรูปจากเว็บอื่น) แล้ว server ดึงรูปมาแกะ EXIF ให้ดูว่าได้ข้อมูลอะไรบ้าง: วันที่ถ่าย, พิกัด GPS, ที่อยู่, กล้อง (ดึงฝั่ง server จึงไม่ติด CORS) — เรียก API ได้ที่ `GET /api/url-metadata?url=<url>&address=1`
-5. **📱 Mobile Files** — แนบรูปจากมือถือ (เปิดหน้าเว็บผ่าน IP วง LAN เดียวกัน หรือให้ mobile app ยิง multipart มาที่ `/hook/mobile-upload`) แล้วฝั่ง web เห็นทันทีว่าแนบไฟล์อะไรมา: รูปตัวอย่าง, ชื่อ/ขนาดไฟล์, IP กับ User-Agent ของผู้ส่ง, หมายเหตุ และ metadata ของรูปครบชุด (วันที่ถ่าย, GPS, ที่อยู่, กล้อง)
+1. **📥 Inspector** — point any system at `/hook` (any method, any sub-path such
+   as `/hook/order/create`) and see headers, query, body and uploaded files in
+   real time.
+2. **📤 Sender** — enter URL / method / headers / body (JSON or multipart
+   form-data with file attachments), fire the request from the server (so no
+   CORS), and inspect the response.
+3. **🖼️ Image Metadata** — pick an image (click or drag-and-drop) to read EXIF:
+   capture date, GPS coordinates, reverse-geocoded address (OpenStreetMap
+   Nominatim), camera info, with a Google Maps link. UTF-8 `ImageDescription`
+   supported.
+4. **🔗 URL Metadata** — paste an image URL; the server fetches it and extracts
+   EXIF: `GET /api/url-metadata?url=<url>&address=1`.
+5. **🌐 Proxy (MITM)** — capture and decrypt real device traffic — see below.
 
-## วิธีใช้งาน
+## Getting started
 
 ```bash
 npm install
-npm start
+npm start          # PORT=8080 npm start to change port (default 3000)
 ```
 
-เปิดเบราว์เซอร์ที่ http://localhost:3000
-
-ทดลองยิงข้อมูลเข้ามา:
+Open http://localhost:3000 and try:
 
 ```bash
 curl -X POST http://localhost:3000/hook/test \
@@ -27,111 +35,79 @@ curl -X POST http://localhost:3000/hook/test \
   -d '{"hello": "world"}'
 ```
 
-## 🌐 Proxy (MITM — ดักทราฟฟิกแบบ Proxyman)
+## 🌐 Proxy (MITM — Proxyman-style)
 
-แท็บ Proxy ทำตัวเป็น HTTP proxy ดักดูทราฟฟิกจริงจากอุปกรณ์ (รวมถึงถอดรหัส HTTPS)
+The Proxy tab shows live device traffic, including decrypted HTTPS, backed by
+**mitmproxy** (port `8888`, HTTP/2 + SNI). An addon (`mitm-to-apitester.py`)
+forwards each decrypted flow to the web UI over Server-Sent Events and enforces
+Map Local rules.
 
-**วิธีใช้:**
-1. บนอุปกรณ์ (มือถือ) ตั้ง Wi-Fi → HTTP Proxy → Manual → Server = IP เครื่องนี้, Port = `9099` (ตั้งผ่าน `PROXY_PORT` ได้)
-2. เปิดเบราว์เซอร์บนอุปกรณ์ โหลด CA cert จาก `http://<IP>:3000/api/proxy/cert` แล้วติดตั้ง + ตั้งค่าให้เชื่อ (iOS: Certificate Trust Settings / Android: Install CA certificate)
-3. เปิดแอป/เว็บบนอุปกรณ์ → ทราฟฟิกโผล่ในแท็บ Proxy แบบ real-time คลิกดู request/response headers + body ได้
+### Connecting a device (driven from the web, over adb)
 
-> ⚠️ CA cert ให้ proxy ถอดรหัส HTTPS ได้ ใช้เฉพาะบนอุปกรณ์ทดสอบของคุณเอง และถอนการติดตั้งเมื่อเลิกใช้
+Enable USB debugging, then use the **How to connect** panel in the Proxy tab:
 
-พอร์ต proxy (`9099`) แยกจากหน้าเว็บ (`3000`) — CA เก็บใน `.proxy-ca/` (ถูก gitignore)
+- **USB** — sets the Android global HTTP proxy to `127.0.0.1:8888` with
+  `adb reverse tcp:8888 tcp:8888`.
+- **Wi-Fi** — sets the proxy to `<Mac LAN IP>:8888` (same network).
+- **Proxy Postern app** — launches the companion VPN app, auto-fills the
+  endpoint for the transport, and connects the VPN (useful when an app ignores
+  the system proxy). The app lives under [`android/ProxyPostern`](android/ProxyPostern).
 
-## 🎯 Map Local (mock response ผ่าน proxy)
+Install the mitmproxy CA on the device with the **Install CA** button (pushes
+the cert and opens the system settings page). Connect / disconnect and CA
+install are all one click from the web.
 
-แท็บ Map Local — กำหนดกฎว่าเมื่อ request ที่วิ่งผ่าน proxy ตรงกับ pattern ให้ **ตอบ response ปลอมที่เราตั้งไว้แทน** โดยไม่แตะเซิร์ฟเวอร์จริง (เหมือน "Map Local" ของ Proxyman) เหมาะกับทดสอบ mobile เพราะ app ชี้ proxy อยู่แล้ว ไม่ต้องแก้ base URL
+### Media detection & preview
 
-**การตั้งกฎ (ผ่านหน้าเว็บ):** method + URL pattern + status + content-type + response body
-- **URL pattern** — ถ้ามี `*` = wildcard (เช่น `/user/*` แมตช์ทุก id), ถ้าไม่มี `*` = ตรวจแบบ "มีคำนี้อยู่ใน URL" (เช่น `/license-types`)
-- กฎที่เจาะจงกว่า (ไม่มี `*` / pattern ยาวกว่า) ชนะกฎ wildcard
-- เปิด/ปิดแต่ละกฎได้ เก็บลง `map-local.json` (คงอยู่หลัง restart)
-- flow ที่ถูก mock จะมี response header `X-Api-Tester: map-local`
+Responses are classified by **magic bytes / URL extension / content-type** (not
+content-type alone), so S3 objects served as `binary/octet-stream` are still
+recognized. The flow list shows a `🖼️ IMAGE`, `🎬 VIDEO` or `📄 PDF` badge, and
+the detail pane adds an inline preview tab:
 
-REST API: `GET/POST /api/maplocal`, `PUT/DELETE /api/maplocal/:id`
+| Type  | Preview                | Size cap for preview |
+|-------|------------------------|----------------------|
+| Image | `<img>` + EXIF metadata | 12 MB |
+| Video | `<video>` player        | 25 MB |
+| PDF   | embedded viewer         | 25 MB |
 
-## Upload API (สำหรับทดสอบอัปโหลดไฟล์)
+Beyond the cap, the item is still tagged but shows a "too large to preview"
+note. Filter the list by media type with the **Image / Video / PDF** buttons.
 
-`POST /api/upload` — ส่งเป็น `multipart/form-data` แนบไฟล์กี่ไฟล์ก็ได้ (ตั้งชื่อ field อะไรก็ได้) พร้อม text field อื่นๆ เช่น `note`
+### Map Local
 
-```bash
-curl -X POST http://localhost:3000/api/upload \
-  -F 'note=ทดสอบอัปโหลด' \
-  -F 'image=@photo.jpg'
-```
+Return a mock response for requests matching a pattern, without touching the
+real server (Map Local tab).
 
-ตอบกลับเป็น JSON: รายละเอียดไฟล์ + `metadata` ของรูป (วันที่ถ่าย, พิกัด GPS, กล้อง, ขนาดภาพ, ImageDescription) เอาไปตรวจความถูกต้องใน test ได้ทันที:
+> ⚠️ The CA lets the proxy decrypt HTTPS. Use it only on your own test devices
+> and remove it when finished.
 
-```json
-{
-  "ok": true,
-  "id": "…",
-  "fields": { "note": "ทดสอบอัปโหลด" },
-  "files": [{
-    "name": "photo.jpg", "mimetype": "image/jpeg", "size": 1142,
-    "url": "/api/requests/…/files/0",
-    "metadata": { "dateTaken": "…", "latitude": 13.75, "longitude": 100.49, "camera": "Apple iPhone 15 Pro" }
-  }]
-}
-```
+## Selected endpoints
 
-- ไม่แนบไฟล์ → ตอบ `400` พร้อมข้อความ error
-- ทุกการอัปโหลดถูกบันทึกเข้า hook ด้วย — เห็นใน**แท็บ Inspector และ Mobile Files แบบ real-time** และดาวน์โหลดไฟล์กลับได้ผ่าน `url` ที่ตอบกลับ
+- `POST /hook/*` — capture any request.
+- `POST /api/send`, `POST /api/send-form` — send a request from the server.
+- `GET /api/url-metadata?url=<url>&address=1` — EXIF for a remote image.
+- `GET /api/requests/:id/files/:index/metadata` — lat/lng/address as JSON.
+  Fetching the file itself also returns `X-Image-Latitude` / `-Longitude` /
+  `-Date` / `-Camera` / `-Address` headers (text values are URL-encoded).
+- `GET /api/proxy/flows`, `GET /api/proxy/flows/:id/image?side=req|res` —
+  proxy flows and captured media bytes.
 
-### ดึง lat/lng/address ของรูปเป็น JSON (สำหรับ mobile)
+## Deployment
 
-response ของ `/api/upload` แต่ละไฟล์มี `metadataUrl` มาให้ — มือถือเอาไปดึง lat/lng/address ตรงๆ ได้ (ไม่ต้องแกะ EXIF เอง):
-
-```
-GET /api/requests/:id/files/:index/metadata
-→ {
-  "ok": true,
-  "metadata": {
-    "latitude": 13.7515, "longitude": 100.4937,
-    "address": "ถนนสนามไชย, แขวงพระบรมมหาราชวัง, เขตพระนคร, กรุงเทพมหานคร, 10200, ประเทศไทย",
-    "dateTaken": "2025-12-25T07:30:00.000Z", "camera": "Apple iPhone 15 Pro"
-  }
-}
-```
-
-- `?address=0` = ข้ามการหาที่อยู่ (เร็วขึ้น ไม่ต้องต่อเน็ต คืนแค่ lat/lng)
-- `/api/upload` เองก็คืน `address` มาในผลลัพธ์เลย (ใส่ `?address=0` เพื่อข้ามได้เช่นกัน)
-- address มาจาก OpenStreetMap Nominatim — server ต้องต่ออินเทอร์เน็ต
-
-### lat/lng มากับตัวภาพเลย (response headers)
-
-เวลาดึงรูปที่ `GET /api/requests/:id/files/:index` server แนบ metadata มาใน headers ด้วย — มือถือโหลดรูปครั้งเดียวได้ทั้งภาพ (body) และพิกัด (headers):
-
-| Header | ค่า |
-|---|---|
-| `X-Image-Latitude` | `13.7515` |
-| `X-Image-Longitude` | `100.4937` |
-| `X-Image-Date` | ISO date |
-| `X-Image-Camera` | URL-encoded (ต้อง `decodeURIComponent`) |
-| `X-Image-Address` | URL-encoded — ใส่ `?address=1` ถึงจะมี (ต้องต่อเน็ต) |
-
-lat/lng/date/camera มาเสมอ (เร็ว) ส่วน address ใส่ `?address=1` เพื่อขอเพิ่ม ค่าที่เป็นข้อความ URL-encode ไว้ (HTTP header รองรับแค่ ASCII) ฝั่งมือถือ decode ด้วย `decodeURIComponent()`
-
-## Deploy ขึ้น server
-
-รันได้ทุกที่ที่มี Node.js 18 ขึ้นไป:
-
-```bash
-npm install
-PORT=8080 npm start        # กำหนด port ได้ผ่านตัวแปร PORT (default 3000)
-```
-
-แนะนำใช้ [pm2](https://pm2.keymetrics.io/) เพื่อให้รันค้างไว้:
+Runs anywhere with Node.js 18+. For a long-running process use
+[pm2](https://pm2.keymetrics.io/):
 
 ```bash
 npm install -g pm2
 pm2 start server.js --name api-tester
 ```
 
-## ข้อควรรู้
+## Notes
 
-- ประวัติ request เก็บใน **หน่วยความจำ** (สูงสุด 200 รายการ) — restart แล้วข้อมูลหาย
-- ไฟล์แนบรับได้สูงสุด 25 MB ต่อไฟล์
-- ส่วนค้นหา "ที่อยู่" จากพิกัด GPS ใช้บริการฟรีของ OpenStreetMap Nominatim จึงต้องต่ออินเทอร์เน็ต (ส่วนอื่นใช้ offline ได้)
+- Request history and proxy flows are kept **in memory** (200 requests / 300
+  flows); they are lost on restart.
+- Uploads accept up to 25 MB per file.
+- Reverse geocoding uses OpenStreetMap Nominatim and needs internet access;
+  everything else works offline.
+- After editing `mitm-to-apitester.py`, restart mitmdump (hot-reload is
+  unreliable).

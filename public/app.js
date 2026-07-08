@@ -454,6 +454,7 @@ let selectedFlowId = null;
 let flowFilter = '';
 let flowField = 'url';   // url | host | path
 let flowMatch = 'contains'; // contains | equals
+let flowMediaFilter = ''; // '' | image | video | pdf
 let selDevice = '';      // '' = ทุก device
 let selHost = '';        // '' = ทุก host (ใน device ที่เลือก)
 // sub-tabs ของ detail
@@ -613,6 +614,13 @@ document.getElementById('flow-match').addEventListener('change', (e) => {
   flowMatch = e.target.value;
   renderFlowTable();
 });
+document.querySelectorAll('#media-filter button').forEach((b) => {
+  b.addEventListener('click', () => {
+    flowMediaFilter = b.dataset.media;
+    document.querySelectorAll('#media-filter button').forEach((x) => x.classList.toggle('active', x === b));
+    renderFlowTable();
+  });
+});
 
 function statusClass(status) {
   if (!status) return 'status-err';
@@ -635,6 +643,9 @@ function filteredFlows() {
       const hay = (f[flowField] || '').toLowerCase();
       if (flowMatch === 'equals' ? hay !== flowFilter : !hay.includes(flowFilter)) return false;
     }
+    if (flowMediaFilter === 'image' && !(f.resIsImage || f.reqIsImage)) return false;
+    if (flowMediaFilter === 'video' && !(f.resIsVideo || f.reqIsVideo)) return false;
+    if (flowMediaFilter === 'pdf' && !(f.resIsPdf || f.reqIsPdf)) return false;
     return true;
   });
 }
@@ -703,6 +714,7 @@ function renderFlowTable() {
     if (f.mapped) topRow.push(el('span', { class: 'map-badge', title: 'ถูก Map Local override', text: '🎯 MAP' }));
     if (f.resIsImage || f.reqIsImage) topRow.push(el('span', { class: 'image-badge', title: 'response เป็นรูปภาพ', text: '🖼️ IMAGE' }));
     if (f.resIsVideo || f.reqIsVideo) topRow.push(el('span', { class: 'video-badge', title: 'response เป็นวิดีโอ', text: '🎬 VIDEO' }));
+    if (f.resIsPdf || f.reqIsPdf) topRow.push(el('span', { class: 'pdf-badge', title: 'response เป็น PDF', text: '📄 PDF' }));
     topRow.push(el('span', { class: 'flow-item-meta', text: f.blocked ? 'cert pinning' : `${fmtTime(f.time)} · ${f.durationMs != null ? f.durationMs + 'ms' : '–'} · ${fmtSize(f.resSize)}` }));
     const item = el('div', { class: 'flow-item' + (f.id === selectedFlowId ? ' selected' : '') + (f.mapped ? ' mapped' : '') + (f.blocked ? ' blocked' : '') }, [
       el('div', { class: 'flow-item-top' }, topRow),
@@ -772,9 +784,13 @@ function mapLocalFromFlow(f) {
 
 // แท็บรูป: โชว์ image ที่ดักได้ + EXIF metadata
 function imageTab(f, side) {
+  const wrap = el('div', { class: 'img-tab' });
+  if (f[`${side}MediaTooBig`]) {
+    wrap.appendChild(el('p', { class: 'hint', text: '🖼️ รูปนี้ใหญ่เกิน 12MB — ไม่ได้ดึงมา preview (แต่ยืนยันว่าเป็นรูปภาพ)' }));
+    return wrap;
+  }
   const url = `/api/proxy/flows/${f.id}/image?side=${side}`;
   const m = f[`${side}ImageMeta`];
-  const wrap = el('div', { class: 'img-tab' });
   wrap.appendChild(el('img', { class: 'img-tab-preview', src: url, alt: 'image' }));
   wrap.appendChild(el('a', { class: 'img-tab-dl', href: url, target: '_blank', text: '⬇ เปิดรูปเต็ม / ดาวน์โหลด' }));
   if (!m) { wrap.appendChild(el('p', { class: 'hint', text: 'รูปนี้ไม่มี EXIF metadata ฝังอยู่' })); return wrap; }
@@ -809,6 +825,19 @@ function videoTab(f, side) {
   return wrap;
 }
 
+// แท็บ PDF: embed preview + ลิงก์เปิดเต็ม
+function pdfTab(f, side) {
+  const wrap = el('div', { class: 'img-tab' });
+  if (f[`${side}MediaTooBig`]) {
+    wrap.appendChild(el('p', { class: 'hint', text: '📄 PDF นี้ใหญ่เกิน 25MB — ไม่ได้ดึงมา preview (แต่ยืนยันว่าเป็น PDF)' }));
+    return wrap;
+  }
+  const url = `/api/proxy/flows/${f.id}/image?side=${side}`;
+  wrap.appendChild(el('iframe', { class: 'pdf-tab-preview', src: url, title: 'pdf' }));
+  wrap.appendChild(el('a', { class: 'img-tab-dl', href: url, target: '_blank', text: '⬇ เปิด PDF เต็ม / ดาวน์โหลด' }));
+  return wrap;
+}
+
 function renderFlowDetail(f) {
   flowDetailEl.innerHTML = '';
 
@@ -821,6 +850,7 @@ function renderFlowDetail(f) {
   };
   if (f.reqIsImage) reqTabs['🖼️ Image'] = imageTab(f, 'req');
   if (f.reqIsVideo) reqTabs['🎬 Video'] = videoTab(f, 'req');
+  if (f.reqIsPdf) reqTabs['📄 PDF'] = pdfTab(f, 'req');
   const reqHeadline = el('span', { class: 'detail-url', text: `${f.method} ${f.url}`, title: f.url });
   const copyUrlBtn = el('button', { class: 'maplocal-icon-btn', type: 'button', title: 'คัดลอก URL', text: '📋 Copy URL' });
   copyUrlBtn.addEventListener('click', () => {
@@ -844,6 +874,7 @@ function renderFlowDetail(f) {
   };
   if (f.resIsImage) resTabs['🖼️ Image'] = imageTab(f, 'res');
   if (f.resIsVideo) resTabs['🎬 Video'] = videoTab(f, 'res');
+  if (f.resIsPdf) resTabs['📄 PDF'] = pdfTab(f, 'res');
   const resHeadline = f.error
     ? el('span', { class: 'status-badge status-err', text: 'ERROR' })
     : el('span', {}, [

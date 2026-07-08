@@ -316,7 +316,7 @@ app.get('/api/proxy/flows', (req, res) => {
 });
 
 // รับ flow ที่ถอดรหัสจาก mitmproxy (ผ่าน addon) มาแสดงในแท็บ Proxy — รองรับ HTTPS/h2 เต็มรูปแบบ
-app.post('/api/proxy/ingest', express.json({ limit: '20mb' }), async (req, res) => {
+app.post('/api/proxy/ingest', express.json({ limit: '40mb' }), async (req, res) => {
   if (proxyMuted) return res.json({ ok: true, muted: true }); // ตัดการเชื่อมต่อแล้ว — ไม่รับ flow
   const b = req.body || {};
   const id = b.id || crypto.randomUUID();
@@ -349,6 +349,7 @@ app.post('/api/proxy/ingest', express.json({ limit: '20mb' }), async (req, res) 
     if (!kind) continue;
     if (kind === 'image') flow[`${side}IsImage`] = true;
     if (kind === 'video') flow[`${side}IsVideo`] = true;
+    if (kind === 'pdf') flow[`${side}IsPdf`] = true;
     if (b[`${side}MediaTooBig`]) { flow[`${side}MediaTooBig`] = true; continue; } // ใหญ่เกิน — ติด tag แต่ไม่มี preview
     const b64 = b[`${side}MediaB64`];
     if (!b64) continue;
