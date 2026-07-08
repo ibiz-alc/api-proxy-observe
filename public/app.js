@@ -474,11 +474,13 @@ let resTab = 'Body';
 
 // ---- ควบคุมมือถือผ่านเว็บ (ตั้ง global http_proxy ผ่าน adb — ไม่ต้องใช้ Postern) ----
 const pdListEl = document.getElementById('pd-list');
-let pdMode = 'usb'; // โหมดที่กำลังเลือก (usb | wifi)
+let pdMode = 'usb'; // โหมดที่กำลังเลือก (usb | wifi | postern)
 
 async function renderDevices() {
+  const isPostern = pdMode === 'postern';
   document.getElementById('pd-title').textContent =
-    pdMode === 'wifi' ? '📶 เลือก device เชื่อมแบบ Wi-Fi' : '🔌 เลือก device เชื่อมแบบ USB';
+    isPostern ? '📲 เลือก device เชื่อมผ่านแอป Proxy Postern'
+      : pdMode === 'wifi' ? '📶 เลือก device เชื่อมแบบ Wi-Fi' : '🔌 เลือก device เชื่อมแบบ USB';
   pdListEl.innerHTML = '<span class="hint">กำลังโหลด device…</span>';
   let data;
   try { data = await (await fetch('/api/devices')).json(); }
@@ -490,29 +492,35 @@ async function renderDevices() {
   }
   pdListEl.innerHTML = '';
   for (const d of devices) {
-    const label = d.connected ? `เชื่อมอยู่ (${d.mode || ''})` : 'ยังไม่เชื่อม';
+    const active = isPostern ? d.posternRunning : d.connected;
+    const cond = isPostern ? (d.transport === 'wifi' ? 'Wi-Fi' : 'USB') : (d.mode || '');
+    const label = active ? `เชื่อมอยู่${cond ? ` (${cond})` : ''}` : 'ยังไม่เชื่อม';
     const row = el('div', { class: 'pd-row' }, [
-      el('span', { class: 'pd-dot ' + (d.connected ? 'on' : 'off'), text: d.connected ? '🟢' : '⚪' }),
+      el('span', { class: 'pd-dot ' + (active ? 'on' : 'off'), text: active ? '🟢' : '⚪' }),
       el('div', { class: 'pd-name-wrap' }, [
         el('div', { class: 'pd-name', text: d.model }),
         el('div', { class: 'pd-serial', text: `${d.serial} · ${label}` }),
       ]),
     ]);
     const connBtn = el('button', {
-      class: d.connected ? 'pd-btn danger' : 'pd-btn primary',
-      text: d.connected ? 'ตัด' : (pdMode === 'wifi' ? 'เชื่อม Wi-Fi' : 'เชื่อม USB'),
+      class: active ? 'pd-btn danger' : 'pd-btn primary',
+      text: active ? 'ตัด' : (isPostern ? 'เชื่อมผ่านแอป' : pdMode === 'wifi' ? 'เชื่อม Wi-Fi' : 'เชื่อม USB'),
     });
     connBtn.addEventListener('click', async () => {
       connBtn.disabled = true; connBtn.textContent = '…';
-      const url = d.connected ? '/api/devices/disconnect' : '/api/devices/connect';
+      const url = active ? '/api/devices/disconnect' : '/api/devices/connect';
+      // postern: เลือกเงื่อนไข USB/Wi-Fi อัตโนมัติจาก transport ของ device
+      const mode = isPostern ? d.transport : pdMode;
+      const method = isPostern ? 'postern' : 'proxy';
       try {
         const r = await (await fetch(url, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ serial: d.serial, mode: pdMode }),
+          body: JSON.stringify({ serial: d.serial, mode, method }),
         })).json();
         if (!r.ok) alert('ไม่สำเร็จ: ' + (r.error || ''));
+        else if (isPostern && !active) alert(`เปิดแอปบน ${d.model} แล้ว (host ${r.host}:${r.port}) — ถ้าเป็นครั้งแรกให้กดอนุญาต VPN บนมือถือ`);
       } catch (e) { alert('error: ' + e.message); }
-      renderDevices();
+      setTimeout(renderDevices, 1200); // รอ service/VPN ขึ้นก่อนค่อยรีเฟรชสถานะ
     });
     const caBtn = el('button', { class: 'pd-btn', text: '📥 CA' });
     caBtn.addEventListener('click', async () => {

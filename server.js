@@ -412,7 +412,16 @@ async function listDevices() {
     const connected = !!proxy && proxy !== ':0' && proxy !== 'null';
     let mode = null;
     if (connected) mode = proxy.startsWith('127.0.0.1') ? 'usb' : 'wifi';
-    devices.push({ serial, model: model.replace(/_/g, ' '), connected, proxy: connected ? proxy : null, mode });
+    // แอป Proxy Postern (VPN) กำลังทำงานไหม — จับเฉพาะ record ที่ยัง active
+    // ("* ServiceRecord{" = รันอยู่ / "* Destroy ServiceRecord{" = หยุดแล้ว)
+    let posternRunning = false;
+    try {
+      const svc = await adb(['-s', serial, 'shell', 'dumpsys', 'activity', 'services', POSTERN_PKG]);
+      posternRunning = /\*\s+ServiceRecord\{[^}]*PosternVpnService/.test(svc);
+    } catch { /* ignore */ }
+    // adb-over-wifi serial จะเป็น ip:port → เลือกเงื่อนไข Wi-Fi ให้อัตโนมัติ
+    const transport = /^\d+\.\d+\.\d+\.\d+:\d+$/.test(serial) ? 'wifi' : 'usb';
+    devices.push({ serial, model: model.replace(/_/g, ' '), connected, proxy: connected ? proxy : null, mode, posternRunning, transport });
   }
   return devices;
 }
@@ -422,38 +431,60 @@ app.get('/api/devices', async (req, res) => {
   catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-// เชื่อม: ตั้ง global http_proxy ให้ทั้งเครื่อง (okhttp/แอปเคารพ) — mode: usb | wifi
+// เลือก host ให้ตรงเงื่อนไข: USB → 127.0.0.1 (+adb reverse), Wi-Fi → LAN IP ของ Mac
+async function resolveTarget(S, mode) {
+  if (mode === 'wifi') {
+    const lan = getLanIp();
+    if (!lan) throw new Error('หา LAN IP ของ Mac ไม่เจอ');
+    return { host: lan, target: `${lan}:${MITM_PORT}` };
+  }
+  await adb([...S, 'reverse', `tcp:${MITM_PORT}`, `tcp:${MITM_PORT}`]);
+  return { host: '127.0.0.1', target: `127.0.0.1:${MITM_PORT}` };
+}
+
+// เชื่อม: method=proxy → ตั้ง global http_proxy | method=postern → เปิดแอป Proxy Postern พร้อม auto-fill+connect
 app.post('/api/devices/connect', express.json(), async (req, res) => {
-  const { serial, mode = 'usb' } = req.body || {};
+  const { serial, mode = 'usb', method = 'proxy' } = req.body || {};
   if (!serial) return res.status(400).json({ ok: false, error: 'ต้องระบุ serial' });
   const S = ['-s', serial];
   try {
-    let target;
-    if (mode === 'wifi') {
-      const lan = getLanIp();
-      if (!lan) return res.status(500).json({ ok: false, error: 'หา LAN IP ของ Mac ไม่เจอ' });
-      target = `${lan}:${MITM_PORT}`;
-    } else {
-      await adb([...S, 'reverse', `tcp:${MITM_PORT}`, `tcp:${MITM_PORT}`]);
-      target = `127.0.0.1:${MITM_PORT}`;
+    const { host, target } = await resolveTarget(S, mode);
+    if (method === 'postern') {
+      // ฆ่า instance เก่าให้หมดก่อน — process :vpn init เอนจิน (lwIP) ได้ครั้งเดียว/process
+      // ถ้าไม่เคลียร์ process เก่าที่กำลังตาย จะชนกับ start ใหม่ → service ค้าง/ANR → tun ไม่ขึ้น
+      await adb([...S, 'shell', 'am', 'force-stop', POSTERN_PKG]).catch(() => {});
+      await new Promise((r) => setTimeout(r, 800));
+      // สั่งแอปผ่าน intent: auto-fill host/port แล้ว connect (VPN) ด้วย process ใหม่สด
+      await adb([...S, 'shell', 'am', 'start', '-n', `${POSTERN_PKG}/.MainActivity`,
+        '--es', 'apitester_host', host,
+        '--ei', 'apitester_port', String(MITM_PORT),
+        '--ez', 'apitester_connect', 'true']);
+      proxyMuted = false;
+      return res.json({ ok: true, connected: true, method, mode, host, port: MITM_PORT });
     }
     await adb([...S, 'shell', 'settings', 'put', 'global', 'http_proxy', target]);
     proxyMuted = false; // เปิดรับ flow อีกครั้ง
-    res.json({ ok: true, connected: true, mode, proxy: target });
+    res.json({ ok: true, connected: true, method, mode, proxy: target });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
 
-// ตัด: ล้าง global http_proxy + ลบ reverse
+// ตัด: method=proxy → ล้าง global http_proxy | method=postern → สั่งแอปหยุด VPN
 app.post('/api/devices/disconnect', express.json(), async (req, res) => {
-  const serial = (req.body || {}).serial;
+  const { serial, method = 'proxy' } = req.body || {};
   if (!serial) return res.status(400).json({ ok: false, error: 'ต้องระบุ serial' });
   const S = ['-s', serial];
   try {
-    await adb([...S, 'shell', 'settings', 'put', 'global', 'http_proxy', ':0']);
-    await adb([...S, 'shell', 'settings', 'delete', 'global', 'http_proxy']).catch(() => {});
-    await adb([...S, 'reverse', '--remove', `tcp:${MITM_PORT}`]).catch(() => {});
+    if (method === 'postern') {
+      await adb([...S, 'shell', 'am', 'start', '-n', `${POSTERN_PKG}/.MainActivity`,
+        '--es', 'apitester_host', '127.0.0.1',
+        '--ez', 'apitester_disconnect', 'true']);
+    } else {
+      await adb([...S, 'shell', 'settings', 'put', 'global', 'http_proxy', ':0']);
+      await adb([...S, 'shell', 'settings', 'delete', 'global', 'http_proxy']).catch(() => {});
+      await adb([...S, 'reverse', '--remove', `tcp:${MITM_PORT}`]).catch(() => {});
+    }
     // mute + ล้าง flow list — กันแอปที่ cache proxy ไว้ยิงต่อแล้วโผล่ใหม่
     proxyMuted = true;
     proxyStore.flows.length = 0;
