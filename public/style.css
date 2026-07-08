@@ -434,11 +434,12 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .pd-dot { font-size: 0.7rem; }
 .pd-name { font-weight: 600; }
 .pd-serial { color: var(--muted); font-size: 0.78rem; flex: 1; }
-.pd-btn { padding: 3px 10px; border-radius: 6px; font-size: 0.74rem; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); }
-.pd-btn.primary { background: transparent; border: 1px solid var(--accent); color: var(--accent); font-weight: 600; }
-.pd-btn.primary:hover { background: var(--accent); color: #0f172a; }
-.pd-btn.danger { background: transparent; border: 1px solid var(--red); color: var(--red); }
-.pd-btn:disabled { opacity: 0.6; }
+/* prefix .postern-modes ให้ specificity ชนะ global button.primary (font 1rem) */
+.postern-modes .pd-btn { padding: 3px 10px; border-radius: 6px; font-size: 0.72rem; font-weight: 500; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); }
+.postern-modes .pd-btn.primary { background: transparent; border: 1px solid var(--accent); color: var(--accent); font-weight: 600; }
+.postern-modes .pd-btn.primary:hover { background: var(--accent); color: #0f172a; }
+.postern-modes .pd-btn.danger { background: transparent; border: 1px solid var(--red); color: var(--red); }
+.postern-modes .pd-btn:disabled { opacity: 0.6; }
 
 /* filter bar */
 .proxy-filterbar {
