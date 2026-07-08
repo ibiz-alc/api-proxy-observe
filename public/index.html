@@ -153,6 +153,15 @@
           <button class="pd-btn" data-mode="wifi" data-act="ca">📥 ติดตั้ง CA (Wi-Fi)</button>
         </div>
       </div>
+      <div class="mode-block">
+        <div class="mode-row">
+          <span class="mode-tag app">📲 Proxy Postern (แอป VPN)</span>
+          <div>
+            ทางเลือกเมื่อ global proxy ใช้ไม่ได้ (บางแอปไม่เคารพ system proxy) — ลงแอป <b>Proxy Postern</b> แล้วเชื่อมในแอป<br/>
+            <span class="mode-step">Host = <code>127.0.0.1</code> (USB, ตั้ง <code>adb reverse tcp:8888 tcp:8888</code>) หรือ <code id="postern-lan2">…</code> (Wi-Fi) · Port <code>8888</code> → กด "เชื่อมต่อ" ในแอป (VPN routes ทุกแอป ไม่ต้องพึ่ง system proxy)</span>
+          </div>
+        </div>
+      </div>
       <div class="pd-panel" id="pd-panel" style="display:none">
         <div class="pd-head">
           <span id="pd-title">📲 เลือก device เพื่อเชื่อม</span>

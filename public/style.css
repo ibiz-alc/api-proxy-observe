@@ -410,6 +410,7 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .mode-tag { flex-shrink: 0; font-weight: 600; padding: 1px 8px; border-radius: 5px; font-size: 0.72rem; white-space: nowrap; }
 .mode-tag.usb { background: rgba(56,189,248,0.15); color: var(--accent); border: 1px solid var(--accent); }
 .mode-tag.wifi { background: rgba(74,222,128,0.15); color: var(--green); border: 1px solid var(--green); }
+.mode-tag.app { background: rgba(250,204,21,0.15); color: var(--yellow); border: 1px solid var(--yellow); }
 .mode-step { color: var(--muted); font-size: 0.78rem; }
 .mode-warn { color: var(--yellow); }
 .mode-common { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border); font-size: 0.78rem; }

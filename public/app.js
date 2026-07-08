@@ -465,7 +465,9 @@ let resTab = 'Body';
   const isLocal = host === 'localhost' || host === '127.0.0.1';
   let lanIp = isLocal ? null : host;
   try { lanIp = (await (await fetch('/api/proxy/info')).json()).lanIp || lanIp; } catch { /* ใช้ค่า fallback */ }
-  const lanEl = document.getElementById('postern-lan'); if (lanEl) lanEl.textContent = lanIp || '<IP วง LAN ของ Mac>';
+  const lanTxt = lanIp || '<IP วง LAN ของ Mac>';
+  const lanEl = document.getElementById('postern-lan'); if (lanEl) lanEl.textContent = lanTxt;
+  const lanEl2 = document.getElementById('postern-lan2'); if (lanEl2) lanEl2.textContent = lanTxt;
   allFlows = await (await fetch('/api/proxy/flows')).json();
   renderProxy();
 })();
