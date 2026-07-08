@@ -702,6 +702,7 @@ function renderFlowTable() {
     }
     if (f.mapped) topRow.push(el('span', { class: 'map-badge', title: 'ถูก Map Local override', text: '🎯 MAP' }));
     if (f.resIsImage || f.reqIsImage) topRow.push(el('span', { class: 'image-badge', title: 'response เป็นรูปภาพ', text: '🖼️ IMAGE' }));
+    if (f.resIsVideo || f.reqIsVideo) topRow.push(el('span', { class: 'video-badge', title: 'response เป็นวิดีโอ', text: '🎬 VIDEO' }));
     topRow.push(el('span', { class: 'flow-item-meta', text: f.blocked ? 'cert pinning' : `${fmtTime(f.time)} · ${f.durationMs != null ? f.durationMs + 'ms' : '–'} · ${fmtSize(f.resSize)}` }));
     const item = el('div', { class: 'flow-item' + (f.id === selectedFlowId ? ' selected' : '') + (f.mapped ? ' mapped' : '') + (f.blocked ? ' blocked' : '') }, [
       el('div', { class: 'flow-item-top' }, topRow),
@@ -794,6 +795,20 @@ function imageTab(f, side) {
   return wrap;
 }
 
+// แท็บวิดีโอ: เล่น preview ที่ดักได้ (ใช้ endpoint เดียวกับรูป — เสิร์ฟ bytes ตาม content-type)
+function videoTab(f, side) {
+  const wrap = el('div', { class: 'img-tab' });
+  if (f[`${side}MediaTooBig`]) {
+    wrap.appendChild(el('p', { class: 'hint', text: '🎬 วิดีโอนี้ใหญ่เกิน 25MB — ไม่ได้ดึงมา preview (แต่ยืนยันว่าเป็นวิดีโอ)' }));
+    return wrap;
+  }
+  const url = `/api/proxy/flows/${f.id}/image?side=${side}`;
+  const video = el('video', { class: 'video-tab-preview', src: url, controls: 'controls', preload: 'metadata' });
+  wrap.appendChild(video);
+  wrap.appendChild(el('a', { class: 'img-tab-dl', href: url, target: '_blank', text: '⬇ เปิดวิดีโอเต็ม / ดาวน์โหลด' }));
+  return wrap;
+}
+
 function renderFlowDetail(f) {
   flowDetailEl.innerHTML = '';
 
@@ -805,6 +820,7 @@ function renderFlowDetail(f) {
     Raw: el('pre', { class: 'code-block', text: reqRawText }),
   };
   if (f.reqIsImage) reqTabs['🖼️ Image'] = imageTab(f, 'req');
+  if (f.reqIsVideo) reqTabs['🎬 Video'] = videoTab(f, 'req');
   const reqHeadline = el('span', { class: 'detail-url', text: `${f.method} ${f.url}`, title: f.url });
   const copyUrlBtn = el('button', { class: 'maplocal-icon-btn', type: 'button', title: 'คัดลอก URL', text: '📋 Copy URL' });
   copyUrlBtn.addEventListener('click', () => {
@@ -827,6 +843,7 @@ function renderFlowDetail(f) {
     Raw: el('pre', { class: 'code-block', text: resRawText }),
   };
   if (f.resIsImage) resTabs['🖼️ Image'] = imageTab(f, 'res');
+  if (f.resIsVideo) resTabs['🎬 Video'] = videoTab(f, 'res');
   const resHeadline = f.error
     ? el('span', { class: 'status-badge status-err', text: 'ERROR' })
     : el('span', {}, [

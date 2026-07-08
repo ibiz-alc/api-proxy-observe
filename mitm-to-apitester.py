@@ -14,11 +14,13 @@ APITESTER = "http://127.0.0.1:3000"
 INGEST = APITESTER + "/api/proxy/ingest"
 RULES_URL = APITESTER + "/api/maplocal"
 MAX_BODY = 200 * 1024
-MAX_IMAGE = 6 * 1024 * 1024   # ส่ง image สูงสุด 6MB (ไว้โชว์รูป + EXIF)
+MAX_IMAGE = 6 * 1024 * 1024    # ส่ง image สูงสุด 6MB (ไว้โชว์รูป + EXIF)
+MAX_VIDEO = 25 * 1024 * 1024   # ส่ง video สูงสุด 25MB (ไว้ preview) — ใหญ่กว่านี้แค่ติด tag
 RULES_TTL = 3.0  # cache กฎ Map Local กี่วินาที
 
 
 _IMG_EXT = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".heic", ".heif", ".svg")
+_VID_EXT = (".mp4", ".m4v", ".mov", ".webm", ".mkv", ".avi")
 
 
 def _sniff_image_mime(content):
@@ -41,19 +43,44 @@ def _sniff_image_mime(content):
     return None
 
 
-def _image_b64(content, headers, url=""):
-    """คืน (base64, mime) ถ้าเป็นรูป — ตัดสินจาก magic bytes / content-type / นามสกุลใน URL
-    คืน (None, None) ถ้าไม่ใช่รูป หรือใหญ่เกิน MAX_IMAGE"""
-    if not content or len(content) > MAX_IMAGE:
-        return None, None
+def _sniff_video_mime(content):
+    """ดู magic bytes ของวิดีโอ — กันกรณี S3 ตอบ content-type เป็น octet-stream"""
+    if not content or len(content) < 12:
+        return None
+    h = content[:12]
+    if h[:4] == b"\x1aE\xdf\xa3":              # EBML → webm/mkv
+        return "video/webm"
+    if h[4:8] == b"ftyp":                       # ISO base media → mp4/mov
+        return "video/quicktime" if h[8:12] == b"qt  " else "video/mp4"
+    if h[:4] == b"RIFF" and content[8:12] == b"AVI ":
+        return "video/x-msvideo"
+    return None
+
+
+def _media(content, headers, url=""):
+    """คืน (base64|None, mime, kind, too_big) — kind ∈ 'image' | 'video' | None
+    ตัดสินจาก magic bytes / content-type / นามสกุลใน URL (ไม่พึ่ง content-type อย่างเดียว
+    เพราะ S3 มักตอบ .jpg/.mp4 เป็น binary/octet-stream). ถ้าใหญ่เกิน cap → คืน bytes=None แต่ยังบอก kind"""
+    if not content:
+        return None, None, None, False
     ct = headers.get("content-type", "").lower().split(";")[0].strip()
-    sniffed = _sniff_image_mime(content)
     path = url.split("?")[0].lower()
-    is_image = ct.startswith("image/") or sniffed is not None or path.endswith(_IMG_EXT)
-    if not is_image:
-        return None, None
-    mime = sniffed or (ct if ct.startswith("image/") else "image/jpeg")
-    return base64.b64encode(content).decode("ascii"), mime
+
+    img = _sniff_image_mime(content)
+    if ct.startswith("image/") or img is not None or path.endswith(_IMG_EXT):
+        mime = img or (ct if ct.startswith("image/") else "image/jpeg")
+        if len(content) <= MAX_IMAGE:
+            return base64.b64encode(content).decode("ascii"), mime, "image", False
+        return None, mime, "image", True
+
+    vid = _sniff_video_mime(content)
+    if ct.startswith("video/") or vid is not None or path.endswith(_VID_EXT):
+        mime = vid or (ct if ct.startswith("video/") else "video/mp4")
+        if len(content) <= MAX_VIDEO:
+            return base64.b64encode(content).decode("ascii"), mime, "video", False
+        return None, mime, "video", True
+
+    return None, None, None, False
 
 _rules = []
 _rules_at = 0.0
@@ -148,12 +175,16 @@ def response(flow: http.HTTPFlow):
         "durationMs": int((res.timestamp_end - req.timestamp_start) * 1000)
         if res.timestamp_end and req.timestamp_start else None,
     }
-    req_b64, req_mime = _image_b64(req.content, req.headers, req.pretty_url)
-    res_b64, res_mime = _image_b64(res.content, res.headers, req.pretty_url)
-    payload["reqImageB64"] = req_b64
-    payload["reqImageType"] = req_mime
-    payload["resImageB64"] = res_b64
-    payload["resImageType"] = res_mime
+    rq_b64, rq_mime, rq_kind, rq_big = _media(req.content, req.headers, req.pretty_url)
+    rs_b64, rs_mime, rs_kind, rs_big = _media(res.content, res.headers, req.pretty_url)
+    payload["reqMediaB64"] = rq_b64
+    payload["reqMediaType"] = rq_mime
+    payload["reqMediaKind"] = rq_kind
+    payload["reqMediaTooBig"] = rq_big
+    payload["resMediaB64"] = rs_b64
+    payload["resMediaType"] = rs_mime
+    payload["resMediaKind"] = rs_kind
+    payload["resMediaTooBig"] = rs_big
     try:
         data = json.dumps(payload).encode("utf-8")
         r = urllib.request.Request(INGEST, data=data, headers={"Content-Type": "application/json"})

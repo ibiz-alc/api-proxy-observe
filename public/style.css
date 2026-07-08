@@ -542,6 +542,23 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
   padding: 1px 5px;
   white-space: nowrap;
 }
+.video-badge {
+  background: rgba(192, 132, 252, 0.15);
+  color: #c084fc;
+  border: 1px solid #c084fc;
+  border-radius: 5px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+.video-tab-preview {
+  max-width: 100%;
+  max-height: 320px;
+  border-radius: 8px;
+  background: #000;
+  display: block;
+}
 .blocked-badge {
   background: rgba(248, 113, 113, 0.15);
   color: var(--red);

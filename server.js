@@ -343,19 +343,24 @@ app.post('/api/proxy/ingest', express.json({ limit: '20mb' }), async (req, res) 
     mapped: b.mapped === true,
     blocked: false,
   };
-  // เก็บ image bytes (req/res) แยกไว้ + แกะ EXIF ให้เลย
+  // เก็บ media bytes (req/res) แยกไว้ — image แกะ EXIF, video ไว้ preview
   for (const side of ['req', 'res']) {
-    const b64 = b[`${side}ImageB64`];
+    const kind = b[`${side}MediaKind`]; // 'image' | 'video' | undefined
+    if (!kind) continue;
+    if (kind === 'image') flow[`${side}IsImage`] = true;
+    if (kind === 'video') flow[`${side}IsVideo`] = true;
+    if (b[`${side}MediaTooBig`]) { flow[`${side}MediaTooBig`] = true; continue; } // ใหญ่เกิน — ติด tag แต่ไม่มี preview
+    const b64 = b[`${side}MediaB64`];
     if (!b64) continue;
     try {
       const buf = Buffer.from(b64, 'base64');
       // ใช้ mime ที่ addon sniff มา (กันกรณี S3 ตอบ octet-stream) แล้วค่อย fallback content-type จริง
-      const sniffed = b[`${side}ImageType`];
-      const ct = sniffed || (side === 'res' ? flow.resContentType : (flow.reqHeaders['content-type'] || 'image/*'));
+      const ct = b[`${side}MediaType`] || (side === 'res' ? flow.resContentType : (flow.reqHeaders['content-type'] || 'application/octet-stream'));
       proxyImages.set(`${id}:${side}`, { buf, ct });
-      flow[`${side}IsImage`] = true;
-      try { flow[`${side}ImageMeta`] = await extractImageMetadata(buf, { withAddress: true }); } catch { flow[`${side}ImageMeta`] = null; }
-    } catch { /* ignore bad image */ }
+      if (kind === 'image') {
+        try { flow[`${side}ImageMeta`] = await extractImageMetadata(buf, { withAddress: true }); } catch { flow[`${side}ImageMeta`] = null; }
+      }
+    } catch { /* ignore bad media */ }
   }
   proxyStore.flows.unshift(flow);
   while (proxyStore.flows.length > 300) {
