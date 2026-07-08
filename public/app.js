@@ -465,12 +465,7 @@ let resTab = 'Body';
   const isLocal = host === 'localhost' || host === '127.0.0.1';
   let lanIp = isLocal ? null : host;
   try { lanIp = (await (await fetch('/api/proxy/info')).json()).lanIp || lanIp; } catch { /* ใช้ค่า fallback */ }
-  document.getElementById('postern-host').textContent = isLocal ? '127.0.0.1' : host;
-  document.getElementById('postern-lan').textContent = lanIp || '<IP วง LAN ของ Mac>';
-  // help box (อ้าง mitmproxy backend)
-  const pip = document.getElementById('proxy-ip'); if (pip) pip.textContent = host;
-  const pport = document.getElementById('proxy-port'); if (pport) pport.textContent = '8888';
-  const pcert = document.getElementById('proxy-cert-url'); if (pcert) pcert.textContent = 'http://mitm.it (ผ่าน proxy) หรือปุ่ม "ติดตั้ง CA" ในแอป';
+  const lanEl = document.getElementById('postern-lan'); if (lanEl) lanEl.textContent = lanIp || '<IP วง LAN ของ Mac>';
   allFlows = await (await fetch('/api/proxy/flows')).json();
   renderProxy();
 })();
@@ -516,14 +511,22 @@ async function renderDevices() {
   }
 }
 document.getElementById('pd-refresh').addEventListener('click', renderDevices);
-renderDevices();
+
+// ปุ่ม "📲 เชื่อมจากเว็บ" — เปิด/ปิด panel device (โหลด device ตอนเปิด)
+document.getElementById('pd-toggle').addEventListener('click', () => {
+  const box = document.getElementById('postern-devices');
+  const show = box.style.display === 'none';
+  box.style.display = show ? 'block' : 'none';
+  if (show) renderDevices();
+});
 
 document.getElementById('proxy-cert-btn').addEventListener('click', () => {
   window.location.href = '/api/proxy/cert';
 });
+// ปุ่ม "❓ วิธีติดตั้ง" — เปิด/ปิด hint USB/Wi-Fi
 document.getElementById('proxy-help-btn').addEventListener('click', () => {
-  const help = document.getElementById('proxy-help');
-  help.style.display = help.style.display === 'none' ? 'block' : 'none';
+  const box = document.getElementById('postern-modes');
+  box.style.display = box.style.display === 'none' ? 'block' : 'none';
 });
 document.getElementById('clear-flows').addEventListener('click', async () => {
   await fetch('/api/proxy/flows', { method: 'DELETE' });

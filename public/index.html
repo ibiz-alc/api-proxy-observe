@@ -128,20 +128,18 @@
   <!-- ============ Proxy (MITM) ============ -->
   <main id="tab-proxy" class="tab">
     <div class="hook-info">
-      <span>🔌 เชื่อม <b>Proxy Postern</b> มาที่ — Host</span>
-      <code id="postern-host">…</code>
-      <span>Port</span>
-      <code id="postern-port">8888</code>
+      <span>🌐 <b>Proxy</b> — ดัก/ถอดรหัส HTTPS ผ่าน Proxy Postern</span>
       <button id="proxy-cert-btn">📥 CA cert</button>
       <button id="proxy-help-btn">❓ วิธีติดตั้ง</button>
+      <button id="pd-toggle">📲 เชื่อมจากเว็บ (USB)</button>
       <button id="clear-flows" class="danger">🗑️ ล้างทั้งหมด</button>
     </div>
-    <div class="postern-modes">
+    <div class="postern-modes" id="postern-modes" style="display:none">
       <div class="mode-row">
         <span class="mode-tag usb">🔌 USB</span>
         <div>
           เสถียร/เร็วสุด — <b>Host</b> <code>127.0.0.1</code> · <b>Port</b> <code>8888</code><br/>
-          <span class="mode-step">1. เสียบสาย + เปิด USB debugging &nbsp; 2. บน Mac รัน <code>./start.sh</code> (ตั้ง <code>adb reverse tcp:8888 tcp:8888</code> ให้เอง) &nbsp; 3. ในแอปกรอก host/port ข้างบน → เชื่อมต่อ</span>
+          <span class="mode-step">1. เสียบสาย + เปิด USB debugging &nbsp; 2. บน Mac รัน <code>./start.sh</code> (ตั้ง <code>adb reverse tcp:8888 tcp:8888</code> ให้เอง) &nbsp; 3. ในแอปกรอก host/port ข้างบน → เชื่อมต่อ (หรือกด "เชื่อมจากเว็บ")</span>
         </div>
       </div>
       <div class="mode-row">
@@ -153,7 +151,7 @@
       </div>
       <div class="mode-common">ทั้ง 2 วิธี: ติดตั้ง CA ของ mitmproxy บนมือถือครั้งเดียว (ปุ่ม "ติดตั้ง CA" ในแอป) — ต้องต่อ Mac ให้ mitmproxy รันอยู่ (<code>./start.sh</code>)</div>
     </div>
-    <div class="postern-devices">
+    <div class="postern-devices" id="postern-devices" style="display:none">
       <div class="pd-head">
         <span>📲 เชื่อม Proxy Postern จากเว็บ (USB)</span>
         <button id="pd-refresh" title="รีเฟรชรายการ device">🔄 รีเฟรช</button>
@@ -171,17 +169,6 @@
         <option value="equals">Equals</option>
       </select>
       <input type="text" id="flow-filter" placeholder="กรอง..." />
-    </div>
-    <div id="proxy-help" class="proxy-help" style="display:none">
-      <strong>วิธีทำให้เห็นเนื้อใน HTTPS:</strong>
-      <ol>
-        <li>บนมือถือ ตั้งค่า Wi-Fi → HTTP Proxy → Manual → Server = <code id="proxy-ip"></code>, Port = <code id="proxy-port"></code></li>
-        <li>เปิดเบราว์เซอร์บนมือถือ ดาวน์โหลด CA cert จาก <code id="proxy-cert-url"></code></li>
-        <li><strong>iOS:</strong> Settings → General → VPN &amp; Device Management → ติดตั้ง profile → จากนั้น Settings → General → About → Certificate Trust Settings → เปิด "Enable Full Trust" ให้ cert นี้</li>
-        <li><strong>Android:</strong> Settings → Security → Install a certificate → CA certificate (แอปบางตัวต้องตั้ง network_security_config เพิ่มถึงจะเชื่อ user CA)</li>
-        <li>เสร็จแล้วเปิดแอป/เว็บบนมือถือ ทราฟฟิกจะโผล่ด้านล่างแบบ real-time</li>
-      </ol>
-      <p class="hint">⚠️ CA cert นี้ให้เครื่องเชื่อ proxy ของเราถอดรหัส HTTPS ได้ ใช้เฉพาะบนอุปกรณ์ทดสอบของคุณเอง และถอนการติดตั้งเมื่อเลิกใช้</p>
     </div>
     <div class="proxy-workspace">
       <div class="proxy-left">
