@@ -584,16 +584,25 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
-  overflow-y: auto;
+  overflow: hidden;              /* พอดีจอ ไม่ต้อง scroll */
   padding: 16px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
-.map-label { display: block; color: var(--muted); font-size: 0.82rem; margin: 12px 0 4px; }
+.map-label { display: block; color: var(--muted); font-size: 0.82rem; margin: 8px 0 3px; flex-shrink: 0; }
 #maplocal-editor input[type="text"],
-#maplocal-editor select,
-#maplocal-editor textarea { width: 100%; }
-#maplocal-editor textarea { font-family: ui-monospace, Menlo, monospace; }
-.map-enable { display: flex; align-items: center; gap: 8px; color: var(--text); }
-.map-btn-row { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+#maplocal-editor select { width: 100%; flex-shrink: 0; }
+#maplocal-editor textarea {
+  width: 100%;
+  font-family: ui-monospace, Menlo, monospace;
+  flex: 1 1 0;                   /* body ยืดเต็มพื้นที่ที่เหลือ */
+  min-height: 70px;
+  resize: none;
+}
+.map-enable { display: flex; align-items: center; gap: 8px; color: var(--text); flex-shrink: 0; }
+.map-btn-row { display: flex; align-items: center; gap: 12px; margin-top: 12px; flex-shrink: 0; }
+#maplocal-editor .hint { flex-shrink: 0; }
 .map-dup-btn {
   background: transparent;
   border: 1px solid var(--border);
