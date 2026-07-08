@@ -34,6 +34,8 @@ function broadcast(event, data) {
 const proxyStore = { flows: [] };
 const proxyImages = new Map(); // "<flowId>:<req|res>" -> { buf, ct }
 let proxyCaPath = null;
+// เมื่อกด disconnect ที่เว็บ → mute ทันที (แอปที่ยัง cache proxy ไว้จะยิงต่อ แต่เราไม่รับ/ไม่โชว์)
+let proxyMuted = false;
 
 // ================= Map Local (mock rules) =================
 let mapRules = [];
@@ -315,6 +317,7 @@ app.get('/api/proxy/flows', (req, res) => {
 
 // รับ flow ที่ถอดรหัสจาก mitmproxy (ผ่าน addon) มาแสดงในแท็บ Proxy — รองรับ HTTPS/h2 เต็มรูปแบบ
 app.post('/api/proxy/ingest', express.json({ limit: '20mb' }), async (req, res) => {
+  if (proxyMuted) return res.json({ ok: true, muted: true }); // ตัดการเชื่อมต่อแล้ว — ไม่รับ flow
   const b = req.body || {};
   const id = b.id || crypto.randomUUID();
   const flow = {
@@ -435,6 +438,7 @@ app.post('/api/devices/connect', express.json(), async (req, res) => {
       target = `127.0.0.1:${MITM_PORT}`;
     }
     await adb([...S, 'shell', 'settings', 'put', 'global', 'http_proxy', target]);
+    proxyMuted = false; // เปิดรับ flow อีกครั้ง
     res.json({ ok: true, connected: true, mode, proxy: target });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -448,7 +452,13 @@ app.post('/api/devices/disconnect', express.json(), async (req, res) => {
   const S = ['-s', serial];
   try {
     await adb([...S, 'shell', 'settings', 'put', 'global', 'http_proxy', ':0']);
+    await adb([...S, 'shell', 'settings', 'delete', 'global', 'http_proxy']).catch(() => {});
     await adb([...S, 'reverse', '--remove', `tcp:${MITM_PORT}`]).catch(() => {});
+    // mute + ล้าง flow list — กันแอปที่ cache proxy ไว้ยิงต่อแล้วโผล่ใหม่
+    proxyMuted = true;
+    proxyStore.flows.length = 0;
+    proxyImages.clear();
+    broadcast('proxy-clear', {});
     res.json({ ok: true, connected: false });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
