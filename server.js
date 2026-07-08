@@ -344,7 +344,16 @@ app.delete('/api/proxy/flows', (req, res) => {
 });
 
 app.get('/api/proxy/info', (req, res) => {
-  res.json({ proxyPort: PROXY_PORT, caReady: !!proxyCaPath });
+  // หา IP วง LAN (IPv4 ตัวแรกที่ไม่ใช่ loopback) เพื่อบอกวิธีเชื่อมแบบ Wi-Fi
+  let lanIp = null;
+  const ifaces = require('os').networkInterfaces();
+  for (const list of Object.values(ifaces)) {
+    for (const i of list || []) {
+      if (i.family === 'IPv4' && !i.internal) { lanIp = i.address; break; }
+    }
+    if (lanIp) break;
+  }
+  res.json({ proxyPort: PROXY_PORT, caReady: !!proxyCaPath, lanIp, mitmPort: 8888 });
 });
 
 // ดาวน์โหลด CA cert เพื่อเอาไปติดตั้งบนอุปกรณ์

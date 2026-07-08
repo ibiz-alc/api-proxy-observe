@@ -402,6 +402,14 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 }
 .postern-modes code { background: var(--bg); color: var(--green); padding: 1px 6px; border-radius: 5px; }
 .postern-modes b { color: var(--text); }
+.mode-row { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; }
+.mode-row + .mode-row { border-top: 1px solid var(--border); }
+.mode-tag { flex-shrink: 0; font-weight: 700; padding: 2px 10px; border-radius: 6px; font-size: 0.8rem; white-space: nowrap; }
+.mode-tag.usb { background: rgba(56,189,248,0.15); color: var(--accent); border: 1px solid var(--accent); }
+.mode-tag.wifi { background: rgba(74,222,128,0.15); color: var(--green); border: 1px solid var(--green); }
+.mode-step { color: var(--muted); font-size: 0.78rem; }
+.mode-warn { color: var(--yellow); }
+.mode-common { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border); font-size: 0.78rem; }
 
 /* filter bar */
 .proxy-filterbar {

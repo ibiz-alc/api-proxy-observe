@@ -463,8 +463,10 @@ let resTab = 'Body';
 (async function initProxy() {
   const host = location.hostname;
   const isLocal = host === 'localhost' || host === '127.0.0.1';
+  let lanIp = isLocal ? null : host;
+  try { lanIp = (await (await fetch('/api/proxy/info')).json()).lanIp || lanIp; } catch { /* ใช้ค่า fallback */ }
   document.getElementById('postern-host').textContent = isLocal ? '127.0.0.1' : host;
-  document.getElementById('postern-lan').textContent = isLocal ? '<IP เครื่องนี้>' : host;
+  document.getElementById('postern-lan').textContent = lanIp || '<IP วง LAN ของ Mac>';
   // help box (อ้าง mitmproxy backend)
   const pip = document.getElementById('proxy-ip'); if (pip) pip.textContent = host;
   const pport = document.getElementById('proxy-port'); if (pport) pport.textContent = '8888';

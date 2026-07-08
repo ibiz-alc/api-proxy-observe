@@ -137,11 +137,21 @@
       <button id="clear-flows" class="danger">🗑️ ล้างทั้งหมด</button>
     </div>
     <div class="postern-modes">
-      เลือก Host ตามการเชื่อม:
-      <b>USB</b> = <code>127.0.0.1</code> (ตั้ง <code>adb reverse tcp:8888 tcp:8888</code>) ·
-      <b>วง LAN เดียวกัน</b> = <code id="postern-lan">IP เครื่องนี้</code> ·
-      <b>ไกล/4G</b> = endpoint จาก <code>ngrok tcp 8888</code>
-      &nbsp;| Port = <code>8888</code> เสมอ (mitmproxy — ถอดรหัส HTTPS)
+      <div class="mode-row">
+        <span class="mode-tag usb">🔌 USB</span>
+        <div>
+          เสถียร/เร็วสุด — <b>Host</b> <code>127.0.0.1</code> · <b>Port</b> <code>8888</code><br/>
+          <span class="mode-step">1. เสียบสาย + เปิด USB debugging &nbsp; 2. บน Mac รัน <code>./start.sh</code> (ตั้ง <code>adb reverse tcp:8888 tcp:8888</code> ให้เอง) &nbsp; 3. ในแอปกรอก host/port ข้างบน → เชื่อมต่อ</span>
+        </div>
+      </div>
+      <div class="mode-row">
+        <span class="mode-tag wifi">📶 Wi-Fi</span>
+        <div>
+          มือถืออยู่วง Wi-Fi เดียวกับ Mac — <b>Host</b> <code id="postern-lan">…</code> · <b>Port</b> <code>8888</code><br/>
+          <span class="mode-step">1. มือถือต่อ Wi-Fi วงเดียวกับ Mac &nbsp; 2. ในแอปกรอก Host = IP ข้างต้น, Port 8888 → เชื่อมต่อ &nbsp; <span class="mode-warn">(Wi-Fi บางที่ (office/สาธารณะ) บล็อกพอร์ต/กันเครื่องคุยกัน — ถ้าต่อไม่ได้ใช้ USB)</span></span>
+        </div>
+      </div>
+      <div class="mode-common">ทั้ง 2 วิธี: ติดตั้ง CA ของ mitmproxy บนมือถือครั้งเดียว (ปุ่ม "ติดตั้ง CA" ในแอป) — ต้องต่อ Mac ให้ mitmproxy รันอยู่ (<code>./start.sh</code>)</div>
     </div>
     <div class="proxy-filterbar">
       <select id="flow-field">
