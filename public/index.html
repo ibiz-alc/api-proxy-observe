@@ -128,11 +128,20 @@
   <!-- ============ Proxy (MITM) ============ -->
   <main id="tab-proxy" class="tab">
     <div class="hook-info">
-      <span>ตั้ง HTTP Proxy บนอุปกรณ์ชี้มาที่</span>
-      <code id="proxy-addr"></code>
-      <button id="proxy-cert-btn">📥 ดาวน์โหลด CA cert</button>
+      <span>🔌 เชื่อม <b>Proxy Postern</b> มาที่ — Host</span>
+      <code id="postern-host">…</code>
+      <span>Port</span>
+      <code id="postern-port">8888</code>
+      <button id="proxy-cert-btn">📥 CA cert</button>
       <button id="proxy-help-btn">❓ วิธีติดตั้ง</button>
       <button id="clear-flows" class="danger">🗑️ ล้างทั้งหมด</button>
+    </div>
+    <div class="postern-modes">
+      เลือก Host ตามการเชื่อม:
+      <b>USB</b> = <code>127.0.0.1</code> (ตั้ง <code>adb reverse tcp:8888 tcp:8888</code>) ·
+      <b>วง LAN เดียวกัน</b> = <code id="postern-lan">IP เครื่องนี้</code> ·
+      <b>ไกล/4G</b> = endpoint จาก <code>ngrok tcp 8888</code>
+      &nbsp;| Port = <code>8888</code> เสมอ (mitmproxy — ถอดรหัส HTTPS)
     </div>
     <div class="proxy-filterbar">
       <select id="flow-field">

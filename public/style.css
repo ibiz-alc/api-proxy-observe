@@ -389,6 +389,20 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
   border-radius: 5px;
   color: var(--green);
 }
+/* hint วิธีเชื่อม Proxy Postern */
+.postern-modes {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 14px;
+  margin-bottom: 10px;
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.8;
+}
+.postern-modes code { background: var(--bg); color: var(--green); padding: 1px 6px; border-radius: 5px; }
+.postern-modes b { color: var(--text); }
+
 /* filter bar */
 .proxy-filterbar {
   display: flex;

@@ -461,12 +461,14 @@ let reqTab = 'Header';
 let resTab = 'Body';
 
 (async function initProxy() {
-  const info = await (await fetch('/api/proxy/info')).json();
   const host = location.hostname;
-  document.getElementById('proxy-addr').textContent = `${host}:${info.proxyPort}`;
-  document.getElementById('proxy-ip').textContent = host;
-  document.getElementById('proxy-port').textContent = info.proxyPort;
-  document.getElementById('proxy-cert-url').textContent = `${location.origin}/api/proxy/cert`;
+  const isLocal = host === 'localhost' || host === '127.0.0.1';
+  document.getElementById('postern-host').textContent = isLocal ? '127.0.0.1' : host;
+  document.getElementById('postern-lan').textContent = isLocal ? '<IP เครื่องนี้>' : host;
+  // help box (อ้าง mitmproxy backend)
+  const pip = document.getElementById('proxy-ip'); if (pip) pip.textContent = host;
+  const pport = document.getElementById('proxy-port'); if (pport) pport.textContent = '8888';
+  const pcert = document.getElementById('proxy-cert-url'); if (pcert) pcert.textContent = 'http://mitm.it (ผ่าน proxy) หรือปุ่ม "ติดตั้ง CA" ในแอป';
   allFlows = await (await fetch('/api/proxy/flows')).json();
   renderProxy();
 })();
