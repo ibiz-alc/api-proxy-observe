@@ -349,7 +349,9 @@ app.post('/api/proxy/ingest', express.json({ limit: '20mb' }), async (req, res) 
     if (!b64) continue;
     try {
       const buf = Buffer.from(b64, 'base64');
-      const ct = side === 'res' ? flow.resContentType : (flow.reqHeaders['content-type'] || 'image/*');
+      // ใช้ mime ที่ addon sniff มา (กันกรณี S3 ตอบ octet-stream) แล้วค่อย fallback content-type จริง
+      const sniffed = b[`${side}ImageType`];
+      const ct = sniffed || (side === 'res' ? flow.resContentType : (flow.reqHeaders['content-type'] || 'image/*'));
       proxyImages.set(`${id}:${side}`, { buf, ct });
       flow[`${side}IsImage`] = true;
       try { flow[`${side}ImageMeta`] = await extractImageMetadata(buf, { withAddress: true }); } catch { flow[`${side}ImageMeta`] = null; }

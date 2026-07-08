@@ -567,6 +567,37 @@ document.getElementById('proxy-help-btn').addEventListener('click', () => {
   const box = document.getElementById('postern-modes');
   box.style.display = box.style.display === 'none' ? 'block' : 'none';
 });
+
+// ตัวลากปรับขนาดรายการ URL (บน) / detail (ล่าง) — เก็บค่าไว้ใน localStorage
+(function initProxyResizer() {
+  const resizer = document.getElementById('proxy-vresizer');
+  const listWrap = document.getElementById('flow-list-wrap');
+  if (!resizer || !listWrap) return;
+  const saved = parseInt(localStorage.getItem('proxyListH') || '', 10);
+  if (saved >= 160) listWrap.style.height = saved + 'px';
+  let dragging = false;
+  resizer.addEventListener('mousedown', (e) => {
+    dragging = true;
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const top = listWrap.getBoundingClientRect().top;
+    const workspace = listWrap.closest('.proxy-workspace').getBoundingClientRect();
+    const max = workspace.bottom - top - 130; // เผื่อพื้นที่ detail ขั้นต่ำ
+    const h = Math.max(160, Math.min(max, e.clientY - top));
+    listWrap.style.height = h + 'px';
+  });
+  window.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    localStorage.setItem('proxyListH', String(parseInt(listWrap.style.height, 10) || 230));
+  });
+})();
 document.getElementById('clear-flows').addEventListener('click', async () => {
   await fetch('/api/proxy/flows', { method: 'DELETE' });
 });
@@ -670,6 +701,7 @@ function renderFlowTable() {
       topRow.push(el('span', { class: `status-badge ${statusClass(f.status)}`, text: String(statusText) }));
     }
     if (f.mapped) topRow.push(el('span', { class: 'map-badge', title: 'ถูก Map Local override', text: '🎯 MAP' }));
+    if (f.resIsImage || f.reqIsImage) topRow.push(el('span', { class: 'image-badge', title: 'response เป็นรูปภาพ', text: '🖼️ IMAGE' }));
     topRow.push(el('span', { class: 'flow-item-meta', text: f.blocked ? 'cert pinning' : `${fmtTime(f.time)} · ${f.durationMs != null ? f.durationMs + 'ms' : '–'} · ${fmtSize(f.resSize)}` }));
     const item = el('div', { class: 'flow-item' + (f.id === selectedFlowId ? ' selected' : '') + (f.mapped ? ' mapped' : '') + (f.blocked ? ' blocked' : '') }, [
       el('div', { class: 'flow-item-top' }, topRow),

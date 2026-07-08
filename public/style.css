@@ -459,27 +459,46 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 
 /* workspace: ซ้าย (URL บน + Device ล่าง) | กลาง (detail) */
 .proxy-workspace {
-  display: grid;
-  grid-template-columns: 360px 1fr;
+  display: flex;
+  flex-direction: row;
   gap: 10px;
   height: calc(100vh - 190px);
-}
-.proxy-left {
-  display: grid;
-  grid-template-rows: 1fr 1fr;
-  gap: 10px;
   min-height: 0;
 }
-.proxy-left > * { min-height: 0; }
-
-/* รายการ URL (ซ้ายบน) */
+/* device (ซ้าย) — แคบ ไม่ต้องกว้าง */
+#device-tree { flex: 0 0 190px; }
+/* คอลัมน์หลัก (ขวา) = URL บน + ตัวลาก + detail ล่าง */
+.proxy-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+/* รายการ URL (บน) — สูงปรับได้ด้วยตัวลาก, ต่ำสุด ~5 แถว */
 .flow-list-wrap {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
   overflow-y: auto;
   position: relative;
+  flex: 0 0 auto;
+  height: 230px;
+  min-height: 160px;
 }
+/* ตัวลากปรับขนาดบน/ล่าง */
+.proxy-vresizer {
+  flex: 0 0 10px;
+  height: 10px;
+  cursor: row-resize;
+  border-radius: 5px;
+  margin: 2px 0;
+  background:
+    linear-gradient(var(--border), var(--border)) center / 40px 3px no-repeat;
+  transition: background-color 0.15s;
+}
+.proxy-vresizer:hover { background-color: var(--panel-2); }
 .pane-title {
   position: sticky;
   top: 0;
@@ -513,6 +532,16 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
   padding: 1px 5px;
 }
 .flow-item.mapped { border-left: 3px solid var(--green); }
+.image-badge {
+  background: rgba(96, 165, 250, 0.15);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
 .blocked-badge {
   background: rgba(248, 113, 113, 0.15);
   color: var(--red);
@@ -557,12 +586,14 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .tree-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tree-count { background: var(--bg); color: var(--muted); border-radius: 10px; padding: 0 8px; font-size: 0.72rem; }
 
-/* detail split (กลาง) */
+/* detail split (ล่าง) — กินพื้นที่ที่เหลือทั้งหมด */
 .flow-detail {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
   overflow: hidden;
+  flex: 1;
+  min-height: 120px;
 }
 .detail-split { display: grid; grid-template-columns: 1fr 1fr; height: 100%; }
 .detail-pane { display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--border); overflow: hidden; }
