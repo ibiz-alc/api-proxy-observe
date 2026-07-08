@@ -520,6 +520,33 @@ app.post('/api/devices/install-ca', express.json(), async (req, res) => {
   }
 });
 
+// ติดตั้งแอป Proxy Postern (APK) ลงเครื่อง — build ให้ถ้ายังไม่มี แล้ว adb install -r
+const POSTERN_DIR = path.join(__dirname, 'android', 'ProxyPostern');
+const POSTERN_APK = path.join(POSTERN_DIR, 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk');
+app.post('/api/devices/install-apk', express.json(), async (req, res) => {
+  const serial = (req.body || {}).serial;
+  if (!serial) return res.status(400).json({ ok: false, error: 'ต้องระบุ serial' });
+  const S = ['-s', serial];
+  try {
+    if (!fs.existsSync(POSTERN_APK)) {
+      if (!fs.existsSync(path.join(POSTERN_DIR, 'gradlew'))) {
+        return res.status(500).json({ ok: false, error: 'ไม่พบ APK และ source (android/ProxyPostern)' });
+      }
+      // build debug APK ให้ก่อน (ครั้งแรกอาจนาน)
+      await execFileP('./gradlew', [':app:assembleDebug', '-q'], {
+        cwd: POSTERN_DIR, timeout: 600000, maxBuffer: 32 * 1024 * 1024,
+        env: { ...process.env, ANDROID_HOME: process.env.ANDROID_HOME || path.join(require('os').homedir(), 'Library/Android/sdk') },
+      });
+    }
+    if (!fs.existsSync(POSTERN_APK)) return res.status(500).json({ ok: false, error: 'build APK ไม่สำเร็จ' });
+    const out = await adb([...S, 'install', '-r', POSTERN_APK], 180000);
+    const ok = /Success/i.test(out);
+    res.json({ ok, output: out.trim().split('\n').filter(Boolean).pop() || 'installed', built: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 app.get('/api/proxy/info', (req, res) => {
   // หา IP วง LAN (IPv4 ตัวแรกที่ไม่ใช่ loopback) เพื่อบอกวิธีเชื่อมแบบ Wi-Fi
   let lanIp = null;

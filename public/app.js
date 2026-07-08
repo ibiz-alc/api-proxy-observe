@@ -559,6 +559,21 @@ document.querySelectorAll('.mode-actions button').forEach((b) => {
         body: JSON.stringify({ serial: dev.serial }),
       })).json();
       alert(r.ok ? `บันทึก ${r.file} บน ${dev.model} + เปิด Settings → เลือก CA certificate ติดตั้ง` : 'ไม่สำเร็จ: ' + (r.error || ''));
+    } else if (b.dataset.act === 'apk') {
+      // ติดตั้งแอป Proxy Postern (APK) ลง device แรกที่เจอ
+      const data = await (await fetch('/api/devices')).json().catch(() => ({}));
+      const dev = (data.devices || [])[0];
+      if (!dev) { alert('ไม่พบ device (เสียบ USB + เปิด USB debugging)'); return; }
+      const orig = b.textContent;
+      b.disabled = true; b.textContent = '⏳ กำลังติดตั้ง (ครั้งแรก build อาจนาน)…';
+      try {
+        const r = await (await fetch('/api/devices/install-apk', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ serial: dev.serial }),
+        })).json();
+        alert(r.ok ? `✅ ติดตั้งแอป Proxy Postern บน ${dev.model} แล้ว` : 'ไม่สำเร็จ: ' + (r.error || r.output || ''));
+      } catch (e) { alert('error: ' + e.message); }
+      b.disabled = false; b.textContent = orig;
     }
   });
 });
