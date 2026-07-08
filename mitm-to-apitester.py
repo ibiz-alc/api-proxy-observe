@@ -4,6 +4,7 @@ mitmproxy addon สำหรับ ApiTester
 - request : บังคับใช้กฎ Map Local (ดึงจาก ApiTester) → ตอบ response ปลอมโดยไม่ยิงเซิร์ฟเวอร์จริง
 รัน: mitmdump --listen-host 0.0.0.0 --listen-port 8888 -s mitm-to-apitester.py
 """
+import base64
 import json
 import time
 import urllib.request
@@ -13,7 +14,15 @@ APITESTER = "http://127.0.0.1:3000"
 INGEST = APITESTER + "/api/proxy/ingest"
 RULES_URL = APITESTER + "/api/maplocal"
 MAX_BODY = 200 * 1024
+MAX_IMAGE = 6 * 1024 * 1024   # ส่ง image สูงสุด 6MB (ไว้โชว์รูป + EXIF)
 RULES_TTL = 3.0  # cache กฎ Map Local กี่วินาที
+
+
+def _image_b64(content, headers):
+    ct = headers.get("content-type", "").lower()
+    if content and ct.startswith("image/") and len(content) <= MAX_IMAGE:
+        return base64.b64encode(content).decode("ascii")
+    return None
 
 _rules = []
 _rules_at = 0.0
@@ -104,6 +113,8 @@ def response(flow: http.HTTPFlow):
         "resBody": _text(res.content, res.headers),
         "resContentType": res.headers.get("content-type"),
         "resSize": len(res.content or b""),
+        "reqImageB64": _image_b64(req.content, req.headers),
+        "resImageB64": _image_b64(res.content, res.headers),
         "mapped": mapped,
         "durationMs": int((res.timestamp_end - req.timestamp_start) * 1000)
         if res.timestamp_end and req.timestamp_start else None,

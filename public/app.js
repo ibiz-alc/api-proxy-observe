@@ -689,6 +689,7 @@ function headersToRaw(headers) {
 // สร้างแผงครึ่งหนึ่ง (Request หรือ Response) พร้อม sub-tabs Header / Body / Raw
 // extra = element เสริมชิดขวาของแถบแท็บ (เช่น ปุ่ม Map Local)
 function buildDetailPane(title, headline, tabs, activeTab, onTab, extra) {
+  if (!(activeTab in tabs)) activeTab = Object.keys(tabs)[0]; // กัน tab ที่ไม่มีในflowนี้ (เช่น Image)
   const pane = el('div', { class: 'detail-pane' });
   const head = el('div', { class: 'detail-pane-head' }, [
     el('span', { class: 'detail-pane-title', text: title }),
@@ -726,6 +727,31 @@ function mapLocalFromFlow(f) {
   renderMapEditor(rule);
 }
 
+// แท็บรูป: โชว์ image ที่ดักได้ + EXIF metadata
+function imageTab(f, side) {
+  const url = `/api/proxy/flows/${f.id}/image?side=${side}`;
+  const m = f[`${side}ImageMeta`];
+  const wrap = el('div', { class: 'img-tab' });
+  wrap.appendChild(el('img', { class: 'img-tab-preview', src: url, alt: 'image' }));
+  wrap.appendChild(el('a', { class: 'img-tab-dl', href: url, target: '_blank', text: '⬇ เปิดรูปเต็ม / ดาวน์โหลด' }));
+  if (!m) { wrap.appendChild(el('p', { class: 'hint', text: 'รูปนี้ไม่มี EXIF metadata ฝังอยู่' })); return wrap; }
+  wrap.appendChild(el('div', { class: 'section-title', text: 'Image Metadata (EXIF)' }));
+  const hi = el('div', { class: 'meta-highlight' });
+  wrap.appendChild(hi);
+  if (m.imageDescription) hi.appendChild(metaCard('📝 คำอธิบายภาพ', String(m.imageDescription)));
+  hi.appendChild(metaCard('📅 วันที่ถ่าย', m.dateTaken ? fmtDate(m.dateTaken) : 'ไม่พบ'));
+  if (m.camera) hi.appendChild(metaCard('📷 กล้อง', m.camera));
+  if (m.width && m.height) hi.appendChild(metaCard('📐 ขนาดภาพ', `${m.width} × ${m.height}`));
+  if (m.latitude != null && m.longitude != null) {
+    const lat = m.latitude.toFixed(6); const lon = m.longitude.toFixed(6);
+    hi.appendChild(metaCard('📍 พิกัด GPS', el('div', { html: `${lat}, ${lon}<br/><a href="https://www.google.com/maps?q=${lat},${lon}" target="_blank">🗺️ เปิด Google Maps</a>` })));
+    if (m.address) hi.appendChild(metaCard('🏠 ที่อยู่', m.address));
+  } else {
+    hi.appendChild(metaCard('📍 พิกัด GPS', 'ไม่พบพิกัดในรูปนี้'));
+  }
+  return wrap;
+}
+
 function renderFlowDetail(f) {
   flowDetailEl.innerHTML = '';
 
@@ -736,10 +762,18 @@ function renderFlowDetail(f) {
     Body: bodyBlock(f.reqBody),
     Raw: el('pre', { class: 'code-block', text: reqRawText }),
   };
+  if (f.reqIsImage) reqTabs['🖼️ Image'] = imageTab(f, 'req');
   const reqHeadline = el('span', { class: 'detail-url', text: `${f.method} ${f.url}`, title: f.url });
+  const copyUrlBtn = el('button', { class: 'maplocal-icon-btn', type: 'button', title: 'คัดลอก URL', text: '📋 Copy URL' });
+  copyUrlBtn.addEventListener('click', () => {
+    navigator.clipboard.writeText(f.url);
+    copyUrlBtn.textContent = '✅ Copied';
+    setTimeout(() => { copyUrlBtn.textContent = '📋 Copy URL'; }, 1200);
+  });
   const mapBtn = el('button', { class: 'maplocal-icon-btn', type: 'button', title: 'สร้าง Map Local จาก flow นี้ (prefill response)', text: '🎯 Map Local' });
   mapBtn.addEventListener('click', () => mapLocalFromFlow(f));
-  const reqPane = buildDetailPane('Request', reqHeadline, reqTabs, reqTab, (name) => { reqTab = name; renderFlowDetail(f); }, mapBtn);
+  const reqExtra = el('div', { class: 'detail-extra' }, [copyUrlBtn, mapBtn]);
+  const reqPane = buildDetailPane('Request', reqHeadline, reqTabs, reqTab, (name) => { reqTab = name; renderFlowDetail(f); }, reqExtra);
 
   // ----- Response pane -----
   const resRawText = f.error
@@ -750,6 +784,7 @@ function renderFlowDetail(f) {
     Body: f.error ? el('pre', { class: 'code-block', text: `ERROR: ${f.error}` }) : bodyBlock(f.resBody),
     Raw: el('pre', { class: 'code-block', text: resRawText }),
   };
+  if (f.resIsImage) resTabs['🖼️ Image'] = imageTab(f, 'res');
   const resHeadline = f.error
     ? el('span', { class: 'status-badge status-err', text: 'ERROR' })
     : el('span', {}, [

@@ -32,6 +32,7 @@ function broadcast(event, data) {
 
 // เก็บ flow ที่ proxy ดักได้ (แยกจาก hook requests)
 const proxyStore = { flows: [] };
+const proxyImages = new Map(); // "<flowId>:<req|res>" -> { buf, ct }
 let proxyCaPath = null;
 
 // ================= Map Local (mock rules) =================
@@ -313,10 +314,11 @@ app.get('/api/proxy/flows', (req, res) => {
 });
 
 // รับ flow ที่ถอดรหัสจาก mitmproxy (ผ่าน addon) มาแสดงในแท็บ Proxy — รองรับ HTTPS/h2 เต็มรูปแบบ
-app.post('/api/proxy/ingest', express.json({ limit: '15mb' }), (req, res) => {
+app.post('/api/proxy/ingest', express.json({ limit: '20mb' }), async (req, res) => {
   const b = req.body || {};
+  const id = b.id || crypto.randomUUID();
   const flow = {
-    id: b.id || crypto.randomUUID(),
+    id,
     time: b.time || new Date().toISOString(),
     scheme: b.scheme || 'https',
     device: b.device || 'mitmproxy',
@@ -338,10 +340,35 @@ app.post('/api/proxy/ingest', express.json({ limit: '15mb' }), (req, res) => {
     mapped: b.mapped === true,
     blocked: false,
   };
+  // เก็บ image bytes (req/res) แยกไว้ + แกะ EXIF ให้เลย
+  for (const side of ['req', 'res']) {
+    const b64 = b[`${side}ImageB64`];
+    if (!b64) continue;
+    try {
+      const buf = Buffer.from(b64, 'base64');
+      const ct = side === 'res' ? flow.resContentType : (flow.reqHeaders['content-type'] || 'image/*');
+      proxyImages.set(`${id}:${side}`, { buf, ct });
+      flow[`${side}IsImage`] = true;
+      try { flow[`${side}ImageMeta`] = await extractImageMetadata(buf, { withAddress: true }); } catch { flow[`${side}ImageMeta`] = null; }
+    } catch { /* ignore bad image */ }
+  }
   proxyStore.flows.unshift(flow);
-  while (proxyStore.flows.length > 300) proxyStore.flows.pop();
+  while (proxyStore.flows.length > 300) {
+    const removed = proxyStore.flows.pop();
+    proxyImages.delete(`${removed.id}:req`);
+    proxyImages.delete(`${removed.id}:res`);
+  }
   broadcast('proxy', flow);
-  res.json({ ok: true, id: flow.id });
+  res.json({ ok: true, id });
+});
+
+// ส่งรูปที่ดักได้ (req/res) ให้หน้าเว็บโชว์
+app.get('/api/proxy/flows/:id/image', (req, res) => {
+  const side = req.query.side === 'req' ? 'req' : 'res';
+  const img = proxyImages.get(`${req.params.id}:${side}`);
+  if (!img) return res.status(404).json({ error: 'no image' });
+  res.setHeader('Content-Type', img.ct || 'application/octet-stream');
+  res.send(img.buf);
 });
 
 app.delete('/api/proxy/flows', (req, res) => {
