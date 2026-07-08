@@ -128,35 +128,38 @@
   <!-- ============ Proxy (MITM) ============ -->
   <main id="tab-proxy" class="tab">
     <div class="hook-info">
-      <span>🌐 <b>Proxy</b> — ดัก/ถอดรหัส HTTPS ผ่าน Proxy Postern</span>
-      <button id="proxy-cert-btn">📥 CA cert</button>
-      <button id="proxy-help-btn">❓ วิธีติดตั้ง</button>
-      <button id="pd-toggle">📲 เชื่อมจากเว็บ (USB)</button>
+      <span>🌐 <b>Proxy</b> — ดัก/ถอดรหัส HTTPS (ไม่ต้องใช้ Postern แล้ว)</span>
+      <button id="proxy-help-btn">❓ วิธีติดตั้ง / เชื่อมต่อ</button>
       <button id="clear-flows" class="danger">🗑️ ล้างทั้งหมด</button>
     </div>
     <div class="postern-modes" id="postern-modes" style="display:none">
-      <div class="mode-row">
-        <span class="mode-tag usb">🔌 USB</span>
-        <div>
-          เสถียร/เร็วสุด — <b>Host</b> <code>127.0.0.1</code> · <b>Port</b> <code>8888</code><br/>
-          <span class="mode-step">1. เสียบสาย + เปิด USB debugging &nbsp; 2. บน Mac รัน <code>./start.sh</code> (ตั้ง <code>adb reverse tcp:8888 tcp:8888</code> ให้เอง) &nbsp; 3. ในแอปกรอก host/port ข้างบน → เชื่อมต่อ (หรือกด "เชื่อมจากเว็บ")</span>
+      <div class="mode-block">
+        <div class="mode-row">
+          <span class="mode-tag usb">🔌 USB</span>
+          <div>เสถียร/เร็วสุด — เสียบสาย + เปิด USB debugging บนมือถือ (จัดการ proxy ให้อัตโนมัติผ่านเว็บ)</div>
+        </div>
+        <div class="mode-actions">
+          <button class="pd-btn primary" data-mode="usb" data-act="show">🔌 เชื่อม USB (จากเว็บ)</button>
+          <button class="pd-btn" data-mode="usb" data-act="ca">📥 ติดตั้ง CA (USB)</button>
         </div>
       </div>
-      <div class="mode-row">
-        <span class="mode-tag wifi">📶 Wi-Fi</span>
-        <div>
-          มือถืออยู่วง Wi-Fi เดียวกับ Mac — <b>Host</b> <code id="postern-lan">…</code> · <b>Port</b> <code>8888</code><br/>
-          <span class="mode-step">1. มือถือต่อ Wi-Fi วงเดียวกับ Mac &nbsp; 2. ในแอปกรอก Host = IP ข้างต้น, Port 8888 → เชื่อมต่อ &nbsp; <span class="mode-warn">(Wi-Fi บางที่ (office/สาธารณะ) บล็อกพอร์ต/กันเครื่องคุยกัน — ถ้าต่อไม่ได้ใช้ USB)</span></span>
+      <div class="mode-block">
+        <div class="mode-row">
+          <span class="mode-tag wifi">📶 Wi-Fi</span>
+          <div>มือถืออยู่วง Wi-Fi เดียวกับ Mac (Host = <code id="postern-lan">…</code> : <code>8888</code>) — <span class="mode-warn">Wi-Fi บางที่บล็อกพอร์ต ถ้าไม่ได้ใช้ USB</span></div>
+        </div>
+        <div class="mode-actions">
+          <button class="pd-btn primary" data-mode="wifi" data-act="show">📶 เชื่อม Wi-Fi (จากเว็บ)</button>
+          <button class="pd-btn" data-mode="wifi" data-act="ca">📥 ติดตั้ง CA (Wi-Fi)</button>
         </div>
       </div>
-      <div class="mode-common">ทั้ง 2 วิธี: ติดตั้ง CA ของ mitmproxy บนมือถือครั้งเดียว (ปุ่ม "ติดตั้ง CA" ในแอป) — ต้องต่อ Mac ให้ mitmproxy รันอยู่ (<code>./start.sh</code>)</div>
-    </div>
-    <div class="postern-devices" id="postern-devices" style="display:none">
-      <div class="pd-head">
-        <span>📲 เชื่อม Proxy Postern จากเว็บ (USB)</span>
-        <button id="pd-refresh" title="รีเฟรชรายการ device">🔄 รีเฟรช</button>
+      <div class="pd-panel" id="pd-panel" style="display:none">
+        <div class="pd-head">
+          <span id="pd-title">📲 เลือก device เพื่อเชื่อม</span>
+          <button id="pd-refresh" title="รีเฟรช">🔄 รีเฟรช</button>
+        </div>
+        <div id="pd-list"><span class="hint">กำลังโหลด device…</span></div>
       </div>
-      <div id="pd-list"><span class="hint">กำลังโหลด device…</span></div>
     </div>
     <div class="proxy-filterbar">
       <select id="flow-field">

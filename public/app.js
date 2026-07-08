@@ -470,60 +470,89 @@ let resTab = 'Body';
   renderProxy();
 })();
 
-// ---- ควบคุมมือถือผ่านเว็บ (เชื่อม Proxy Postern ด้วย adb) ----
+// ---- ควบคุมมือถือผ่านเว็บ (ตั้ง global http_proxy ผ่าน adb — ไม่ต้องใช้ Postern) ----
 const pdListEl = document.getElementById('pd-list');
+let pdMode = 'usb'; // โหมดที่กำลังเลือก (usb | wifi)
+
 async function renderDevices() {
+  document.getElementById('pd-title').textContent =
+    pdMode === 'wifi' ? '📶 เลือก device เชื่อมแบบ Wi-Fi' : '🔌 เลือก device เชื่อมแบบ USB';
   pdListEl.innerHTML = '<span class="hint">กำลังโหลด device…</span>';
   let data;
   try { data = await (await fetch('/api/devices')).json(); }
   catch { pdListEl.innerHTML = '<span class="hint">เรียก API ไม่ได้</span>'; return; }
   const devices = (data && data.devices) || [];
   if (!devices.length) {
-    pdListEl.innerHTML = '<span class="hint">ไม่พบ device (เสียบ USB + เปิด USB debugging) — หรือใช้ Wi-Fi เชื่อมจากแอปเอง</span>';
+    pdListEl.innerHTML = '<span class="hint">ไม่พบ device — เสียบ USB + เปิด USB debugging (จำเป็นทั้ง USB และ Wi-Fi เพื่อให้เว็บสั่ง adb ได้)</span>';
     return;
   }
   pdListEl.innerHTML = '';
   for (const d of devices) {
+    const label = d.connected ? `เชื่อมอยู่ (${d.mode || ''})` : 'ยังไม่เชื่อม';
     const row = el('div', { class: 'pd-row' }, [
       el('span', { class: 'pd-dot ' + (d.connected ? 'on' : 'off'), text: d.connected ? '🟢' : '⚪' }),
-      el('span', { class: 'pd-name', text: `${d.model}` }),
-      el('span', { class: 'pd-serial', text: d.serial }),
+      el('div', { class: 'pd-name-wrap' }, [
+        el('div', { class: 'pd-name', text: d.model }),
+        el('div', { class: 'pd-serial', text: `${d.serial} · ${label}` }),
+      ]),
     ]);
-    const btn = el('button', {
+    const connBtn = el('button', {
       class: d.connected ? 'pd-btn danger' : 'pd-btn primary',
-      text: d.connected ? 'ตัดการเชื่อมต่อ' : 'เชื่อมต่อ',
+      text: d.connected ? 'ตัด' : (pdMode === 'wifi' ? 'เชื่อม Wi-Fi' : 'เชื่อม USB'),
     });
-    btn.addEventListener('click', async () => {
-      btn.disabled = true; btn.textContent = d.connected ? 'กำลังตัด…' : 'กำลังเชื่อม…';
+    connBtn.addEventListener('click', async () => {
+      connBtn.disabled = true; connBtn.textContent = '…';
       const url = d.connected ? '/api/devices/disconnect' : '/api/devices/connect';
       try {
         const r = await (await fetch(url, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ serial: d.serial }),
+          body: JSON.stringify({ serial: d.serial, mode: pdMode }),
         })).json();
         if (!r.ok) alert('ไม่สำเร็จ: ' + (r.error || ''));
-        else if (!d.connected && !r.connected) alert('กดเชื่อมแล้วแต่ VPN ยังไม่ขึ้น — ลองกดในแอป หรือดู VPN consent บนมือถือ');
       } catch (e) { alert('error: ' + e.message); }
       renderDevices();
     });
-    row.appendChild(btn);
+    const caBtn = el('button', { class: 'pd-btn', text: '📥 CA' });
+    caBtn.addEventListener('click', async () => {
+      caBtn.disabled = true;
+      try {
+        const r = await (await fetch('/api/devices/install-ca', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ serial: d.serial }),
+        })).json();
+        alert(r.ok ? `บันทึก ${r.file} + เปิด Settings แล้ว → เลือก CA certificate ติดตั้ง` : 'ไม่สำเร็จ: ' + (r.error || ''));
+      } catch (e) { alert('error: ' + e.message); }
+      caBtn.disabled = false;
+    });
+    row.appendChild(connBtn);
+    row.appendChild(caBtn);
     pdListEl.appendChild(row);
   }
 }
 document.getElementById('pd-refresh').addEventListener('click', renderDevices);
 
-// ปุ่ม "📲 เชื่อมจากเว็บ" — เปิด/ปิด panel device (โหลด device ตอนเปิด)
-document.getElementById('pd-toggle').addEventListener('click', () => {
-  const box = document.getElementById('postern-devices');
-  const show = box.style.display === 'none';
-  box.style.display = show ? 'block' : 'none';
-  if (show) renderDevices();
+// ปุ่มในแต่ละวิธี (data-mode + data-act)
+document.querySelectorAll('.mode-actions button').forEach((b) => {
+  b.addEventListener('click', async () => {
+    pdMode = b.dataset.mode;
+    if (b.dataset.act === 'show') {
+      document.getElementById('pd-panel').style.display = 'block';
+      renderDevices();
+    } else if (b.dataset.act === 'ca') {
+      // ติดตั้ง CA ให้ device แรกที่เจอ
+      const data = await (await fetch('/api/devices')).json().catch(() => ({}));
+      const dev = (data.devices || [])[0];
+      if (!dev) { alert('ไม่พบ device (เสียบ USB)'); return; }
+      const r = await (await fetch('/api/devices/install-ca', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serial: dev.serial }),
+      })).json();
+      alert(r.ok ? `บันทึก ${r.file} บน ${dev.model} + เปิด Settings → เลือก CA certificate ติดตั้ง` : 'ไม่สำเร็จ: ' + (r.error || ''));
+    }
+  });
 });
 
-document.getElementById('proxy-cert-btn').addEventListener('click', () => {
-  window.location.href = '/api/proxy/cert';
-});
-// ปุ่ม "❓ วิธีติดตั้ง" — เปิด/ปิด hint USB/Wi-Fi
+// ปุ่ม "❓ วิธีติดตั้ง / เชื่อมต่อ" — เปิด/ปิด
 document.getElementById('proxy-help-btn').addEventListener('click', () => {
   const box = document.getElementById('postern-modes');
   box.style.display = box.style.display === 'none' ? 'block' : 'none';

@@ -350,15 +350,24 @@ app.delete('/api/proxy/flows', (req, res) => {
   res.json({ ok: true });
 });
 
-// ================= ควบคุมมือถือผ่าน adb (เชื่อม Proxy Postern จากเว็บ) =================
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
+// ================= ควบคุมมือถือผ่าน adb (ตั้ง global http_proxy — ไม่ต้องใช้ Postern) =================
 async function adb(args, timeout = 15000) {
   const { stdout } = await execFileP(ADB, args, { timeout, maxBuffer: 8 * 1024 * 1024 });
   return stdout;
 }
 
-// อ่านรายการ device ที่ต่ออยู่ + สถานะ VPN ของแต่ละเครื่อง
+// IP วง LAN ของ Mac (IPv4 ตัวแรกที่ไม่ใช่ loopback)
+function getLanIp() {
+  const ifaces = require('os').networkInterfaces();
+  for (const list of Object.values(ifaces)) {
+    for (const i of list || []) {
+      if (i.family === 'IPv4' && !i.internal) return i.address;
+    }
+  }
+  return null;
+}
+
+// อ่านรายการ device + สถานะ proxy (global http_proxy ตั้งอยู่ไหม)
 async function listDevices() {
   let out = '';
   try { out = await adb(['devices', '-l']); } catch { return []; }
@@ -368,56 +377,68 @@ async function listDevices() {
     if (!m) continue;
     const serial = m[1];
     const model = (m[2].match(/model:(\S+)/) || [])[1] || serial;
-    let connected = false;
-    try {
-      const ip = await adb(['-s', serial, 'shell', 'ip', '-br', 'addr']);
-      connected = /tun0/.test(ip);
-    } catch { /* ignore */ }
-    devices.push({ serial, model: model.replace(/_/g, ' '), connected });
+    let proxy = '';
+    try { proxy = (await adb(['-s', serial, 'shell', 'settings', 'get', 'global', 'http_proxy'])).trim(); } catch { /* ignore */ }
+    const connected = !!proxy && proxy !== ':0' && proxy !== 'null';
+    let mode = null;
+    if (connected) mode = proxy.startsWith('127.0.0.1') ? 'usb' : 'wifi';
+    devices.push({ serial, model: model.replace(/_/g, ' '), connected, proxy: connected ? proxy : null, mode });
   }
   return devices;
 }
 
 app.get('/api/devices', async (req, res) => {
-  try { res.json({ ok: true, devices: await listDevices() }); }
+  try { res.json({ ok: true, devices: await listDevices(), lanIp: getLanIp(), port: MITM_PORT }); }
   catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-// เชื่อม Proxy Postern บน device ที่เลือก: reverse → เปิดแอป → กดปุ่มเชื่อมต่อ → เช็ค tun0
+// เชื่อม: ตั้ง global http_proxy ให้ทั้งเครื่อง (okhttp/แอปเคารพ) — mode: usb | wifi
 app.post('/api/devices/connect', express.json(), async (req, res) => {
-  const serial = (req.body || {}).serial;
+  const { serial, mode = 'usb' } = req.body || {};
   if (!serial) return res.status(400).json({ ok: false, error: 'ต้องระบุ serial' });
   const S = ['-s', serial];
   try {
-    await adb([...S, 'reverse', `tcp:${MITM_PORT}`, `tcp:${MITM_PORT}`]);
-    await adb([...S, 'shell', 'monkey', '-p', POSTERN_PKG, '-c', 'android.intent.category.LAUNCHER', '1']);
-    await sleep(2500);
-    // หาปุ่ม "เชื่อมต่อ" จาก UI
-    await adb([...S, 'shell', 'uiautomator', 'dump', '/sdcard/u.xml']);
-    const xml = await adb([...S, 'shell', 'cat', '/sdcard/u.xml']);
-    const re = /text="เชื่อมต่อ"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/;
-    const m = xml.match(re);
-    if (m) {
-      const cx = (Number(m[1]) + Number(m[3])) >> 1;
-      const cy = (Number(m[2]) + Number(m[4])) >> 1;
-      await adb([...S, 'shell', 'input', 'tap', String(cx), String(cy)]);
-      await sleep(4000);
+    let target;
+    if (mode === 'wifi') {
+      const lan = getLanIp();
+      if (!lan) return res.status(500).json({ ok: false, error: 'หา LAN IP ของ Mac ไม่เจอ' });
+      target = `${lan}:${MITM_PORT}`;
+    } else {
+      await adb([...S, 'reverse', `tcp:${MITM_PORT}`, `tcp:${MITM_PORT}`]);
+      target = `127.0.0.1:${MITM_PORT}`;
     }
-    const ip = await adb([...S, 'shell', 'ip', '-br', 'addr']);
-    const connected = /tun0/.test(ip);
-    res.json({ ok: true, connected, tapped: !!m });
+    await adb([...S, 'shell', 'settings', 'put', 'global', 'http_proxy', target]);
+    res.json({ ok: true, connected: true, mode, proxy: target });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
 
-// ตัดการเชื่อมต่อ: force-stop แอป (ปิด VPN)
+// ตัด: ล้าง global http_proxy + ลบ reverse
 app.post('/api/devices/disconnect', express.json(), async (req, res) => {
   const serial = (req.body || {}).serial;
   if (!serial) return res.status(400).json({ ok: false, error: 'ต้องระบุ serial' });
+  const S = ['-s', serial];
   try {
-    await adb(['-s', serial, 'shell', 'am', 'force-stop', POSTERN_PKG]);
+    await adb([...S, 'shell', 'settings', 'put', 'global', 'http_proxy', ':0']);
+    await adb([...S, 'reverse', '--remove', `tcp:${MITM_PORT}`]).catch(() => {});
     res.json({ ok: true, connected: false });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ดัน CA ของ mitmproxy เข้าเครื่อง (Downloads) + เปิดหน้า Settings ให้ติดตั้ง
+app.post('/api/devices/install-ca', express.json(), async (req, res) => {
+  const serial = (req.body || {}).serial;
+  if (!serial) return res.status(400).json({ ok: false, error: 'ต้องระบุ serial' });
+  const S = ['-s', serial];
+  const caPath = path.join(require('os').homedir(), '.mitmproxy', 'mitmproxy-ca-cert.cer');
+  if (!fs.existsSync(caPath)) return res.status(500).json({ ok: false, error: 'ไม่พบ CA ของ mitmproxy (รัน mitmproxy ก่อน)' });
+  try {
+    await adb([...S, 'push', caPath, '/sdcard/Download/mitmproxy-ca.crt']);
+    await adb([...S, 'shell', 'am', 'start', '-a', 'android.settings.SECURITY_SETTINGS']);
+    res.json({ ok: true, file: 'Download/mitmproxy-ca.crt' });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
@@ -619,6 +640,22 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`API Tester รันอยู่ที่ http://localhost:${PORT}`);
   console.log(`Hook endpoint: http://localhost:${PORT}/hook (รับทุก method ทุก path ย่อย)`);
 });
+
+// ประกาศ service ผ่าน mDNS/Bonjour ให้แอปในวง Wi-Fi เดียวกันค้นหา mitmproxy เจอเอง (auto-fill)
+try {
+  const { Bonjour } = require('bonjour-service');
+  const bonjour = new Bonjour();
+  bonjour.publish({
+    name: `ApiTester Proxy (${require('os').hostname()})`,
+    type: 'apitester',           // ประกาศเป็น _apitester._tcp
+    protocol: 'tcp',
+    port: MITM_PORT,             // พอร์ต mitmproxy ที่มือถือเชื่อม
+    txt: { mitm: '8888', web: String(PORT) },
+  });
+  console.log(`mDNS: ประกาศ _apitester._tcp พอร์ต ${MITM_PORT} (แอปในวง Wi-Fi เดียวกันค้นหาเจอเอง)`);
+} catch (err) {
+  console.error('mDNS ประกาศไม่สำเร็จ:', err.message);
+}
 
 startProxy({
   port: PROXY_PORT,
