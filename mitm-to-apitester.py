@@ -167,7 +167,8 @@ def response(flow: http.HTTPFlow):
         "device": client,
         "userAgent": req.headers.get("user-agent"),
         "method": req.method,
-        "host": req.host,
+        # pretty_host = domain จาก Host header/SNI (แทน req.host ที่บางทีได้เป็น IP)
+        "host": req.pretty_host,
         "path": req.path,
         "url": req.pretty_url,
         "reqHeaders": dict(req.headers),
