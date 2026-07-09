@@ -458,6 +458,8 @@ app.post('/api/devices/connect', express.json(), async (req, res) => {
   try {
     const { host, target } = await resolveTarget(S, mode);
     if (method === 'postern') {
+      // กันชนกับโหมด proxy: ล้าง global http_proxy ทิ้งก่อน (อย่าให้สองโหมดซ้อนกัน)
+      await adb([...S, 'shell', 'settings', 'delete', 'global', 'http_proxy']).catch(() => {});
       // ฆ่า instance เก่าให้หมดก่อน — process :vpn init เอนจิน (lwIP) ได้ครั้งเดียว/process
       // ถ้าไม่เคลียร์ process เก่าที่กำลังตาย จะชนกับ start ใหม่ → service ค้าง/ANR → tun ไม่ขึ้น
       await adb([...S, 'shell', 'am', 'force-stop', POSTERN_PKG]).catch(() => {});
@@ -470,6 +472,9 @@ app.post('/api/devices/connect', express.json(), async (req, res) => {
       proxyMuted = false;
       return res.json({ ok: true, connected: true, method, mode, host, port: MITM_PORT });
     }
+    // โหมด proxy: กันชนกับ Postern — ปิด VPN (force-stop แอป) ก่อน ไม่งั้น VPN จะ hijack
+    // loopback/reverse tunnel ทำให้ http_proxy 127.0.0.1:8888 ส่งไม่ถึง mitmproxy
+    await adb([...S, 'shell', 'am', 'force-stop', POSTERN_PKG]).catch(() => {});
     await adb([...S, 'shell', 'settings', 'put', 'global', 'http_proxy', target]);
     proxyMuted = false; // เปิดรับ flow อีกครั้ง
     res.json({ ok: true, connected: true, method, mode, proxy: target });
