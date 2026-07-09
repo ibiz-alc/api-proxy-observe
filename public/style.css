@@ -411,6 +411,10 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .mode-tag.usb { background: rgba(56,189,248,0.15); color: var(--accent); border: 1px solid var(--accent); }
 .mode-tag.wifi { background: rgba(74,222,128,0.15); color: var(--green); border: 1px solid var(--green); }
 .mode-tag.app { background: rgba(250,204,21,0.15); color: var(--yellow); border: 1px solid var(--yellow); }
+.mode-custom { display: flex; align-items: center; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.mode-custom-label { font-size: 0.78rem; color: var(--muted); }
+.mode-custom #postern-custom-host { flex: 1; min-width: 180px; padding: 4px 8px; font-size: 0.82rem; }
+.mode-custom #postern-custom-port { width: 64px; padding: 4px 8px; font-size: 0.82rem; }
 .mode-step { color: var(--muted); font-size: 0.78rem; }
 .mode-warn { color: var(--yellow); }
 .mode-common { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border); font-size: 0.78rem; }

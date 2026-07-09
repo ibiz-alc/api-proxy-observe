@@ -456,8 +456,18 @@ app.post('/api/devices/connect', express.json(), async (req, res) => {
   if (!serial) return res.status(400).json({ ok: false, error: 'ต้องระบุ serial' });
   const S = ['-s', serial];
   try {
-    const { host, target } = await resolveTarget(S, mode);
     if (method === 'postern') {
+      // เลือก host: usb=127.0.0.1(+reverse) / wifi=IP Mac / custom=host ที่กรอกเอง (เช่น Tailscale IP, tunnel)
+      let phost;
+      let pport = MITM_PORT;
+      if (mode === 'custom') {
+        phost = String((req.body || {}).host || '').trim();
+        if (!phost) return res.status(400).json({ ok: false, error: 'โหมด custom ต้องระบุ host' });
+        const p = parseInt((req.body || {}).port, 10);
+        if (p >= 1 && p <= 65535) pport = p;
+      } else {
+        phost = (await resolveTarget(S, mode)).host; // usb จะตั้ง adb reverse ให้ด้วย
+      }
       // กันชนกับโหมด proxy: ล้าง global http_proxy ทิ้งก่อน (อย่าให้สองโหมดซ้อนกัน)
       await adb([...S, 'shell', 'settings', 'delete', 'global', 'http_proxy']).catch(() => {});
       // ฆ่า instance เก่าให้หมดก่อน — process :vpn init เอนจิน (lwIP) ได้ครั้งเดียว/process
@@ -466,12 +476,13 @@ app.post('/api/devices/connect', express.json(), async (req, res) => {
       await new Promise((r) => setTimeout(r, 800));
       // สั่งแอปผ่าน intent: auto-fill host/port แล้ว connect (VPN) ด้วย process ใหม่สด
       await adb([...S, 'shell', 'am', 'start', '-n', `${POSTERN_PKG}/.MainActivity`,
-        '--es', 'apitester_host', host,
-        '--ei', 'apitester_port', String(MITM_PORT),
+        '--es', 'apitester_host', phost,
+        '--ei', 'apitester_port', String(pport),
         '--ez', 'apitester_connect', 'true']);
       proxyMuted = false;
-      return res.json({ ok: true, connected: true, method, mode, host, port: MITM_PORT });
+      return res.json({ ok: true, connected: true, method, mode, host: phost, port: pport });
     }
+    const { target } = await resolveTarget(S, mode);
     // โหมด proxy: กันชนกับ Postern — ปิด VPN (force-stop แอป) ก่อน ไม่งั้น VPN จะ hijack
     // loopback/reverse tunnel ทำให้ http_proxy 127.0.0.1:8888 ส่งไม่ถึง mitmproxy
     await adb([...S, 'shell', 'am', 'force-stop', POSTERN_PKG]).catch(() => {});
