@@ -584,28 +584,6 @@ document.querySelectorAll('.mode-actions button').forEach((b) => {
   });
 });
 
-// เชื่อม Postern แบบ custom host (Tailscale/tunnel) — สำหรับ 4G/ข้ามเครือข่าย
-document.getElementById('postern-custom-connect').addEventListener('click', async (e) => {
-  const btn = e.currentTarget;
-  const host = document.getElementById('postern-custom-host').value.trim();
-  const port = document.getElementById('postern-custom-port').value.trim() || '8888';
-  if (!host) { alert('กรอก host ก่อน เช่น Tailscale IP (100.x.x.x)'); return; }
-  const data = await (await fetch('/api/devices')).json().catch(() => ({}));
-  const dev = (data.devices || [])[0];
-  if (!dev) { alert('ไม่พบ device (ต่อ USB ครั้งแรกเพื่อสั่งเปิดแอป — traffic จะวิ่งผ่าน host นี้)'); return; }
-  const orig = btn.textContent; btn.disabled = true; btn.textContent = '…';
-  try {
-    const r = await (await fetch('/api/devices/connect', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ serial: dev.serial, method: 'postern', mode: 'custom', host, port }),
-    })).json();
-    alert(r.ok
-      ? `เปิดแอปบน ${dev.model} แล้ว → host ${r.host}:${r.port}\n\nถอด USB ได้เลย traffic จะวิ่งผ่าน host นี้ (มือถือต้องเข้าถึง host นี้ได้)\nครั้งแรกให้กดอนุญาต VPN + ติดตั้ง CA บนมือถือ`
-      : 'ไม่สำเร็จ: ' + (r.error || ''));
-  } catch (err) { alert('error: ' + err.message); }
-  btn.disabled = false; btn.textContent = orig;
-});
-
 // ปุ่ม "❓ วิธีติดตั้ง / เชื่อมต่อ" — เปิด/ปิด
 document.getElementById('proxy-help-btn').addEventListener('click', () => {
   const box = document.getElementById('postern-modes');

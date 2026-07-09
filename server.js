@@ -457,17 +457,9 @@ app.post('/api/devices/connect', express.json(), async (req, res) => {
   const S = ['-s', serial];
   try {
     if (method === 'postern') {
-      // เลือก host: usb=127.0.0.1(+reverse) / wifi=IP Mac / custom=host ที่กรอกเอง (เช่น Tailscale IP, tunnel)
-      let phost;
-      let pport = MITM_PORT;
-      if (mode === 'custom') {
-        phost = String((req.body || {}).host || '').trim();
-        if (!phost) return res.status(400).json({ ok: false, error: 'โหมด custom ต้องระบุ host' });
-        const p = parseInt((req.body || {}).port, 10);
-        if (p >= 1 && p <= 65535) pport = p;
-      } else {
-        phost = (await resolveTarget(S, mode)).host; // usb จะตั้ง adb reverse ให้ด้วย
-      }
+      // เลือก host: usb=127.0.0.1(+reverse) / wifi=IP Mac
+      const phost = (await resolveTarget(S, mode)).host; // usb จะตั้ง adb reverse ให้ด้วย
+      const pport = MITM_PORT;
       // กันชนกับโหมด proxy: ล้าง global http_proxy ทิ้งก่อน (อย่าให้สองโหมดซ้อนกัน)
       await adb([...S, 'shell', 'settings', 'delete', 'global', 'http_proxy']).catch(() => {});
       // ฆ่า instance เก่าให้หมดก่อน — process :vpn init เอนจิน (lwIP) ได้ครั้งเดียว/process
