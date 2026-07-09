@@ -478,9 +478,11 @@ const pdListEl = document.getElementById('pd-list');
 let pdMode = 'usb'; // โหมดที่กำลังเลือก (usb | wifi | postern)
 
 async function renderDevices() {
-  const isPostern = pdMode === 'postern';
+  const isPostern = pdMode === 'postern' || pdMode === 'postern-wifi';
+  // Postern: เลือกโหมดชัดเจนจากปุ่มที่กด (usb = 127.0.0.1 ผ่านสาย / wifi = IP Mac ไม่ต้องพึ่ง USB)
+  const posternMode = pdMode === 'postern-wifi' ? 'wifi' : 'usb';
   document.getElementById('pd-title').textContent =
-    isPostern ? '📲 เลือก device เชื่อมผ่านแอป Proxy Postern'
+    isPostern ? (posternMode === 'wifi' ? '📶 เลือก device เชื่อม Postern ผ่าน Wi-Fi (IP Mac)' : '📲 เลือก device เชื่อม Postern ผ่าน USB')
       : pdMode === 'wifi' ? '📶 เลือก device เชื่อมแบบ Wi-Fi' : '🔌 เลือก device เชื่อมแบบ USB';
   pdListEl.innerHTML = '<span class="hint">กำลังโหลด device…</span>';
   let data;
@@ -494,7 +496,7 @@ async function renderDevices() {
   pdListEl.innerHTML = '';
   for (const d of devices) {
     const active = isPostern ? d.posternRunning : d.connected;
-    const cond = isPostern ? (d.transport === 'wifi' ? 'Wi-Fi' : 'USB') : (d.mode || '');
+    const cond = isPostern ? (posternMode === 'wifi' ? 'Wi-Fi' : 'USB') : (d.mode || '');
     const label = active ? `เชื่อมอยู่${cond ? ` (${cond})` : ''}` : 'ยังไม่เชื่อม';
     const row = el('div', { class: 'pd-row' }, [
       el('span', { class: 'pd-dot ' + (active ? 'on' : 'off'), text: active ? '🟢' : '⚪' }),
@@ -505,13 +507,12 @@ async function renderDevices() {
     ]);
     const connBtn = el('button', {
       class: active ? 'pd-btn danger' : 'pd-btn primary',
-      text: active ? 'ตัด' : (isPostern ? 'เชื่อมผ่านแอป' : pdMode === 'wifi' ? 'เชื่อม Wi-Fi' : 'เชื่อม USB'),
+      text: active ? 'ตัด' : (isPostern ? (posternMode === 'wifi' ? 'เชื่อม (Wi-Fi)' : 'เชื่อม (USB)') : pdMode === 'wifi' ? 'เชื่อม Wi-Fi' : 'เชื่อม USB'),
     });
     connBtn.addEventListener('click', async () => {
       connBtn.disabled = true; connBtn.textContent = '…';
       const url = active ? '/api/devices/disconnect' : '/api/devices/connect';
-      // postern: เลือกเงื่อนไข USB/Wi-Fi อัตโนมัติจาก transport ของ device
-      const mode = isPostern ? d.transport : pdMode;
+      const mode = isPostern ? posternMode : pdMode;
       const method = isPostern ? 'postern' : 'proxy';
       try {
         const r = await (await fetch(url, {
@@ -519,7 +520,12 @@ async function renderDevices() {
           body: JSON.stringify({ serial: d.serial, mode, method }),
         })).json();
         if (!r.ok) alert('ไม่สำเร็จ: ' + (r.error || ''));
-        else if (isPostern && !active) alert(`เปิดแอปบน ${d.model} แล้ว (host ${r.host}:${r.port}) — ถ้าเป็นครั้งแรกให้กดอนุญาต VPN บนมือถือ`);
+        else if (isPostern && !active) {
+          const wifiNote = posternMode === 'wifi'
+            ? `\n\n✅ โหมด Wi-Fi: host = ${r.host}:${r.port} → ถอด USB ได้ traffic ยังวิ่งผ่าน Wi-Fi (มือถือต้องอยู่วงเดียวกับ Mac)`
+            : '\n\n⚠️ โหมด USB: host = 127.0.0.1 → ห้ามถอดสาย USB ไม่งั้น traffic หยุด';
+          alert(`เปิดแอปบน ${d.model} แล้ว${wifiNote}\n\nถ้าเป็นครั้งแรกให้กดอนุญาต VPN + ติดตั้ง CA บนมือถือ`);
+        }
       } catch (e) { alert('error: ' + e.message); }
       setTimeout(renderDevices, 1200); // รอ service/VPN ขึ้นก่อนค่อยรีเฟรชสถานะ
     });
