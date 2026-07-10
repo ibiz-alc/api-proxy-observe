@@ -85,7 +85,10 @@ function makeJsonEditor(value) {
   ta.value = value || '';
   const refresh = () => { code.innerHTML = syntaxHighlightJson(ta.value) + '\n'; };
   ta.addEventListener('input', refresh);
+  // sync scroll สองทาง: พิมพ์/เลื่อนที่ textarea → เลื่อน layer ไฮไลต์ตาม;
+  // และเมื่อ browser Cmd+F เลื่อน layer ไฮไลต์ไปหา match → เลื่อน textarea ตาม (ตั้งค่าซ้ำค่าเดิมไม่ยิง event ซ้ำ จึงไม่ loop)
   ta.addEventListener('scroll', () => { highlight.scrollTop = ta.scrollTop; highlight.scrollLeft = ta.scrollLeft; });
+  highlight.addEventListener('scroll', () => { ta.scrollTop = highlight.scrollTop; ta.scrollLeft = highlight.scrollLeft; });
   refresh();
   return { wrap: el('div', { class: 'je-wrap' }, [highlight, ta]), textarea: ta, refresh };
 }
