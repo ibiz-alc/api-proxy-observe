@@ -1,0 +1,10 @@
+{
+  "name": "case1 — userA happy path",
+  "autoAdvance": true,
+  "endpoints": [
+    { "method": "POST", "urlPattern": "/api/login",        "steps": [ { "label": "userA", "file": "responses/login.json" } ] },
+    { "method": "GET",  "urlPattern": "/api/detail",        "steps": [ { "file": "responses/detail.json" } ] },
+    { "method": "PUT",  "urlPattern": "/api/detail/name",   "steps": [ { "file": "responses/update-name.json" } ] },
+    { "method": "PUT",  "urlPattern": "/api/detail/items",  "steps": [ { "file": "responses/update-items.json" } ] }
+  ]
+}

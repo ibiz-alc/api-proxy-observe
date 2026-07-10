@@ -1428,7 +1428,7 @@ function renderTcList() {
       el('span', { class: 'map-dot ' + (active ? 'on' : 'off'), text: active ? '●' : '○' }),
       el('div', { class: 'map-item-body' }, [
         el('div', { class: 'map-item-name', text: c.name || '(ไม่มีชื่อ)' }),
-        el('div', { class: 'map-item-sub', text: `${c.endpoints.length} endpoints${active ? ' · 🟢 active' : ''}` }),
+        el('div', { class: 'map-item-sub', text: `${c.source === 'file' ? '🗂️ file' : '✎ inline'} · ${c.endpoints.length} endpoints${active ? ' · 🟢 active' : ''}` }),
       ]),
     ]);
     item.addEventListener('click', () => { tcSelectedId = c.id; renderTcList(); renderTcEditor(c); });
@@ -1436,7 +1436,50 @@ function renderTcList() {
   }
 }
 
+// ปุ่ม activate/reset/next (ใช้ร่วมทั้ง file view และ editor)
+function tcControls(caseObj) {
+  const active = caseObj.id === tcActiveId;
+  const actBtn = el('button', { class: active ? 'pd-btn danger' : 'pd-btn primary', text: active ? '⏹ ปิดใช้เคสนี้' : '▶ เปิดใช้เคสนี้' });
+  actBtn.addEventListener('click', async () => {
+    await fetch(active ? '/api/testcases/deactivate' : `/api/testcases/${caseObj.id}/activate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    await loadCases();
+  });
+  const ctrls = el('div', { class: 'tc-ctrls' }, [actBtn]);
+  if (active) {
+    const resetBtn = el('button', { class: 'pd-btn', text: '↺ Reset' });
+    resetBtn.addEventListener('click', async () => { await fetch('/api/testcases/reset', { method: 'POST' }); await loadCases(); });
+    const nextBtn = el('button', { class: 'pd-btn', text: '⏭ Next step' });
+    nextBtn.addEventListener('click', async () => { await fetch('/api/testcases/next', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); await loadCases(); });
+    ctrls.appendChild(resetBtn); ctrls.appendChild(nextBtn);
+  }
+  return ctrls;
+}
+
 function renderTcEditor(caseObj) {
+  // เคสจากไฟล์ = read-only (แก้ที่ไฟล์แล้ว reload)
+  if (caseObj.source === 'file') {
+    tcEditorEl.innerHTML = '';
+    tcEditorEl.appendChild(el('div', { class: 'tc-file-banner', html: `🗂️ เคสจากไฟล์ <code>test-cases/${caseObj.dir}/</code> (read-only) — แก้ที่ไฟล์แล้วกด 🔄 Reload ไฟล์` }));
+    tcEditorEl.appendChild(el('div', { class: 'tc-name', text: caseObj.name }));
+    tcEditorEl.appendChild(tcControls(caseObj));
+    const cursors = (tcData.find((c) => c.id === caseObj.id) || {}).cursors || {};
+    const active = caseObj.id === tcActiveId;
+    for (const ep of caseObj.endpoints) {
+      const box = el('div', { class: 'tc-ep' });
+      box.appendChild(el('div', { class: 'tc-ep-head' }, [methodBadge(ep.method), el('code', { text: ep.urlPattern })]));
+      const cur = cursors[`${ep.method} ${ep.urlPattern}`];
+      ep.steps.forEach((st, si) => {
+        const isCur = active && cur === si;
+        const stBox = el('div', { class: 'tc-step' + (isCur ? ' current' : '') });
+        stBox.appendChild(el('div', { class: 'tc-step-head' }, [el('span', { class: 'tc-step-num', text: `#${si + 1} ${st.label || ''} · ${st.status}${isCur ? ' ◀ ตอนนี้' : ''}` })]));
+        stBox.appendChild(el('pre', { class: 'code-block json tc-ro-body', html: syntaxHighlightJson(st.body || '') }));
+        box.appendChild(stBox);
+      });
+      tcEditorEl.appendChild(box);
+    }
+    return;
+  }
+
   const isNew = !caseObj.id;
   const model = {
     id: caseObj.id,
@@ -1550,6 +1593,11 @@ document.getElementById('tc-add').addEventListener('click', () => {
   tcSelectedId = null;
   renderTcList();
   renderTcEditor({ autoAdvance: true, endpoints: [] });
+});
+document.getElementById('tc-reload').addEventListener('click', async (e) => {
+  const b = e.currentTarget; b.disabled = true;
+  try { const r = await (await fetch('/api/testcases/reload', { method: 'POST' })).json(); await loadCases(); b.textContent = `🔄 Reload (${r.fileCases} ไฟล์)`; setTimeout(() => { b.textContent = '🔄 Reload ไฟล์'; }, 1500); }
+  finally { b.disabled = false; }
 });
 
 loadCases();

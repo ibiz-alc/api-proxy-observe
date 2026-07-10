@@ -799,6 +799,11 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .tc-add-step, .tc-add-ep { background: var(--panel-2); border: 1px dashed var(--border); color: var(--text); border-radius: 6px; padding: 4px 12px; font-size: 0.82rem; cursor: pointer; }
 .tc-add-step { margin-top: 6px; }
 .tc-add-ep { display: block; margin: 10px 0; }
+.tc-file-banner { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 0.84rem; color: var(--muted); margin-bottom: 10px; }
+.tc-file-banner code { color: var(--accent); }
+.tc-name { font-size: 1rem; font-weight: 600; margin: 6px 0; }
+.tc-ep-head code { color: var(--text); font-size: 0.86rem; }
+.tc-ro-body { max-height: 160px; overflow: auto; margin: 4px 0 0; font-size: 0.82rem; }
 
 .map-enable { display: flex; align-items: center; gap: 8px; color: var(--text); flex-shrink: 0; }
 .map-btn-row { display: flex; align-items: center; gap: 12px; margin-top: 8px; flex-shrink: 0; }

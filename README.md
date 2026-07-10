@@ -87,8 +87,26 @@ responses over successive calls (e.g. `GET /api/detail` → error on call 1, ok 
 call 2 after a refresh). Each case is a set of endpoints, each with an ordered
 list of steps; only one case is active at a time. Steps **auto-advance** by call
 count by default, with manual **Reset / Next** controls. Fully drivable from MCP
-(`activate_case`, `reset_case`, `next_step`, …). See
+(`activate_case`, `reset_case`, `next_step`, `reload_cases`, …). See
 [`docs/dynamic-test-cases-design.md`](docs/dynamic-test-cases-design.md).
+
+Cases can be **inline** (created in the web/MCP, stored in `test-cases.json`) or
+**file-based** — a folder per case with response bodies as separate files, kept
+apart between cases and version-controlled:
+
+```
+test-cases/
+  case1-userA/
+    case.json                 # endpoints + steps, each step points to a file
+    responses/{login,detail,update-name,update-items}.json
+  case2-userB/
+    case.json
+    responses/{login,detail,update-name,update-error}.json
+```
+
+Each step uses `"file": "responses/<x>.json"` instead of an inline `body`
+(status defaults to 200, `.json` → `application/json`). Edit the files and press
+**🔄 Reload** (or MCP `reload_cases`). See `test-cases/` for the working example.
 
 > ⚠️ The CA lets the proxy decrypt HTTPS. Use it only on your own test devices
 > and remove it when finished.

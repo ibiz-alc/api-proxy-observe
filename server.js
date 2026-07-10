@@ -164,10 +164,61 @@ function saveTestCases() {
   catch (err) { console.error('บันทึก test-cases.json ไม่ได้:', err.message); }
 }
 
+// เคสแบบไฟล์: โฟลเดอร์ test-cases/<name>/case.json + ไฟล์ response แยกตามเคส (อ่าน read-only)
+const TESTCASES_DIR = path.join(__dirname, 'test-cases');
+let fileCases = [];
+function readCaseFile(caseDir, rel) {
+  const p = path.resolve(caseDir, rel);
+  if (p !== path.resolve(caseDir) && !p.startsWith(path.resolve(caseDir) + path.sep)) {
+    throw new Error('path นอกโฟลเดอร์เคส: ' + rel); // กัน path traversal
+  }
+  return fs.readFileSync(p, 'utf8');
+}
+function loadFileCases() {
+  fileCases = [];
+  let dirs = [];
+  try {
+    if (fs.existsSync(TESTCASES_DIR)) {
+      dirs = fs.readdirSync(TESTCASES_DIR, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+    }
+  } catch (e) { console.error('อ่าน test-cases/ ไม่ได้:', e.message); return; }
+  for (const name of dirs) {
+    const caseDir = path.join(TESTCASES_DIR, name);
+    const manifestPath = path.join(caseDir, 'case.json');
+    if (!fs.existsSync(manifestPath)) continue;
+    try {
+      const m = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      fileCases.push({
+        id: 'file:' + name,
+        source: 'file',
+        dir: name,
+        name: m.name || name,
+        autoAdvance: m.autoAdvance !== false,
+        endpoints: (Array.isArray(m.endpoints) ? m.endpoints : []).map((ep) => ({
+          method: ep.method || 'ANY',
+          urlPattern: ep.urlPattern || '',
+          steps: (Array.isArray(ep.steps) ? ep.steps : []).map((s) => {
+            let body = s.body != null ? String(s.body) : '';
+            let ct = s.contentType;
+            if (s.file) {
+              body = readCaseFile(caseDir, s.file);
+              if (!ct) ct = s.file.endsWith('.json') ? 'application/json' : 'text/plain';
+            }
+            return { label: s.label || s.file || '', status: Number(s.status) || 200, contentType: ct || 'application/json', body };
+          }),
+        })),
+      });
+    } catch (e) { console.error(`โหลดเคสไฟล์ ${name} ไม่ได้:`, e.message); }
+  }
+}
+loadFileCases();
+
 let activeCaseId = null;
 let caseCursors = {}; // "<METHOD> <urlPattern>" -> index (state ของ case ที่ active, in-memory)
 const cursorKey = (ep) => `${ep.method || 'ANY'} ${ep.urlPattern}`;
-const activeCase = () => testCases.find((c) => c.id === activeCaseId) || null;
+// รวมเคสจากไฟล์ (read-only) + เคส inline (store) เข้าด้วยกัน
+const allCases = () => [...fileCases, ...testCases.map((c) => ({ ...c, source: 'store' }))];
+const activeCase = () => allCases().find((c) => c.id === activeCaseId) || null;
 
 function normalizeCase(b) {
   return {
@@ -189,7 +240,7 @@ function normalizeCase(b) {
 function caseWithState(c) {
   const cursors = {};
   if (c.id === activeCaseId) for (const ep of c.endpoints) cursors[cursorKey(ep)] = caseCursors[cursorKey(ep)] || 0;
-  return { ...c, active: c.id === activeCaseId, cursors };
+  return { ...c, source: c.source || 'store', active: c.id === activeCaseId, cursors };
 }
 // เลือก endpoint ใน case ที่ตรง request (เจาะจง/ยาวกว่าชนะ เหมือน findMapRule)
 function matchEndpoint(c, method, url) {
@@ -200,7 +251,13 @@ function matchEndpoint(c, method, url) {
   return cands[0] || null;
 }
 
-app.get('/api/testcases', (req, res) => res.json({ ok: true, activeCaseId, cases: testCases.map(caseWithState) }));
+app.get('/api/testcases', (req, res) => res.json({ ok: true, activeCaseId, cases: allCases().map(caseWithState) }));
+
+// reload เคสแบบไฟล์จากดิสก์ (test-cases/<name>/case.json)
+app.post('/api/testcases/reload', (req, res) => {
+  loadFileCases();
+  res.json({ ok: true, fileCases: fileCases.length });
+});
 
 app.post('/api/testcases', express.json({ limit: '10mb' }), (req, res) => {
   const c = normalizeCase(req.body || {});
@@ -209,6 +266,7 @@ app.post('/api/testcases', express.json({ limit: '10mb' }), (req, res) => {
 });
 
 app.put('/api/testcases/:id', express.json({ limit: '10mb' }), (req, res) => {
+  if (req.params.id.startsWith('file:')) return res.status(400).json({ ok: false, error: 'เคสแบบไฟล์ แก้ที่ test-cases/<dir> แล้วกด reload' });
   const idx = testCases.findIndex((c) => c.id === req.params.id);
   if (idx < 0) return res.status(404).json({ ok: false, error: 'ไม่พบ test case' });
   testCases[idx] = normalizeCase({ ...req.body, id: req.params.id });
@@ -218,6 +276,7 @@ app.put('/api/testcases/:id', express.json({ limit: '10mb' }), (req, res) => {
 });
 
 app.delete('/api/testcases/:id', (req, res) => {
+  if (req.params.id.startsWith('file:')) return res.status(400).json({ ok: false, error: 'เคสแบบไฟล์ ลบที่โฟลเดอร์ test-cases/<dir> เอง' });
   testCases = testCases.filter((c) => c.id !== req.params.id);
   if (activeCaseId === req.params.id) { activeCaseId = null; caseCursors = {}; }
   saveTestCases();
@@ -225,7 +284,7 @@ app.delete('/api/testcases/:id', (req, res) => {
 });
 
 app.post('/api/testcases/:id/activate', express.json(), (req, res) => {
-  const c = testCases.find((x) => x.id === req.params.id);
+  const c = allCases().find((x) => x.id === req.params.id);
   if (!c) return res.status(404).json({ ok: false, error: 'ไม่พบ test case' });
   activeCaseId = c.id; // exclusive: active ได้ทีละ case
   if ((req.body || {}).resetOnActivate !== false) caseCursors = {}; // default reset cursor

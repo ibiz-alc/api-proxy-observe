@@ -1,0 +1,9 @@
+{
+  "name": "case2 — userB, update name ok then error",
+  "autoAdvance": true,
+  "endpoints": [
+    { "method": "POST", "urlPattern": "/api/login",       "steps": [ { "label": "userB", "file": "responses/login.json" } ] },
+    { "method": "GET",  "urlPattern": "/api/detail",       "steps": [ { "file": "responses/detail.json" } ] },
+    { "method": "PUT",  "urlPattern": "/api/detail/name",  "steps": [ { "label": "ok", "file": "responses/update-name.json" }, { "label": "error", "status": 422, "file": "responses/update-error.json" } ] }
+  ]
+}
