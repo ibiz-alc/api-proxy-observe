@@ -761,8 +761,8 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
   position: relative; flex: 1 1 0; min-height: 160px;
   border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--bg);
 }
-#maplocal-editor .je-highlight,
-#maplocal-editor .je-input {
+.je-highlight,
+.je-input {
   margin: 0; padding: 8px 10px; border: 0; box-sizing: border-box;
   font-family: ui-monospace, Menlo, monospace; font-size: 0.86rem; line-height: 1.5;
   white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 2;
@@ -771,12 +771,34 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
    ทั้ง layer ไฮไลต์และ textarea ต้อง overflow:auto เท่ากัน — content จะกว้างเท่ากัน (เผื่อ scrollbar เท่ากัน) ข้อความไม่เหลื่อม
    textarea อยู่บนสุดบัง scrollbar ของ layer หลัง จึงเห็น scrollbar อันเดียว */
 .je-highlight { position: absolute; inset: 0; overflow: auto; pointer-events: none; color: #cbd5e1; }
-#maplocal-editor .je-input {
+.je-input {
   position: absolute; inset: 0; width: 100%; height: 100%; resize: none; overflow: auto;
   background: transparent; color: transparent; caret-color: var(--text); outline: none;
   flex: none; min-height: 0;
 }
-#maplocal-editor .je-input::placeholder { color: var(--muted); }
+.je-input::placeholder { color: var(--muted); }
+
+/* ---------- Test Cases ---------- */
+#tc-editor { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; overflow-y: auto; }
+#tc-editor input[type="text"], #tc-editor select { padding: 4px 10px; }
+.tc-ctrls { display: flex; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
+.tc-ep { border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin: 8px 0; background: var(--bg); }
+.tc-ep-head { display: flex; gap: 6px; align-items: center; }
+.tc-ep-method { flex: 0 0 90px; }
+.tc-ep-pattern { flex: 1; }
+.tc-step { border-left: 3px solid var(--border); padding: 6px 0 6px 8px; margin: 8px 0; }
+.tc-step.current { border-left-color: var(--accent); background: rgba(96, 165, 250, 0.06); }
+.tc-step-head { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
+.tc-step-num { font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
+.tc-step.current .tc-step-num { color: var(--accent); font-weight: 600; }
+.tc-step-label { flex: 1; }
+.tc-step-status { flex: 0 0 66px; }
+.tc-step-ct { flex: 0 0 150px; }
+.tc-step-body { height: 130px; flex: none; margin-top: 4px; }
+.tc-x { background: transparent; border: 1px solid var(--border); color: var(--red); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+.tc-add-step, .tc-add-ep { background: var(--panel-2); border: 1px dashed var(--border); color: var(--text); border-radius: 6px; padding: 4px 12px; font-size: 0.82rem; cursor: pointer; }
+.tc-add-step { margin-top: 6px; }
+.tc-add-ep { display: block; margin: 10px 0; }
 
 .map-enable { display: flex; align-items: center; gap: 8px; color: var(--text); flex-shrink: 0; }
 .map-btn-row { display: flex; align-items: center; gap: 12px; margin-top: 8px; flex-shrink: 0; }

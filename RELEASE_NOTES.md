@@ -6,6 +6,17 @@ Proxyman-like web UI.
 
 ## 2026-07-10
 
+### Dynamic Test Cases (sequenced Map Local)
+- New **Test Cases** tab + engine: define flows where the same endpoint returns
+  different responses over successive calls (per-endpoint step cursor, auto-advance
+  by default + manual Reset/Next/Goto). One case active at a time.
+- Server endpoints under `/api/testcases*` + `/api/testcase/resolve`; the addon
+  checks the active case first (`X-Api-Tester: test-case`) then falls back to
+  static Map Local.
+- 11 new MCP tools (`list_cases`, `create_case`, `activate_case`, `reset_case`,
+  `next_step`, `goto_step`, `case_status`, …). Spec:
+  `docs/dynamic-test-cases-design.md`.
+
 ### MCP server for agents
 - New stdio MCP server (`mcp/`) exposing 16 tools so an AI agent can drive
   ApiTester: manage Map Local mocks, group them into **scenarios** (activate a

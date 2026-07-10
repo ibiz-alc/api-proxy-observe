@@ -1400,6 +1400,160 @@ window.addEventListener('keydown', (e) => {
   if (mapSaveHandler) mapSaveHandler();
 });
 
+// ================= Test Cases (dynamic sequenced mock) =================
+const tcListEl = document.getElementById('tc-list');
+const tcEditorEl = document.getElementById('tc-editor');
+let tcData = [];
+let tcActiveId = null;
+let tcSelectedId = null;
+const newStep = () => ({ label: '', status: 200, contentType: 'application/json', body: '' });
+const newEndpoint = () => ({ method: 'GET', urlPattern: '', steps: [newStep()] });
+
+async function loadCases() {
+  try {
+    const d = await (await fetch('/api/testcases')).json();
+    tcData = d.cases || []; tcActiveId = d.activeCaseId || null;
+  } catch { tcData = []; }
+  renderTcList();
+  const sel = tcData.find((c) => c.id === tcSelectedId);
+  if (sel) renderTcEditor(sel);
+}
+
+function renderTcList() {
+  tcListEl.innerHTML = '';
+  if (!tcData.length) { tcListEl.appendChild(el('p', { class: 'empty-msg', html: 'ยังไม่มีเคส<br/>กด "เพิ่มเคส" เพื่อสร้าง' })); return; }
+  for (const c of tcData) {
+    const active = c.id === tcActiveId;
+    const item = el('div', { class: 'map-item' + (c.id === tcSelectedId ? ' selected' : '') }, [
+      el('span', { class: 'map-dot ' + (active ? 'on' : 'off'), text: active ? '●' : '○' }),
+      el('div', { class: 'map-item-body' }, [
+        el('div', { class: 'map-item-name', text: c.name || '(ไม่มีชื่อ)' }),
+        el('div', { class: 'map-item-sub', text: `${c.endpoints.length} endpoints${active ? ' · 🟢 active' : ''}` }),
+      ]),
+    ]);
+    item.addEventListener('click', () => { tcSelectedId = c.id; renderTcList(); renderTcEditor(c); });
+    tcListEl.appendChild(item);
+  }
+}
+
+function renderTcEditor(caseObj) {
+  const isNew = !caseObj.id;
+  const model = {
+    id: caseObj.id,
+    name: caseObj.name || '',
+    autoAdvance: caseObj.autoAdvance !== false,
+    endpoints: (caseObj.endpoints || []).map((e) => ({
+      method: e.method || 'GET', urlPattern: e.urlPattern || '',
+      steps: (e.steps || []).map((s) => ({ label: s.label || '', status: s.status || 200, contentType: s.contentType || 'application/json', body: s.body || '' })),
+    })),
+  };
+  if (!model.endpoints.length) model.endpoints.push(newEndpoint());
+  const cursors = (tcData.find((c) => c.id === model.id) || {}).cursors || {};
+  const status2 = el('span', { class: 'hint' });
+
+  const draw = () => {
+    tcEditorEl.innerHTML = '';
+    const nameInput = el('input', { type: 'text', value: model.name, placeholder: 'ชื่อเคส เช่น case 5' });
+    nameInput.addEventListener('input', () => { model.name = nameInput.value; });
+    tcEditorEl.appendChild(el('label', { class: 'map-label', text: 'ชื่อเคส' }));
+    tcEditorEl.appendChild(nameInput);
+    const auto = el('input', { type: 'checkbox' }); auto.checked = model.autoAdvance;
+    auto.addEventListener('change', () => { model.autoAdvance = auto.checked; });
+    tcEditorEl.appendChild(el('label', { class: 'map-enable' }, [auto, el('span', { text: ' auto-advance (เลื่อน step อัตโนมัติเมื่อ endpoint ถูกเรียก)' })]));
+
+    if (!isNew) {
+      const active = model.id === tcActiveId;
+      const actBtn = el('button', { class: active ? 'pd-btn danger' : 'pd-btn primary', text: active ? '⏹ ปิดใช้เคสนี้' : '▶ เปิดใช้เคสนี้' });
+      actBtn.addEventListener('click', async () => {
+        await fetch(active ? '/api/testcases/deactivate' : `/api/testcases/${model.id}/activate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        await loadCases();
+      });
+      const ctrls = el('div', { class: 'tc-ctrls' }, [actBtn]);
+      if (active) {
+        const resetBtn = el('button', { class: 'pd-btn', text: '↺ Reset' });
+        resetBtn.addEventListener('click', async () => { await fetch('/api/testcases/reset', { method: 'POST' }); await loadCases(); });
+        const nextBtn = el('button', { class: 'pd-btn', text: '⏭ Next step' });
+        nextBtn.addEventListener('click', async () => { await fetch('/api/testcases/next', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); await loadCases(); });
+        ctrls.appendChild(resetBtn); ctrls.appendChild(nextBtn);
+      }
+      tcEditorEl.appendChild(ctrls);
+    }
+
+    tcEditorEl.appendChild(el('div', { class: 'map-label', text: 'Endpoints (แต่ละ endpoint ตอบตามลำดับ step)' }));
+    model.endpoints.forEach((ep, ei) => {
+      const box = el('div', { class: 'tc-ep' });
+      const mSel = el('select', { class: 'tc-ep-method' });
+      for (const m of ['ANY', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE']) { const o = el('option', { value: m, text: m }); if (ep.method === m) o.selected = true; mSel.appendChild(o); }
+      mSel.addEventListener('change', () => { ep.method = mSel.value; });
+      const pat = el('input', { type: 'text', class: 'tc-ep-pattern', value: ep.urlPattern, placeholder: '/api/detail หรือ /user/*' });
+      pat.addEventListener('input', () => { ep.urlPattern = pat.value; });
+      const rmEp = el('button', { class: 'tc-x', title: 'ลบ endpoint', text: '✕' });
+      rmEp.addEventListener('click', () => { model.endpoints.splice(ei, 1); if (!model.endpoints.length) model.endpoints.push(newEndpoint()); draw(); });
+      box.appendChild(el('div', { class: 'tc-ep-head' }, [mSel, pat, rmEp]));
+
+      const curIdx = cursors[`${ep.method} ${ep.urlPattern}`];
+      ep.steps.forEach((st, si) => {
+        const isCur = model.id === tcActiveId && curIdx === si;
+        const stBox = el('div', { class: 'tc-step' + (isCur ? ' current' : '') });
+        const sLabel = el('input', { type: 'text', class: 'tc-step-label', value: st.label, placeholder: `label step ${si + 1}` });
+        sLabel.addEventListener('input', () => { st.label = sLabel.value; });
+        const sStatus = el('input', { type: 'text', class: 'tc-step-status', value: String(st.status), placeholder: 'status' });
+        sStatus.addEventListener('input', () => { st.status = parseInt(sStatus.value, 10) || 200; });
+        const sCt = el('input', { type: 'text', class: 'tc-step-ct', value: st.contentType, placeholder: 'content-type' });
+        sCt.addEventListener('input', () => { st.contentType = sCt.value; });
+        const rmSt = el('button', { class: 'tc-x', title: 'ลบ step', text: '✕' });
+        rmSt.addEventListener('click', () => { ep.steps.splice(si, 1); if (!ep.steps.length) ep.steps.push(newStep()); draw(); });
+        const bodyEd = makeJsonEditor(st.body);
+        bodyEd.textarea.addEventListener('input', () => { st.body = bodyEd.textarea.value; });
+        bodyEd.wrap.classList.add('tc-step-body');
+        stBox.appendChild(el('div', { class: 'tc-step-head' }, [el('span', { class: 'tc-step-num', text: `#${si + 1}${isCur ? ' ◀ ตอนนี้' : ''}` }), sLabel, sStatus, sCt, rmSt]));
+        stBox.appendChild(bodyEd.wrap);
+        box.appendChild(stBox);
+      });
+      const addStep = el('button', { class: 'tc-add-step', text: '+ step' });
+      addStep.addEventListener('click', () => { ep.steps.push(newStep()); draw(); });
+      box.appendChild(addStep);
+      tcEditorEl.appendChild(box);
+    });
+
+    const addEp = el('button', { class: 'tc-add-ep', text: '+ เพิ่ม endpoint' });
+    addEp.addEventListener('click', () => { model.endpoints.push(newEndpoint()); draw(); });
+    tcEditorEl.appendChild(addEp);
+
+    const saveBtn = el('button', { class: 'primary', text: isNew ? 'สร้างเคส' : 'บันทึก' });
+    saveBtn.addEventListener('click', async () => {
+      if (!model.name.trim()) { status2.textContent = '⚠️ ใส่ชื่อเคสก่อน'; status2.style.color = 'var(--yellow)'; return; }
+      for (const ep of model.endpoints) {
+        for (const st of ep.steps) {
+          if ((st.contentType || '').includes('json') && st.body.trim()) {
+            try { JSON.parse(st.body); } catch (e) { status2.textContent = `⛔ JSON ผิดที่ ${ep.urlPattern || '(endpoint)'}: ${e.message}`; status2.style.color = 'var(--red)'; return; }
+          }
+        }
+      }
+      const url = isNew ? '/api/testcases' : `/api/testcases/${model.id}`;
+      const resp = await (await fetch(url, { method: isNew ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(model) })).json();
+      if (resp.ok) { status2.textContent = '✅ บันทึกแล้ว'; status2.style.color = 'var(--green)'; tcSelectedId = resp.case.id; await loadCases(); }
+      else { status2.textContent = '❌ ' + (resp.error || 'บันทึกไม่สำเร็จ'); status2.style.color = 'var(--red)'; }
+    });
+    const btnRow = el('div', { class: 'map-btn-row' }, [saveBtn, status2]);
+    if (!isNew) {
+      const delBtn = el('button', { class: 'danger', text: '🗑️ ลบเคส' });
+      delBtn.addEventListener('click', async () => { await fetch(`/api/testcases/${model.id}`, { method: 'DELETE' }); tcSelectedId = null; await loadCases(); tcEditorEl.innerHTML = '<p class="empty-msg">เลือกเคส หรือกด "เพิ่มเคส"</p>'; });
+      btnRow.appendChild(delBtn);
+    }
+    tcEditorEl.appendChild(btnRow);
+  };
+  draw();
+}
+
+document.getElementById('tc-add').addEventListener('click', () => {
+  tcSelectedId = null;
+  renderTcList();
+  renderTcEditor({ autoAdvance: true, endpoints: [] });
+});
+
+loadCases();
+
 loadMapRules();
 
 // ================= Polling fallback (สำหรับ ngrok ที่ SSE อาจไม่ push) =================

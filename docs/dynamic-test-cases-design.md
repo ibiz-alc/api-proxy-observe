@@ -1,6 +1,6 @@
 # Design: Dynamic Test Cases (sequenced Map Local)
 
-Date: 2026-07-10 · Status: draft for review
+Date: 2026-07-10 · Status: **implemented** (server + addon + MCP + UI). This doc is the reference.
 
 ## Problem
 Map Local today is **static**: one URL pattern → one fixed response (see `server.js`

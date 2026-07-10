@@ -80,6 +80,16 @@ note. Filter the list by media type with the **Image / Video / PDF** buttons.
 Return a mock response for requests matching a pattern, without touching the
 real server (Map Local tab).
 
+### Test Cases (sequenced mock flows)
+
+The **Test Cases** tab defines flows where the *same* endpoint returns different
+responses over successive calls (e.g. `GET /api/detail` → error on call 1, ok on
+call 2 after a refresh). Each case is a set of endpoints, each with an ordered
+list of steps; only one case is active at a time. Steps **auto-advance** by call
+count by default, with manual **Reset / Next** controls. Fully drivable from MCP
+(`activate_case`, `reset_case`, `next_step`, …). See
+[`docs/dynamic-test-cases-design.md`](docs/dynamic-test-cases-design.md).
+
 > ⚠️ The CA lets the proxy decrypt HTTPS. Use it only on your own test devices
 > and remove it when finished.
 
@@ -168,6 +178,7 @@ running independently of the editor. Otherwise stdio (above) is simplest.
 | **Map Local (mock)** | `list_mocks`, `create_mock`, `update_mock`, `toggle_mock`, `delete_mock` |
 | **Scenarios** | `list_scenarios`, `activate_scenario` (`exclusive` to switch sets), `deactivate_scenario` |
 | **Flows (captured traffic)** | `list_flows`, `get_flow`, `mock_from_flow`, `clear_flows` |
+| **Test cases (sequenced)** | `list_cases`, `get_case`, `create_case`, `update_case`, `delete_case`, `activate_case`, `deactivate_case`, `reset_case`, `next_step`, `goto_step`, `case_status` |
 | **Device / proxy** | `proxy_info`, `list_devices`, `connect_device`, `disconnect_device` |
 
 ### 5. Example agent prompts
