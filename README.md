@@ -126,11 +126,16 @@ claude mcp add apitester -- node /absolute/path/to/ApiTester/mcp/index.js
     "apitester": {
       "command": "node",
       "args": ["/absolute/path/to/ApiTester/mcp/index.js"],
-      "env": { "APITESTER_URL": "http://127.0.0.1:3000" }
+      "env": { "APITESTER_URL": "http://127.0.0.1:3000", "NODE_OPTIONS": "" }
     }
   }
 }
 ```
+
+> **Troubleshooting:** if the server fails to start with
+> `Cannot find module '.../cmux-claude-node-options/restore-node-options.cjs'`,
+> the launcher injected a stale `NODE_OPTIONS`. The committed `.mcp.json` clears
+> it with `"NODE_OPTIONS": ""` — keep that in any custom config too.
 
 ### 4. Tools
 
