@@ -9,3 +9,4 @@ __pycache__/
 
 # MCP server deps
 mcp/node_modules/
+test-cases.json

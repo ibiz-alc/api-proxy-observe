@@ -152,6 +152,140 @@ app.post('/api/maplocal/scenarios/:name/deactivate', (req, res) => {
   res.json({ ok: true, scenario: name, changed });
 });
 
+// ================= Dynamic Test Cases (sequenced Map Local) =================
+// ดูสเปค: docs/dynamic-test-cases-design.md
+const TESTCASES_FILE = path.join(__dirname, 'test-cases.json');
+let testCases = [];
+try {
+  if (fs.existsSync(TESTCASES_FILE)) testCases = JSON.parse(fs.readFileSync(TESTCASES_FILE, 'utf8'));
+} catch (err) { console.error('โหลด test-cases.json ไม่ได้:', err.message); }
+function saveTestCases() {
+  try { fs.writeFileSync(TESTCASES_FILE, JSON.stringify(testCases, null, 2)); }
+  catch (err) { console.error('บันทึก test-cases.json ไม่ได้:', err.message); }
+}
+
+let activeCaseId = null;
+let caseCursors = {}; // "<METHOD> <urlPattern>" -> index (state ของ case ที่ active, in-memory)
+const cursorKey = (ep) => `${ep.method || 'ANY'} ${ep.urlPattern}`;
+const activeCase = () => testCases.find((c) => c.id === activeCaseId) || null;
+
+function normalizeCase(b) {
+  return {
+    id: b.id || crypto.randomUUID(),
+    name: b.name || '',
+    autoAdvance: b.autoAdvance !== false, // default true
+    endpoints: Array.isArray(b.endpoints) ? b.endpoints.map((ep) => ({
+      method: ep.method || 'ANY',
+      urlPattern: ep.urlPattern || '',
+      steps: Array.isArray(ep.steps) ? ep.steps.map((s) => ({
+        label: s.label || '',
+        status: Number(s.status) || 200,
+        contentType: s.contentType || 'application/json',
+        body: s.body != null ? String(s.body) : '',
+      })) : [],
+    })) : [],
+  };
+}
+function caseWithState(c) {
+  const cursors = {};
+  if (c.id === activeCaseId) for (const ep of c.endpoints) cursors[cursorKey(ep)] = caseCursors[cursorKey(ep)] || 0;
+  return { ...c, active: c.id === activeCaseId, cursors };
+}
+// เลือก endpoint ใน case ที่ตรง request (เจาะจง/ยาวกว่าชนะ เหมือน findMapRule)
+function matchEndpoint(c, method, url) {
+  const cands = (c.endpoints || []).filter((ep) => ep.steps.length &&
+    (!ep.method || ep.method === 'ANY' || ep.method === method) &&
+    patternMatches(ep.urlPattern, url || ''));
+  cands.sort((a, b) => (a.urlPattern.includes('*') - b.urlPattern.includes('*')) || (b.urlPattern.length - a.urlPattern.length));
+  return cands[0] || null;
+}
+
+app.get('/api/testcases', (req, res) => res.json({ ok: true, activeCaseId, cases: testCases.map(caseWithState) }));
+
+app.post('/api/testcases', express.json({ limit: '10mb' }), (req, res) => {
+  const c = normalizeCase(req.body || {});
+  testCases.unshift(c); saveTestCases();
+  res.json({ ok: true, case: caseWithState(c) });
+});
+
+app.put('/api/testcases/:id', express.json({ limit: '10mb' }), (req, res) => {
+  const idx = testCases.findIndex((c) => c.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ ok: false, error: 'ไม่พบ test case' });
+  testCases[idx] = normalizeCase({ ...req.body, id: req.params.id });
+  saveTestCases();
+  if (activeCaseId === req.params.id) caseCursors = {}; // แก้แล้ว → เริ่มนับใหม่
+  res.json({ ok: true, case: caseWithState(testCases[idx]) });
+});
+
+app.delete('/api/testcases/:id', (req, res) => {
+  testCases = testCases.filter((c) => c.id !== req.params.id);
+  if (activeCaseId === req.params.id) { activeCaseId = null; caseCursors = {}; }
+  saveTestCases();
+  res.json({ ok: true });
+});
+
+app.post('/api/testcases/:id/activate', express.json(), (req, res) => {
+  const c = testCases.find((x) => x.id === req.params.id);
+  if (!c) return res.status(404).json({ ok: false, error: 'ไม่พบ test case' });
+  activeCaseId = c.id; // exclusive: active ได้ทีละ case
+  if ((req.body || {}).resetOnActivate !== false) caseCursors = {}; // default reset cursor
+  proxyMuted = false;
+  res.json({ ok: true, active: caseWithState(c) });
+});
+
+app.post('/api/testcases/deactivate', (req, res) => {
+  activeCaseId = null; caseCursors = {};
+  res.json({ ok: true });
+});
+
+app.post('/api/testcases/reset', (req, res) => {
+  caseCursors = {};
+  const c = activeCase();
+  res.json({ ok: true, activeCaseId, cursors: c ? caseWithState(c).cursors : {} });
+});
+
+app.post('/api/testcases/next', express.json(), (req, res) => {
+  const c = activeCase();
+  if (!c) return res.status(400).json({ ok: false, error: 'ยังไม่มี case ที่ active' });
+  const pat = (req.body || {}).pattern;
+  for (const ep of c.endpoints) {
+    if (pat && ep.urlPattern !== pat) continue;
+    const k = cursorKey(ep);
+    caseCursors[k] = Math.min((caseCursors[k] || 0) + 1, Math.max(0, ep.steps.length - 1));
+  }
+  res.json({ ok: true, cursors: caseWithState(c).cursors });
+});
+
+app.post('/api/testcases/goto', express.json(), (req, res) => {
+  const c = activeCase();
+  if (!c) return res.status(400).json({ ok: false, error: 'ยังไม่มี case ที่ active' });
+  const { pattern, index } = req.body || {};
+  const ep = c.endpoints.find((e) => e.urlPattern === pattern);
+  if (!ep) return res.status(404).json({ ok: false, error: 'ไม่พบ endpoint pattern นี้ใน case' });
+  caseCursors[cursorKey(ep)] = Math.max(0, Math.min(Number(index) || 0, Math.max(0, ep.steps.length - 1)));
+  res.json({ ok: true, cursors: caseWithState(c).cursors });
+});
+
+// addon เรียกต่อ request ที่ match pattern: คืน response ของ step ปัจจุบัน (+ advance ถ้า autoAdvance)
+app.post('/api/testcase/resolve', express.json({ limit: '2mb' }), (req, res) => {
+  const c = activeCase();
+  if (!c) return res.json({ matched: false });
+  const { method, url } = req.body || {};
+  const ep = matchEndpoint(c, method, url);
+  if (!ep) return res.json({ matched: false });
+  const k = cursorKey(ep);
+  const i = Math.min(caseCursors[k] || 0, ep.steps.length - 1);
+  const step = ep.steps[i];
+  if (c.autoAdvance !== false) caseCursors[k] = Math.min((caseCursors[k] || 0) + 1, ep.steps.length - 1);
+  res.json({ matched: true, status: step.status, contentType: step.contentType, body: step.body, step: i, label: step.label, pattern: ep.urlPattern });
+});
+
+// รายการ pattern ของ case active — ให้ addon cache ไว้ตัดสินใจว่าจะเรียก resolve ไหม
+app.get('/api/testcase/patterns', (req, res) => {
+  const c = activeCase();
+  res.json({ active: !!c, patterns: c ? c.endpoints.filter((e) => e.steps.length).map((e) => ({ method: e.method, urlPattern: e.urlPattern })) : [] });
+});
+
 function addEntry(entry, files) {
   requests.unshift(entry);
   if (files && files.length) fileBuffers.set(entry.id, files);

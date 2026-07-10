@@ -13,6 +13,8 @@ from mitmproxy import http
 APITESTER = "http://127.0.0.1:3000"
 INGEST = APITESTER + "/api/proxy/ingest"
 RULES_URL = APITESTER + "/api/maplocal"
+TC_PATTERNS_URL = APITESTER + "/api/testcase/patterns"
+TC_RESOLVE_URL = APITESTER + "/api/testcase/resolve"
 MAX_BODY = 200 * 1024
 MAX_IMAGE = 12 * 1024 * 1024   # ส่ง image สูงสุด 12MB (ไว้โชว์รูป + EXIF) — รูปจากมือถือมักหลายMB
 MAX_VIDEO = 25 * 1024 * 1024   # ส่ง video สูงสุด 25MB (ไว้ preview) — ใหญ่กว่านี้แค่ติด tag
@@ -108,6 +110,37 @@ def _get_rules():
     return _rules
 
 
+_tc_patterns = []
+_tc_at = 0.0
+
+
+def _get_case_patterns():
+    """รายการ pattern ของ test case ที่ active (cache สั้นๆ) — ไว้ตัดสินใจว่าจะถาม resolve ไหม"""
+    global _tc_patterns, _tc_at
+    now = time.time()
+    if now - _tc_at < RULES_TTL:
+        return _tc_patterns
+    _tc_at = now
+    try:
+        with urllib.request.urlopen(TC_PATTERNS_URL, timeout=2) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        _tc_patterns = data.get("patterns", []) if data.get("active") else []
+    except Exception:
+        pass
+    return _tc_patterns
+
+
+def _resolve_case(method, url):
+    """ถาม server ว่ามี response ของ test case สำหรับ request นี้ไหม (server คุม cursor/advance เอง)"""
+    try:
+        payload = json.dumps({"method": method, "url": url}).encode("utf-8")
+        req = urllib.request.Request(TC_RESOLVE_URL, data=payload, headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=2) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except Exception:
+        return {"matched": False}
+
+
 def _pattern_matches(pattern, url):
     if not pattern:
         return False
@@ -133,7 +166,25 @@ def _find_rule(method, url):
 
 
 def request(flow: http.HTTPFlow):
-    rule = _find_rule(flow.request.method, flow.request.pretty_url)
+    method = flow.request.method
+    url = flow.request.pretty_url
+    # 1) Test Case (dynamic/sequenced) มาก่อน — ถ้า pattern ตรงค่อยถาม server (server มี cursor + advance)
+    pats = _get_case_patterns()
+    if any(
+        (not p.get("method") or p["method"] == "ANY" or p["method"] == method)
+        and _pattern_matches(p.get("urlPattern", ""), url)
+        for p in pats
+    ):
+        r = _resolve_case(method, url)
+        if r.get("matched"):
+            flow.response = http.Response.make(
+                int(r.get("status") or 200),
+                (r.get("body") or "").encode("utf-8"),
+                {"Content-Type": r.get("contentType") or "application/json", "X-Api-Tester": "test-case", "Access-Control-Allow-Origin": "*"},
+            )
+            return
+    # 2) Map Local (static)
+    rule = _find_rule(method, url)
     if rule:
         body = rule.get("body") or ""
         ct = rule.get("contentType") or "application/json"

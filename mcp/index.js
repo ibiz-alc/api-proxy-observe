@@ -206,6 +206,108 @@ server.tool(
   { serial: z.string(), method: z.enum(['proxy', 'postern']).optional() },
   wrap(({ serial, method = 'proxy' }) => api('POST', '/api/devices/disconnect', { serial, method })),
 );
+
+/* ============ Dynamic Test Cases (sequenced mock flows) ============ */
+const STEP_SCHEMA = {
+  label: z.string().optional(),
+  status: z.number().int().optional(),
+  contentType: z.string().optional(),
+  body: z.string().describe('เนื้อหา response ของ step (มัก JSON string)'),
+};
+const ENDPOINT_DESC = 'endpoint 1 ตัว = { method, urlPattern, steps: [...] } โดย steps เรียงตามลำดับที่จะตอบ (ครั้งที่ 1,2,3...)';
+
+server.tool(
+  'list_cases',
+  'ดู test case ทั้งหมด (mock flow แบบมีลำดับ step) + case ที่ active + cursor ปัจจุบันของแต่ละ endpoint',
+  {},
+  wrap(async () => {
+    const d = await api('GET', '/api/testcases');
+    return {
+      activeCaseId: d.activeCaseId,
+      cases: d.cases.map((c) => ({ id: c.id, name: c.name, active: c.active, autoAdvance: c.autoAdvance, endpoints: c.endpoints.map((e) => `${e.method} ${e.urlPattern} (${e.steps.length} steps)`), cursors: c.cursors })),
+    };
+  }),
+);
+
+server.tool(
+  'get_case',
+  'ดูรายละเอียดเต็มของ test case ตัวเดียว (endpoints + steps)',
+  { id: z.string() },
+  wrap(async ({ id }) => {
+    const c = (await api('GET', '/api/testcases')).cases.find((x) => x.id === id);
+    if (!c) throw new Error('ไม่พบ test case id นี้');
+    return c;
+  }),
+);
+
+server.tool(
+  'create_case',
+  `สร้าง test case ใหม่ (mock flow มีลำดับ). ${ENDPOINT_DESC}. autoAdvance=true (default) = endpoint ถูกเรียกครั้งที่ N ตอบ step[N] อัตโนมัติ (เกินก็ค้าง step สุดท้าย)`,
+  {
+    name: z.string(),
+    autoAdvance: z.boolean().optional(),
+    endpoints: z.array(z.object({
+      method: z.enum(['ANY', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE']).optional(),
+      urlPattern: z.string(),
+      steps: z.array(z.object(STEP_SCHEMA)),
+    })).describe('รายการ endpoint แต่ละตัวมีลำดับ steps'),
+  },
+  wrap(async (a) => (await api('POST', '/api/testcases', a)).case),
+);
+
+server.tool(
+  'update_case',
+  'แก้ test case (ส่ง case ทั้งก้อน — name/autoAdvance/endpoints). แก้แล้ว cursor ของ case นั้นจะ reset',
+  {
+    id: z.string(),
+    name: z.string().optional(),
+    autoAdvance: z.boolean().optional(),
+    endpoints: z.array(z.object({
+      method: z.enum(['ANY', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE']).optional(),
+      urlPattern: z.string(),
+      steps: z.array(z.object(STEP_SCHEMA)),
+    })).optional(),
+  },
+  wrap(async ({ id, ...patch }) => (await api('PUT', `/api/testcases/${id}`, patch)).case),
+);
+
+server.tool('delete_case', 'ลบ test case', { id: z.string() }, wrap(({ id }) => api('DELETE', `/api/testcases/${id}`)));
+
+server.tool(
+  'activate_case',
+  'เปิดใช้ test case (active ได้ทีละอันเท่านั้น — เปิดตัวนี้ปิดตัวอื่นอัตโนมัติ). default reset cursor เริ่มนับใหม่',
+  { id: z.string(), resetOnActivate: z.boolean().optional() },
+  wrap(({ id, resetOnActivate }) => api('POST', `/api/testcases/${id}/activate`, { resetOnActivate: resetOnActivate !== false })),
+);
+
+server.tool('deactivate_case', 'ปิด test case ที่ active อยู่ (กลับไปใช้ Map Local static ปกติ)', {}, wrap(() => api('POST', '/api/testcases/deactivate')));
+
+server.tool('reset_case', 'รีเซ็ต cursor ของ case ที่ active — เริ่ม flow ใหม่จาก step แรก', {}, wrap(() => api('POST', '/api/testcases/reset')));
+
+server.tool(
+  'next_step',
+  'เลื่อน step ถัดไปเอง (สำหรับ manual/autoAdvance=false). ระบุ pattern เพื่อเลื่อนเฉพาะ endpoint นั้น ไม่ระบุ = เลื่อนทุก endpoint',
+  { pattern: z.string().optional() },
+  wrap(({ pattern }) => api('POST', '/api/testcases/next', pattern ? { pattern } : {})),
+);
+
+server.tool(
+  'goto_step',
+  'ตั้ง step ปัจจุบันของ endpoint หนึ่งเป็น index ที่ระบุ (0 = step แรก)',
+  { pattern: z.string(), index: z.number().int() },
+  wrap(({ pattern, index }) => api('POST', '/api/testcases/goto', { pattern, index })),
+);
+
+server.tool(
+  'case_status',
+  'ดูสถานะ case ที่ active ตอนนี้ + cursor ของแต่ละ endpoint (step ปัจจุบัน)',
+  {},
+  wrap(async () => {
+    const d = await api('GET', '/api/testcases');
+    const c = d.cases.find((x) => x.id === d.activeCaseId);
+    return c ? { active: c.name, autoAdvance: c.autoAdvance, cursors: c.cursors } : { active: null, note: 'ยังไม่มี case ที่ active' };
+  }),
+);
 }
 
 function buildServer() {
