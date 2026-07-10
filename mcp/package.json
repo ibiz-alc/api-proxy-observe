@@ -7,10 +7,12 @@
     "apitester-mcp": "index.js"
   },
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "start:http": "MCP_PORT=7000 node index.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
+    "express": "^4.21.2",
     "zod": "^3.23.8"
   }
 }

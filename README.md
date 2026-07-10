@@ -137,6 +137,26 @@ claude mcp add apitester -- node /absolute/path/to/ApiTester/mcp/index.js
 > the launcher injected a stale `NODE_OPTIONS`. The committed `.mcp.json` clears
 > it with `"NODE_OPTIONS": ""` — keep that in any custom config too.
 
+### Run as an HTTP server on localhost (optional)
+
+By default the server uses **stdio** (the launcher spawns it). To instead run it
+as a long-lived **HTTP** endpoint that any MCP-over-HTTP client can connect to:
+
+```bash
+cd mcp
+MCP_PORT=7000 node index.js      # or: npm run start:http
+# → http://127.0.0.1:7000/mcp  (Streamable HTTP, bound to localhost only)
+```
+
+Connect Claude Code to it over HTTP instead of stdio:
+
+```bash
+claude mcp add --transport http apitester http://127.0.0.1:7000/mcp
+```
+
+Use HTTP mode when several clients/agents share one server, or you want it
+running independently of the editor. Otherwise stdio (above) is simplest.
+
 ### 4. Tools
 
 | Group | Tools |

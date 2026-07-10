@@ -34,8 +34,7 @@ const ok = (obj) => ({ content: [{ type: 'text', text: typeof obj === 'string' ?
 const fail = (e) => ({ isError: true, content: [{ type: 'text', text: 'error: ' + (e?.message || String(e)) }] });
 const wrap = (fn) => async (args) => { try { return ok(await fn(args || {})); } catch (e) { return fail(e); } };
 
-const server = new McpServer({ name: 'apitester', version: '1.0.0' });
-
+function registerTools(server) {
 /* ============ Map Local (mock local data) ============ */
 server.tool(
   'list_mocks',
@@ -207,7 +206,58 @@ server.tool(
   { serial: z.string(), method: z.enum(['proxy', 'postern']).optional() },
   wrap(({ serial, method = 'proxy' }) => api('POST', '/api/devices/disconnect', { serial, method })),
 );
+}
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
-console.error(`apitester-mcp พร้อมใช้งาน — ต่อกับ ApiTester ที่ ${BASE}`);
+function buildServer() {
+  const server = new McpServer({ name: 'apitester', version: '1.0.0' });
+  registerTools(server);
+  return server;
+}
+
+/* ============ transport: HTTP (ถ้าตั้ง MCP_PORT) หรือ stdio (default) ============ */
+const HTTP_PORT = parseInt(process.env.MCP_PORT || '', 10);
+
+if (HTTP_PORT >= 1 && HTTP_PORT <= 65535) {
+  // โหมด HTTP บน localhost — ให้ agent/tool ต่อผ่าน http://127.0.0.1:<PORT>/mcp (Streamable HTTP)
+  const express = (await import('express')).default;
+  const { StreamableHTTPServerTransport } = await import('@modelcontextprotocol/sdk/server/streamableHttp.js');
+  const { isInitializeRequest } = await import('@modelcontextprotocol/sdk/types.js');
+  const { randomUUID } = await import('node:crypto');
+
+  const app = express();
+  app.use(express.json({ limit: '40mb' }));
+  const transports = {}; // sessionId -> transport
+
+  app.post('/mcp', async (req, res) => {
+    const sid = req.headers['mcp-session-id'];
+    let transport = sid && transports[sid];
+    if (!transport && isInitializeRequest(req.body)) {
+      transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => randomUUID(),
+        onsessioninitialized: (id) => { transports[id] = transport; },
+      });
+      transport.onclose = () => { if (transport.sessionId) delete transports[transport.sessionId]; };
+      await buildServer().connect(transport);
+    } else if (!transport) {
+      return res.status(400).json({ jsonrpc: '2.0', error: { code: -32000, message: 'No valid session; send initialize first' }, id: null });
+    }
+    await transport.handleRequest(req, res, req.body);
+  });
+
+  const sessionReq = async (req, res) => {
+    const sid = req.headers['mcp-session-id'];
+    const transport = sid && transports[sid];
+    if (!transport) return res.status(400).send('Invalid or missing session id');
+    await transport.handleRequest(req, res);
+  };
+  app.get('/mcp', sessionReq);     // server→client stream (SSE)
+  app.delete('/mcp', sessionReq);  // ปิด session
+
+  app.listen(HTTP_PORT, '127.0.0.1', () => {
+    console.error(`apitester-mcp (HTTP) → http://127.0.0.1:${HTTP_PORT}/mcp | ApiTester ที่ ${BASE}`);
+  });
+} else {
+  const transport = new StdioServerTransport();
+  await buildServer().connect(transport);
+  console.error(`apitester-mcp (stdio) พร้อมใช้งาน — ต่อกับ ApiTester ที่ ${BASE}`);
+}

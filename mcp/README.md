@@ -15,6 +15,18 @@ The server talks to a running ApiTester (start it with `npm start` in the repo
 root). Endpoint defaults to `http://127.0.0.1:3000`; override with
 `APITESTER_URL`.
 
+### Transport
+
+- **stdio** (default) — the agent launches `node index.js`; used by the committed
+  `.mcp.json`.
+- **HTTP** — set `MCP_PORT` to serve over Streamable HTTP on localhost:
+
+  ```bash
+  MCP_PORT=7000 node index.js        # npm run start:http
+  # → http://127.0.0.1:7000/mcp  (localhost-only)
+  claude mcp add --transport http apitester http://127.0.0.1:7000/mcp
+  ```
+
 ## Register with Claude Code
 
 A project-scoped `.mcp.json` is already committed at the repo root, so Claude
