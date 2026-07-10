@@ -88,6 +88,7 @@ app.post('/api/maplocal', express.json({ limit: '5mb' }), (req, res) => {
     status: Number(b.status) || 200,
     contentType: b.contentType || 'application/json',
     body: b.body != null ? String(b.body) : '',
+    scenario: b.scenario || '', // แท็กจัดกลุ่มเป็นชุด (scenario) — ว่าง = ไม่อยู่ชุดไหน
   };
   mapRules.unshift(rule);
   saveMapRules();
@@ -98,7 +99,7 @@ app.put('/api/maplocal/:id', express.json({ limit: '5mb' }), (req, res) => {
   const rule = mapRules.find((r) => r.id === req.params.id);
   if (!rule) return res.status(404).json({ ok: false, error: 'ไม่พบ rule' });
   const b = req.body || {};
-  for (const k of ['enabled', 'name', 'method', 'urlPattern', 'contentType', 'body']) {
+  for (const k of ['enabled', 'name', 'method', 'urlPattern', 'contentType', 'body', 'scenario']) {
     if (b[k] !== undefined) rule[k] = k === 'body' ? String(b[k]) : b[k];
   }
   if (b.status !== undefined) rule.status = Number(b.status) || 200;
@@ -111,6 +112,44 @@ app.delete('/api/maplocal/:id', (req, res) => {
   mapRules = mapRules.filter((r) => r.id !== req.params.id);
   saveMapRules();
   res.json({ ok: true, removed: before - mapRules.length });
+});
+
+// ---- Scenario: จัดกลุ่ม mock เป็นชุด แล้วเปิด/ปิดทั้งชุด ----
+app.get('/api/maplocal/scenarios', (req, res) => {
+  const map = new Map();
+  for (const r of mapRules) {
+    if (!r.scenario) continue;
+    const s = map.get(r.scenario) || { name: r.scenario, total: 0, enabled: 0 };
+    s.total += 1;
+    if (r.enabled) s.enabled += 1;
+    map.set(r.scenario, s);
+  }
+  // active = ทุก rule ในชุดถูกเปิด
+  const scenarios = [...map.values()].map((s) => ({ ...s, active: s.total > 0 && s.enabled === s.total }));
+  res.json({ ok: true, scenarios });
+});
+
+// เปิดชุดนี้ (enable rule ในชุด) + option exclusive = ปิด rule ของชุดอื่นด้วย
+app.post('/api/maplocal/scenarios/:name/activate', express.json(), (req, res) => {
+  const name = req.params.name;
+  const exclusive = (req.body || {}).exclusive === true;
+  let changed = 0;
+  for (const r of mapRules) {
+    if (r.scenario === name) { if (!r.enabled) { r.enabled = true; changed++; } }
+    else if (exclusive && r.scenario && r.enabled) { r.enabled = false; changed++; }
+  }
+  saveMapRules();
+  res.json({ ok: true, scenario: name, exclusive, changed });
+});
+
+app.post('/api/maplocal/scenarios/:name/deactivate', (req, res) => {
+  const name = req.params.name;
+  let changed = 0;
+  for (const r of mapRules) {
+    if (r.scenario === name && r.enabled) { r.enabled = false; changed++; }
+  }
+  saveMapRules();
+  res.json({ ok: true, scenario: name, changed });
 });
 
 function addEntry(entry, files) {

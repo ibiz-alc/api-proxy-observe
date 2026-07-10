@@ -19,6 +19,8 @@ Proxyman-like UI.
 4. **🔗 URL Metadata** — paste an image URL; the server fetches it and extracts
    EXIF: `GET /api/url-metadata?url=<url>&address=1`.
 5. **🌐 Proxy (MITM)** — capture and decrypt real device traffic — see below.
+6. **🤖 MCP server** — let an AI agent mock local data, inspect traffic, manage
+   scenarios and devices. See [`mcp/`](mcp/).
 
 ## Getting started
 

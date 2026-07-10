@@ -4,6 +4,17 @@ API Tester — a web tool for inspecting, sending and mocking API traffic, plus
 MITM decryption of a target Android app's HTTPS traffic, viewed in a
 Proxyman-like web UI.
 
+## 2026-07-10
+
+### MCP server for agents
+- New stdio MCP server (`mcp/`) exposing 16 tools so an AI agent can drive
+  ApiTester: manage Map Local mocks, group them into **scenarios** (activate a
+  whole set, optionally exclusive), read captured **flows** and turn one into a
+  mock (`mock_from_flow`), and control devices/proxy.
+- Map Local rules gained an optional `scenario` tag with
+  `GET /api/maplocal/scenarios` and activate/deactivate endpoints.
+- Project-scoped `.mcp.json` so Claude Code auto-detects the server in this repo.
+
 ## 2026-07-08
 
 ### Proxy — media handling

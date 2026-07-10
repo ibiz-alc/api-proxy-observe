@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "apitester": {
+      "command": "node",
+      "args": ["mcp/index.js"],
+      "env": {
+        "APITESTER_URL": "http://127.0.0.1:3000"
+      }
+    }
+  }
+}
