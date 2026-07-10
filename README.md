@@ -83,6 +83,78 @@ real server (Map Local tab).
 > ⚠️ The CA lets the proxy decrypt HTTPS. Use it only on your own test devices
 > and remove it when finished.
 
+## 🤖 MCP server (for AI agents)
+
+`mcp/` is a stdio [MCP](https://modelcontextprotocol.io) server that lets an AI
+agent (Claude Code, Claude Desktop, …) drive ApiTester over its HTTP API: mock
+local data (Map Local), group mocks into scenarios, read captured traffic and
+turn a real response into a mock, and control devices.
+
+### 1. Install
+
+```bash
+cd mcp
+npm install
+```
+
+### 2. Run ApiTester
+
+The MCP server is a thin client — ApiTester must be running:
+
+```bash
+npm start          # in the repo root (serves http://127.0.0.1:3000)
+```
+
+For the proxy/flow tools, also have mitmproxy running (`./start.sh`).
+Override the target with `APITESTER_URL` if not on the default.
+
+### 3. Register with the agent
+
+**Claude Code** — a project-scoped `.mcp.json` is committed at the repo root, so
+running `claude` inside this repo auto-detects the `apitester` server (accept the
+prompt to enable it). Verify with `/mcp`. To add it from anywhere:
+
+```bash
+claude mcp add apitester -- node /absolute/path/to/ApiTester/mcp/index.js
+```
+
+**Claude Desktop** — add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "apitester": {
+      "command": "node",
+      "args": ["/absolute/path/to/ApiTester/mcp/index.js"],
+      "env": { "APITESTER_URL": "http://127.0.0.1:3000" }
+    }
+  }
+}
+```
+
+### 4. Tools
+
+| Group | Tools |
+|-------|-------|
+| **Map Local (mock)** | `list_mocks`, `create_mock`, `update_mock`, `toggle_mock`, `delete_mock` |
+| **Scenarios** | `list_scenarios`, `activate_scenario` (`exclusive` to switch sets), `deactivate_scenario` |
+| **Flows (captured traffic)** | `list_flows`, `get_flow`, `mock_from_flow`, `clear_flows` |
+| **Device / proxy** | `proxy_info`, `list_devices`, `connect_device`, `disconnect_device` |
+
+### 5. Example agent prompts
+
+- *"Mock `/api/user` to return a premium user."* → `create_mock`
+- *"Capture the real `/api/tasks` response and mock it, then change status to empty."*
+  → `list_flows` → `mock_from_flow` → `update_mock`
+- *"Make a 'server error' scenario for all endpoints and switch to it."*
+  → `create_mock` (scenario `error`, status 500) → `activate_scenario` with `exclusive: true`
+- *"Connect my phone over USB and show the last 10 requests."*
+  → `connect_device` → `list_flows`
+
+A mock intercepts matching requests going through the proxy and returns the
+canned response without hitting the real server. Scenarios let the agent flip
+between whole sets of mocks (e.g. `happy-path` vs `error`) in one call.
+
 ## Selected endpoints
 
 - `POST /hook/*` — capture any request.
