@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node index.js",
-    "start:http": "MCP_PORT=7000 node index.js"
+    "start:http": "MCP_PORT=7333 node index.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",

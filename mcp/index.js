@@ -255,6 +255,16 @@ if (HTTP_PORT >= 1 && HTTP_PORT <= 65535) {
 
   app.listen(HTTP_PORT, '127.0.0.1', () => {
     console.error(`apitester-mcp (HTTP) → http://127.0.0.1:${HTTP_PORT}/mcp | ApiTester ที่ ${BASE}`);
+  }).on('error', (e) => {
+    if (e.code === 'EADDRINUSE') {
+      const hint = HTTP_PORT === 7000 || HTTP_PORT === 5000
+        ? ' (พอร์ตนี้มักถูก macOS AirPlay Receiver ยึด — ปิดใน System Settings → General → AirDrop & Handoff, หรือใช้พอร์ตอื่น)'
+        : '';
+      console.error(`❌ พอร์ต ${HTTP_PORT} ถูกใช้อยู่แล้ว${hint} — ตั้ง MCP_PORT เป็นพอร์ตอื่น เช่น MCP_PORT=7333`);
+    } else {
+      console.error('❌ start HTTP MCP ไม่สำเร็จ:', e.message);
+    }
+    process.exit(1);
   });
 } else {
   const transport = new StdioServerTransport();

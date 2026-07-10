@@ -22,9 +22,9 @@ root). Endpoint defaults to `http://127.0.0.1:3000`; override with
 - **HTTP** — set `MCP_PORT` to serve over Streamable HTTP on localhost:
 
   ```bash
-  MCP_PORT=7000 node index.js        # npm run start:http
-  # → http://127.0.0.1:7000/mcp  (localhost-only)
-  claude mcp add --transport http apitester http://127.0.0.1:7000/mcp
+  MCP_PORT=7333 node index.js        # npm run start:http
+  # → http://127.0.0.1:7333/mcp  (localhost-only)
+  claude mcp add --transport http apitester http://127.0.0.1:7333/mcp
   ```
 
 ## Register with Claude Code

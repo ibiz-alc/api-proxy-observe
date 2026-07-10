@@ -144,18 +144,22 @@ as a long-lived **HTTP** endpoint that any MCP-over-HTTP client can connect to:
 
 ```bash
 cd mcp
-MCP_PORT=7000 node index.js      # or: npm run start:http
-# → http://127.0.0.1:7000/mcp  (Streamable HTTP, bound to localhost only)
+MCP_PORT=7333 node index.js      # or: npm run start:http
+# → http://127.0.0.1:7333/mcp  (Streamable HTTP, bound to localhost only)
 ```
 
 Connect Claude Code to it over HTTP instead of stdio:
 
 ```bash
-claude mcp add --transport http apitester http://127.0.0.1:7000/mcp
+claude mcp add --transport http apitester http://127.0.0.1:7333/mcp
 ```
 
 Use HTTP mode when several clients/agents share one server, or you want it
 running independently of the editor. Otherwise stdio (above) is simplest.
+
+> Avoid ports **7000** and **5000** on macOS — the AirPlay Receiver
+> (ControlCenter) holds them, so binding there fails with `EADDRINUSE`. The
+> default is `7333`; override with `MCP_PORT`.
 
 ### 4. Tools
 
