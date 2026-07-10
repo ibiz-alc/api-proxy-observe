@@ -77,6 +77,19 @@ function syntaxHighlightJson(jsonStr) {
   );
 }
 
+// กล่องแก้ JSON ที่มีไฮไลต์สี (textarea โปร่งใสวางทับ <pre> ที่ไฮไลต์ไว้ + sync scroll)
+function makeJsonEditor(value) {
+  const code = el('code');
+  const highlight = el('pre', { class: 'je-highlight' }, [code]);
+  const ta = el('textarea', { class: 'je-input', spellcheck: 'false', placeholder: '{"key": "value"}' });
+  ta.value = value || '';
+  const refresh = () => { code.innerHTML = syntaxHighlightJson(ta.value) + '\n'; };
+  ta.addEventListener('input', refresh);
+  ta.addEventListener('scroll', () => { highlight.scrollTop = ta.scrollTop; highlight.scrollLeft = ta.scrollLeft; });
+  refresh();
+  return { wrap: el('div', { class: 'je-wrap' }, [highlight, ta]), textarea: ta, refresh };
+}
+
 // ปุ่ม copy เล็กๆ มุมขวาบนของ code block
 function copyButton(getText) {
   const btn = el('button', { class: 'copy-btn', type: 'button', text: '📋 Copy', title: 'คัดลอก' });
@@ -1238,18 +1251,19 @@ function renderMapList() {
 function renderMapEditor(rule) {
   mapEditorEl.innerHTML = '';
   const isNew = !rule.id;
-  const field = (label, node) => {
-    mapEditorEl.appendChild(el('label', { class: 'map-label', text: label }));
-    mapEditorEl.appendChild(node);
+  const cfg = el('div', { class: 'map-cfg' });          // คอลัมน์ Config
+  const bodyCol = el('div', { class: 'map-body-col' });  // คอลัมน์ Response Body
+  const field = (parent, label, node) => {
+    parent.appendChild(el('label', { class: 'map-label', text: label }));
+    parent.appendChild(node);
     return node;
   };
 
   const enabled = el('input', { type: 'checkbox' });
   enabled.checked = rule.enabled !== false;
-  const enableRow = el('label', { class: 'map-enable' }, [enabled, el('span', { text: ' เปิดใช้งานกฎนี้' })]);
-  mapEditorEl.appendChild(enableRow);
+  cfg.appendChild(el('label', { class: 'map-enable' }, [enabled, el('span', { text: ' เปิดใช้งานกฎนี้' })]));
 
-  const name = field('ชื่อกฎ (ไว้จำ)', el('input', { type: 'text', value: rule.name || '', placeholder: 'เช่น mock license-types' }));
+  const name = field(cfg, 'ชื่อกฎ (ไว้จำ)', el('input', { type: 'text', value: rule.name || '', placeholder: 'เช่น mock license-types' }));
 
   const method = el('select');
   for (const m of ['ANY', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE']) {
@@ -1257,27 +1271,42 @@ function renderMapEditor(rule) {
     if ((rule.method || 'ANY') === m) opt.selected = true;
     method.appendChild(opt);
   }
-  field('Method', method);
+  field(cfg, 'Method', method);
 
-  const pattern = field('URL pattern (มี * = wildcard, ไม่มี * = ตรวจแบบ "มีคำนี้")',
+  const pattern = field(cfg, 'URL pattern (มี * = wildcard, ไม่มี * = ตรวจแบบ "มีคำนี้")',
     el('input', { type: 'text', value: rule.urlPattern || '', placeholder: 'เช่น /api/master-data/license-types หรือ /user/*' }));
 
-  const status = field('HTTP status', el('input', { type: 'text', value: String(rule.status || 200) }));
-  const contentType = field('Content-Type', el('input', { type: 'text', value: rule.contentType || 'application/json' }));
-  const body = field('Response body', el('textarea', { rows: '12', placeholder: '{"key": "value"}' }));
-  body.value = rule.body || '';
+  const status = field(cfg, 'HTTP status', el('input', { type: 'text', value: String(rule.status || 200) }));
+  const contentType = field(cfg, 'Content-Type', el('input', { type: 'text', value: rule.contentType || 'application/json' }));
 
+  // ---- Response body (คอลัมน์ขวา) — ไฮไลต์สี + ปุ่ม Format ----
+  const bodyEd = makeJsonEditor(rule.body || '');
   const jsonHint = el('span', { class: 'hint', text: '' });
   const validateJson = () => {
-    if ((contentType.value || '').includes('json') && body.value.trim()) {
-      try { JSON.parse(body.value); jsonHint.textContent = '✅ JSON ถูกต้อง'; jsonHint.style.color = 'var(--green)'; }
+    const v = bodyEd.textarea.value;
+    if ((contentType.value || '').includes('json') && v.trim()) {
+      try { JSON.parse(v); jsonHint.textContent = '✅ JSON ถูกต้อง'; jsonHint.style.color = 'var(--green)'; }
       catch (e) { jsonHint.textContent = '⚠️ JSON ไม่ถูกต้อง: ' + e.message; jsonHint.style.color = 'var(--yellow)'; }
     } else jsonHint.textContent = '';
   };
-  body.addEventListener('input', validateJson);
+  bodyEd.textarea.addEventListener('input', validateJson);
   contentType.addEventListener('input', validateJson);
+  const fmtBtn = el('button', { class: 'map-fmt-btn', type: 'button', title: 'จัดรูปแบบ JSON ให้สวย', text: '✨ Format' });
+  fmtBtn.addEventListener('click', () => {
+    const v = bodyEd.textarea.value.trim();
+    if (!v) return;
+    try {
+      bodyEd.textarea.value = JSON.stringify(JSON.parse(v), null, 2);
+      bodyEd.refresh();
+      jsonHint.textContent = '✅ จัดรูปแบบแล้ว'; jsonHint.style.color = 'var(--green)';
+    } catch (e) {
+      jsonHint.textContent = '⚠️ format ไม่ได้ (JSON ไม่ถูกต้อง): ' + e.message; jsonHint.style.color = 'var(--yellow)';
+    }
+  });
+  bodyCol.appendChild(el('div', { class: 'map-body-head' }, [el('span', { class: 'map-label', text: 'Response body' }), fmtBtn]));
+  bodyCol.appendChild(bodyEd.wrap);
+  bodyCol.appendChild(jsonHint);
   validateJson();
-  mapEditorEl.appendChild(jsonHint);
 
   const collect = () => ({
     enabled: enabled.checked,
@@ -1286,7 +1315,7 @@ function renderMapEditor(rule) {
     urlPattern: pattern.value.trim(),
     status: status.value.trim(),
     contentType: contentType.value.trim(),
-    body: body.value,
+    body: bodyEd.textarea.value,
   });
 
   const status2 = el('span', { class: 'hint' });
@@ -1338,7 +1367,8 @@ function renderMapEditor(rule) {
     });
     btnRow.appendChild(delBtn);
   }
-  mapEditorEl.appendChild(btnRow);
+  cfg.appendChild(btnRow);
+  mapEditorEl.appendChild(el('div', { class: 'map-editor-cols' }, [cfg, bodyCol]));
 }
 
 document.getElementById('maplocal-add').addEventListener('click', () => {
