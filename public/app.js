@@ -1226,6 +1226,7 @@ const mapListEl = document.getElementById('maplocal-list');
 const mapEditorEl = document.getElementById('maplocal-editor');
 let mapRulesData = [];
 let selectedRuleId = null;
+let mapSaveHandler = null; // ฟังก์ชัน save ของ editor ที่เปิดอยู่ (ให้ Cmd+S เรียกได้)
 
 async function loadMapRules() {
   mapRulesData = await (await fetch('/api/maplocal')).json();
@@ -1322,10 +1323,17 @@ function renderMapEditor(rule) {
   });
 
   const status2 = el('span', { class: 'hint' });
-  const saveBtn = el('button', { class: 'primary', text: isNew ? 'สร้างกฎ' : 'บันทึก' });
-  saveBtn.addEventListener('click', async () => {
+  const doSave = async () => {
     const data = collect();
-    if (!data.urlPattern) { status2.textContent = '⚠️ กรุณาใส่ URL pattern'; return; }
+    if (!data.urlPattern) { status2.textContent = '⚠️ กรุณาใส่ URL pattern'; status2.style.color = 'var(--yellow)'; return; }
+    // ถ้า content-type เป็น json และมี body → ต้อง parse ได้ ไม่งั้นเตือนแล้วไม่บันทึก
+    if ((data.contentType || '').includes('json') && data.body.trim()) {
+      try { JSON.parse(data.body); } catch (e) {
+        jsonHint.textContent = '⛔ JSON format ผิด — บันทึกไม่ได้: ' + e.message; jsonHint.style.color = 'var(--red)';
+        status2.textContent = '❌ format ผิด บันทึกไม่ได้'; status2.style.color = 'var(--red)';
+        return;
+      }
+    }
     const url = isNew ? '/api/maplocal' : `/api/maplocal/${rule.id}`;
     const resp = await (await fetch(url, {
       method: isNew ? 'POST' : 'PUT',
@@ -1333,14 +1341,17 @@ function renderMapEditor(rule) {
       body: JSON.stringify(data),
     })).json();
     if (resp.ok) {
-      status2.textContent = '✅ บันทึกแล้ว';
+      status2.textContent = '✅ บันทึกแล้ว'; status2.style.color = 'var(--green)';
       selectedRuleId = resp.rule.id;
       await loadMapRules();
       renderMapEditor(resp.rule);
     } else {
-      status2.textContent = '❌ ' + (resp.error || 'บันทึกไม่สำเร็จ');
+      status2.textContent = '❌ ' + (resp.error || 'บันทึกไม่สำเร็จ'); status2.style.color = 'var(--red)';
     }
-  });
+  };
+  mapSaveHandler = doSave; // ให้ Cmd+S เรียก save ของ editor ตัวนี้
+  const saveBtn = el('button', { class: 'primary', text: isNew ? 'สร้างกฎ' : 'บันทึก' });
+  saveBtn.addEventListener('click', doSave);
 
   const btnRow = el('div', { class: 'map-btn-row' }, [saveBtn, status2]);
   if (!isNew) {
@@ -1365,6 +1376,7 @@ function renderMapEditor(rule) {
     delBtn.addEventListener('click', async () => {
       await fetch(`/api/maplocal/${rule.id}`, { method: 'DELETE' });
       selectedRuleId = null;
+      mapSaveHandler = null;
       await loadMapRules();
       mapEditorEl.innerHTML = '<p class="empty-msg">เลือกกฎจากด้านซ้าย หรือกด "เพิ่มกฎ" เพื่อสร้างใหม่</p>';
     });
@@ -1378,6 +1390,14 @@ document.getElementById('maplocal-add').addEventListener('click', () => {
   selectedRuleId = null;
   renderMapList();
   renderMapEditor({ enabled: true, method: 'ANY', status: 200, contentType: 'application/json', body: '' });
+});
+
+// Cmd/Ctrl+S บนแท็บ Map Local → บันทึกกฎที่เปิดอยู่ (บล็อกไว้ถ้า JSON format ผิด)
+window.addEventListener('keydown', (e) => {
+  if (!((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's')) return;
+  if (!document.getElementById('tab-maplocal').classList.contains('active')) return;
+  e.preventDefault(); // กัน browser เด้ง save page
+  if (mapSaveHandler) mapSaveHandler();
 });
 
 loadMapRules();
