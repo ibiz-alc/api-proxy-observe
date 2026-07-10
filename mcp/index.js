@@ -312,8 +312,14 @@ server.tool(
 );
 }
 
+const INSTRUCTIONS = `ApiTester: inspect/mock API traffic through a MITM proxy.
+- Static mock: create_mock (one urlPattern -> one response). urlPattern without * = substring match, with * = wildcard.
+- Scenario: tag static mocks, activate_scenario {exclusive:true} to switch whole sets.
+- Test case (flow): each endpoint has ordered steps; same endpoint returns step 1 on call 1, step 2 on call 2 (autoAdvance). Only ONE case active at a time; activating is exclusive. Inline via create_case; file-based under test-cases/<name>/ loaded by reload_cases (ids look like "file:<name>"). Drive with activate_case/reset_case/next_step/goto_step; case_status shows cursors.
+- mock_from_flow turns a captured flow into a mock. See mcp/USAGE.md for full examples.`;
+
 function buildServer() {
-  const server = new McpServer({ name: 'apitester', version: '1.0.0' });
+  const server = new McpServer({ name: 'apitester', version: '1.0.0' }, { instructions: INSTRUCTIONS });
   registerTools(server);
   return server;
 }

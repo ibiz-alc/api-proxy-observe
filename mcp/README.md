@@ -37,6 +37,12 @@ the prompt to enable it). To add it manually elsewhere:
 claude mcp add apitester -- node /absolute/path/to/ApiTester/mcp/index.js
 ```
 
+## Usage examples
+
+See **[USAGE.md](USAGE.md)** for concrete tool-call examples per workflow (static
+mocks, scenarios, dynamic/file-based test cases, driving a flow, device control).
+The server also sends a short `instructions` summary to the client on connect.
+
 ## Tools
 
 **Map Local (mock local data)**
