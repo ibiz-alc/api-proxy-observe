@@ -1630,3 +1630,156 @@ setInterval(async () => {
     }
   } catch { /* ignore */ }
 }, 10000);
+
+// ================= Status tab (ความพร้อมของระบบ + ปุ่มเปิด service ที่ดับ) =================
+const statusCards = document.getElementById('status-cards');
+const statusBanner = document.getElementById('status-banner');
+
+function stBadge(up, textUp = 'พร้อมใช้งาน', textDown = 'ไม่พร้อม') {
+  return el('span', { class: 'st-badge ' + (up ? 'up' : 'down'), text: up ? '✅ ' + textUp : '❌ ' + textDown });
+}
+
+function stBtn(label, onClick, kind = '') {
+  const b = el('button', { class: 'st-action' + (kind ? ' ' + kind : ''), text: label });
+  b.addEventListener('click', async () => {
+    b.disabled = true;
+    const old = b.textContent;
+    b.textContent = '⏳ กำลังทำ…';
+    try { await onClick(); } catch (e) { alert('ไม่สำเร็จ: ' + e.message); }
+    b.disabled = false;
+    b.textContent = old;
+    renderStatus();
+  });
+  return b;
+}
+
+async function stStartService(svc) {
+  const r = await (await fetch('/api/status/start/' + svc, { method: 'POST' })).json();
+  if (!r.ok) throw new Error((r.error || 'start ไม่สำเร็จ') + (r.log ? '\n--- log ---\n' + r.log : ''));
+}
+
+async function stStopService(svc) {
+  const r = await (await fetch('/api/status/stop/' + svc, { method: 'POST' })).json();
+  if (!r.ok) throw new Error(r.error || 'stop ไม่สำเร็จ');
+}
+
+async function stDisconnectDevice(serial) {
+  const r = await (await fetch('/api/devices/disconnect', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ serial }),
+  })).json();
+  if (!r.ok) throw new Error(r.error || 'disconnect ไม่สำเร็จ');
+}
+
+async function stConnectDevice(serial, mode) {
+  const r = await (await fetch('/api/devices/connect', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ serial, mode }),
+  })).json();
+  if (!r.ok) throw new Error(r.error || 'connect ไม่สำเร็จ');
+}
+
+function stCard(icon, title, up, details, actions = []) {
+  const card = el('div', { class: 'st-card ' + (up ? 'ok' : 'bad') }, [
+    el('div', { class: 'st-head' }, [
+      el('span', { class: 'st-title', text: icon + ' ' + title }),
+      stBadge(up),
+    ]),
+    el('div', { class: 'st-body' }, details.map((t) => el('div', { class: 'st-line', text: t }))),
+  ]);
+  if (actions.length) card.appendChild(el('div', { class: 'st-actions' }, actions));
+  return card;
+}
+
+async function renderStatus() {
+  let d;
+  try { d = await (await fetch('/api/status')).json(); }
+  catch (e) {
+    statusCards.innerHTML = '';
+    statusCards.appendChild(el('p', { class: 'empty-msg', text: 'เช็คสถานะไม่ได้: ' + e.message }));
+    return;
+  }
+  const { services: sv, devices, muted, flows, lanIp } = d;
+  statusCards.innerHTML = '';
+
+  // --- ความพร้อมรวมของ pipeline บันทึก traffic ---
+  const connectedDev = devices.find((x) => x.connected || x.posternRunning);
+  const usbNoReverse = devices.find((x) => x.connected && x.mode === 'usb' && x.reverse === false);
+  const blockers = [];
+  if (!sv.mitmproxy.up) blockers.push('mitmproxy ยังไม่เปิด (ตัวบันทึก traffic)');
+  if (!devices.length) blockers.push('ไม่พบ device — เสียบสาย USB + เปิด USB debugging');
+  else if (!connectedDev) blockers.push('มือถือยังไม่ได้เชื่อม proxy — กดปุ่มเชื่อมที่การ์ด Device');
+  if (usbNoReverse) blockers.push('adb reverse หายไป (สายหลุด/เสียบใหม่) — กดเชื่อม USB ใหม่');
+  if (muted) blockers.push('การบันทึกถูก mute อยู่ — กดเชื่อม device เพื่อปลด');
+  statusBanner.className = 'status-banner ' + (blockers.length ? 'bad' : 'ok');
+  statusBanner.innerHTML = blockers.length
+    ? '<b>⚠️ ยังบันทึก traffic ไม่ได้:</b><br/>• ' + blockers.join('<br/>• ')
+    : '✅ <b>พร้อมบันทึก traffic จากมือถือ</b> — เปิดแอป/เว็บบนมือถือได้เลย';
+
+  // --- ApiTester server ---
+  statusCards.appendChild(stCard('🧪', 'ApiTester server', true,
+    [`พอร์ต ${sv.apitester.port} — หน้าเว็บ + API + เก็บ flow (ตอบอยู่ตอนนี้)`]));
+
+  // --- mitmproxy ---
+  statusCards.appendChild(stCard('🌐', `mitmproxy (พอร์ต ${sv.mitmproxy.port})`, sv.mitmproxy.up,
+    sv.mitmproxy.up
+      ? ['ดัก/ถอดรหัส HTTPS จากมือถือแล้วส่ง flow เข้ามาบันทึก']
+      : ['ดับอยู่ — เชื่อม USB/Wi-Fi ไปก็ไม่บันทึก เพราะไม่มีตัวรับบนพอร์ตนี้'],
+    sv.mitmproxy.up
+      ? [stBtn('⏹️ ปิด mitmproxy', () => stStopService('mitm'), 'stop')]
+      : [stBtn('▶️ เปิด mitmproxy', () => stStartService('mitm'))]));
+
+  // --- MCP ---
+  statusCards.appendChild(stCard('🤖', `MCP server (พอร์ต ${sv.mcp.port})`, sv.mcp.up,
+    sv.mcp.up
+      ? [`ให้ AI agent ควบคุม ApiTester — ${sv.mcp.url}`]
+      : ['ดับอยู่ — ไม่กระทบการบันทึก traffic แต่ AI agent จะต่อไม่ได้'],
+    sv.mcp.up
+      ? [stBtn('⏹️ ปิด MCP', () => stStopService('mcp'), 'stop')]
+      : [stBtn('▶️ เปิด MCP', () => stStartService('mcp'))]));
+
+  // --- Devices ---
+  if (!devices.length) {
+    statusCards.appendChild(stCard('📱', 'Device', false,
+      ['ไม่พบ device — เสียบสาย USB + เปิด USB debugging แล้วกดรีเฟรช']));
+  }
+  for (const dev of devices) {
+    const okDev = !!(dev.connected || dev.posternRunning) && !(dev.mode === 'usb' && dev.reverse === false);
+    const details = [];
+    if (dev.connected) {
+      details.push(`เชื่อมแล้วโหมด ${dev.mode.toUpperCase()} → proxy ${dev.proxy}`);
+      if (dev.mode === 'usb') details.push(dev.reverse ? 'adb reverse tcp:8888 ✓' : '⚠️ adb reverse หายไป — traffic ไปไม่ถึง Mac');
+    } else if (dev.posternRunning) {
+      details.push('เชื่อมผ่านแอป Proxy Postern (VPN) อยู่');
+    } else {
+      details.push('ยังไม่ได้เชื่อม proxy' + (lanIp ? ` (Wi-Fi ใช้ Host ${lanIp}:8888)` : ''));
+    }
+    const acts = [];
+    if (!okDev) {
+      acts.push(stBtn('🔌 เชื่อม USB', () => stConnectDevice(dev.serial, 'usb')));
+      acts.push(stBtn('📶 เชื่อม Wi-Fi', () => stConnectDevice(dev.serial, 'wifi')));
+    } else {
+      acts.push(stBtn('⛔ ตัดการเชื่อมต่อ', () => stDisconnectDevice(dev.serial), 'stop'));
+    }
+    statusCards.appendChild(stCard('📱', `${dev.model} (${dev.transport.toUpperCase()})`, okDev, details, acts));
+  }
+
+  // --- การบันทึก ---
+  const recDetails = [
+    muted ? '🔇 ถูก mute อยู่ — flow ที่เข้ามาจะถูกทิ้ง (เกิดหลังกด disconnect)' : '🔊 รับ flow ปกติ',
+    `บันทึกไว้ ${flows.count} flows` + (flows.lastAt ? ` · ล่าสุด ${new Date(flows.lastAt).toLocaleTimeString()}` : ''),
+  ];
+  const recActs = muted && devices.length
+    ? [stBtn('🔊 ปลด mute (เชื่อมใหม่)', () => stConnectDevice(devices[0].serial, devices[0].mode || 'usb'))]
+    : [];
+  statusCards.appendChild(stCard('⏺️', 'การบันทึก traffic', !muted, recDetails, recActs));
+}
+
+document.getElementById('status-refresh').addEventListener('click', renderStatus);
+document.querySelector('.tab-btn[data-tab="status"]').addEventListener('click', renderStatus);
+setInterval(() => {
+  if (document.getElementById('tab-status').classList.contains('active')) renderStatus();
+}, 5000);
+renderStatus();

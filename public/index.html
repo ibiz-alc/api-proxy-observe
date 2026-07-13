@@ -18,6 +18,7 @@
       <button class="tab-btn" data-tab="proxy">🌐 Proxy</button>
       <button class="tab-btn" data-tab="maplocal">🎯 Map Local</button>
       <button class="tab-btn" data-tab="testcases">🎬 Test Cases</button>
+      <button class="tab-btn" data-tab="status">🩺 Status</button>
     </nav>
   </header>
 
@@ -241,6 +242,16 @@
       <aside id="tc-list"><p class="empty-msg">ยังไม่มีเคส<br/>กด "เพิ่มเคส" เพื่อสร้าง</p></aside>
       <section id="tc-editor"><p class="empty-msg">เลือกเคสจากด้านซ้าย หรือกด "เพิ่มเคส"</p></section>
     </div>
+  </main>
+
+  <!-- ============ Status (ความพร้อมของระบบ) ============ -->
+  <main id="tab-status" class="tab">
+    <div class="hook-info">
+      <span>🩺 <b>Status</b> — เช็คว่าแต่ละส่วนพร้อมใช้งานไหม ถ้าไม่พร้อมกดปุ่มเปิดได้เลย</span>
+      <button id="status-refresh">🔄 รีเฟรช</button>
+    </div>
+    <div id="status-banner" class="status-banner"></div>
+    <div id="status-cards" class="status-cards"><p class="empty-msg">กำลังเช็คสถานะ…</p></div>
   </main>
 
   <script src="/vendor/exifr.js"></script>

@@ -787,6 +787,127 @@ app.post('/api/devices/install-apk', express.json(), async (req, res) => {
   }
 });
 
+// ================= Status dashboard (เช็คความพร้อม + สตาร์ท service ที่ดับ) =================
+const MCP_PORT = parseInt(process.env.MCP_PORT || '7333', 10);
+const MITM_ADDON = path.join(__dirname, 'mitm-to-apitester.py');
+const MITM_LOG = '/tmp/mitmdump.log';
+const MCP_LOG = '/tmp/apitester-mcp.log';
+
+// เช็คว่ามีใครฟัง TCP พอร์ตนี้ไหม (ตัวจริงของ "service ขึ้นแล้ว" — ไม่เดาจาก process list)
+function checkPort(port, host = '127.0.0.1', timeout = 800) {
+  return new Promise((resolve) => {
+    const s = require('net').connect({ port, host });
+    const done = (up) => { s.destroy(); resolve(up); };
+    s.setTimeout(timeout, () => done(false));
+    s.on('connect', () => done(true));
+    s.on('error', () => done(false));
+  });
+}
+
+async function hasReverseTunnel(serial) {
+  try {
+    const out = await adb(['-s', serial, 'reverse', '--list']);
+    return out.includes(`tcp:${MITM_PORT}`);
+  } catch { return false; }
+}
+
+app.get('/api/status', async (req, res) => {
+  try {
+    const [mitmUp, mcpUp, devices] = await Promise.all([
+      checkPort(MITM_PORT), checkPort(MCP_PORT), listDevices(),
+    ]);
+    // reverse tunnel เช็คเฉพาะ device ที่ต่อโหมด usb (ใช้ 127.0.0.1 ผ่าน adb reverse)
+    for (const d of devices) {
+      d.reverse = d.mode === 'usb' ? await hasReverseTunnel(d.serial) : null;
+    }
+    let lastFlowAt = null;
+    for (const f of proxyStore.flows) if (!lastFlowAt || f.time > lastFlowAt) lastFlowAt = f.time;
+    res.json({
+      ok: true,
+      services: {
+        apitester: { up: true, port: PORT },
+        mitmproxy: { up: mitmUp, port: MITM_PORT },
+        mcp: { up: mcpUp, port: MCP_PORT, url: `http://127.0.0.1:${MCP_PORT}/mcp` },
+      },
+      devices,
+      muted: proxyMuted,
+      flows: { count: proxyStore.flows.length, lastAt: lastFlowAt },
+      lanIp: getLanIp(),
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// สตาร์ท service ที่ดับ: mitm | mcp — spawn แบบ detached แล้วยืนยันว่าพอร์ตขึ้นจริงก่อนตอบ
+app.post('/api/status/start/:service', express.json(), async (req, res) => {
+  const { spawn } = require('child_process');
+  const svc = req.params.service;
+  const defs = {
+    mitm: {
+      port: MITM_PORT, log: MITM_LOG,
+      cmd: fs.existsSync('/opt/homebrew/bin/mitmdump') ? '/opt/homebrew/bin/mitmdump' : 'mitmdump',
+      args: ['--listen-host', '0.0.0.0', '--listen-port', String(MITM_PORT), '-s', MITM_ADDON],
+      env: { ...process.env, PYTHONUNBUFFERED: '1' },
+      cwd: __dirname,
+    },
+    mcp: {
+      port: MCP_PORT, log: MCP_LOG,
+      cmd: process.execPath, // node ตัวเดียวกับที่รัน server อยู่
+      args: ['index.js'],
+      env: { ...process.env, MCP_PORT: String(MCP_PORT) },
+      cwd: path.join(__dirname, 'mcp'),
+    },
+  };
+  const def = defs[svc];
+  if (!def) return res.status(400).json({ ok: false, error: `ไม่รู้จัก service: ${svc}` });
+  try {
+    if (await checkPort(def.port)) return res.json({ ok: true, up: true, already: true });
+    const logFd = fs.openSync(def.log, 'a');
+    const child = spawn(def.cmd, def.args, {
+      cwd: def.cwd, env: def.env, detached: true, stdio: ['ignore', logFd, logFd],
+    });
+    child.unref();
+    fs.closeSync(logFd);
+    // รอพอร์ตขึ้นจริง (สูงสุด ~6 วิ) — spawn สำเร็จไม่ได้แปลว่า service รอด
+    let up = false;
+    for (let i = 0; i < 12 && !up; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      up = await checkPort(def.port);
+    }
+    if (up) return res.json({ ok: true, up: true, pid: child.pid });
+    let tail = '';
+    try { tail = fs.readFileSync(def.log, 'utf8').split('\n').slice(-8).join('\n'); } catch { /* ignore */ }
+    res.status(500).json({ ok: false, up: false, error: `สตาร์ทแล้วแต่พอร์ต ${def.port} ไม่ขึ้น`, log: tail });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ปิด service: mitm | mcp — หา PID จากพอร์ตแล้ว SIGTERM (แม่นกว่า pkill ตามชื่อ)
+app.post('/api/status/stop/:service', express.json(), async (req, res) => {
+  const svc = req.params.service;
+  const ports = { mitm: MITM_PORT, mcp: MCP_PORT };
+  const port = ports[svc];
+  if (!port) return res.status(400).json({ ok: false, error: `ไม่รู้จัก service: ${svc}` });
+  try {
+    if (!(await checkPort(port))) return res.json({ ok: true, up: false, already: true });
+    const { stdout } = await execFileP('lsof', ['-nP', '-t', `-iTCP:${port}`, '-sTCP:LISTEN']);
+    for (const pid of stdout.split('\n').filter(Boolean)) {
+      try { process.kill(parseInt(pid, 10), 'SIGTERM'); } catch { /* ตายไปแล้ว */ }
+    }
+    let down = false;
+    for (let i = 0; i < 10 && !down; i++) {
+      await new Promise((r) => setTimeout(r, 400));
+      down = !(await checkPort(port));
+    }
+    if (down) return res.json({ ok: true, up: false });
+    res.status(500).json({ ok: false, error: `สั่งปิดแล้วแต่พอร์ต ${port} ยังเปิดอยู่` });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 app.get('/api/proxy/info', (req, res) => {
   // หา IP วง LAN (IPv4 ตัวแรกที่ไม่ใช่ loopback) เพื่อบอกวิธีเชื่อมแบบ Wi-Fi
   let lanIp = null;
