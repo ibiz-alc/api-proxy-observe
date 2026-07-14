@@ -300,6 +300,18 @@ CA** (works for iOS and Android alike).
 
 Or drive compose directly: `docker compose up -d --build` / `logs -f` / `down`.
 
+**Prebuilt image** (amd64 + arm64) — no clone needed:
+
+```bash
+docker run -d --name apitester \
+  -p 3000:3000 -p 8888:8888 -p 7333:7333 \
+  -v apitester-ca:/root/.mitmproxy \
+  ghcr.io/ibiz-alc/api-proxy-observe:latest
+```
+
+Web UI at http://localhost:3000. The `apitester-ca` volume keeps the mitmproxy
+CA stable across restarts.
+
 > **Don't run native and Docker at the same time.** Both can bind the same
 > ports without an error (native on IPv4, Docker on IPv6) and requests silently
 > split between the two stacks. `start.sh`/`stop.sh` handle the switch for you.
