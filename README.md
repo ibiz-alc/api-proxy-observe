@@ -292,10 +292,17 @@ on macOS has no USB passthrough, so connect devices with **manual proxy + manual
 CA** (works for iOS and Android alike).
 
 ```bash
-docker compose up -d --build     # build + start
-docker compose logs -f           # watch logs
-docker compose down              # stop
+./start.sh --docker              # start in Docker (stops native services first)
+./start.sh --docker --build      # rebuild image after code changes
+./start.sh                       # switch back to native (stops the container first)
+./stop.sh                        # stop everything (native + container)
 ```
+
+Or drive compose directly: `docker compose up -d --build` / `logs -f` / `down`.
+
+> **Don't run native and Docker at the same time.** Both can bind the same
+> ports without an error (native on IPv4, Docker on IPv6) and requests silently
+> split between the two stacks. `start.sh`/`stop.sh` handle the switch for you.
 
 Then on the device:
 
