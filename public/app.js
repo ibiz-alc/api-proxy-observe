@@ -1801,13 +1801,30 @@ function renderIosCard(lanIp, mitmUp) {
       el('div', { class: 'st-line', html: `Proxy ที่ต้องกรอกบน iPhone: <code>${proxyStr}</code>` }));
     card.appendChild(el('div', { class: 'st-actions' }, [copyBtn]));
   }
-  // checklist
+  // --- iOS Simulator: ติดตั้ง CA อัตโนมัติ (เฉพาะ sim บน Mac เครื่องนี้) ---
+  // ต่างจากเครื่องจริง: simctl add-root-cert วางเข้า trusted root ให้เลย ไม่ต้องทำ 5 ขั้นด้านล่าง
+  card.querySelector('.st-body').appendChild(
+    el('div', { class: 'st-line', html: '🤖 <b>iOS Simulator</b> (บน Mac เครื่องนี้): กดปุ่มติดตั้ง CA อัตโนมัติได้เลย — auto-trust ให้ ไม่ต้องทำขั้นตอน manual ด้านล่าง (เปิด Simulator ให้บูตก่อน)' }));
+  const simBtn = stBtn('🤖 ติดตั้ง CA อัตโนมัติ (Simulator)', stSimInstallCa);
+  card.appendChild(el('div', { class: 'st-actions' }, [simBtn]));
+
+  // checklist (เครื่องจริง — ต้องทำเอง)
+  card.querySelector('.st-body').appendChild(
+    el('div', { class: 'st-line', text: '📱 เครื่องจริง (iPhone/iPad) — ทำตามขั้นตอนนี้:' }));
   const ol = el('ol', { class: 'st-steps' });
   for (const s of steps) ol.appendChild(el('li', { text: s }));
   card.querySelector('.st-body').appendChild(ol);
   card.querySelector('.st-body').appendChild(
     el('div', { class: 'st-line', text: '⚠️ แอปที่ทำ certificate pinning (เช่นแอปธนาคาร) จะไม่วิ่งผ่าน proxy แม้ติดตั้ง cert ถูก — เป็นข้อจำกัดของแอปเป้าหมายเอง' }));
   return card;
+}
+
+// ติดตั้ง CA ลง iOS Simulator ที่บูตอยู่ทุกตัว (auto-trust) — ปุ่มเดียวจบ
+async function stSimInstallCa() {
+  const r = await (await fetch('/api/devices/ios-sim/install-ca', { method: 'POST' })).json();
+  if (!r.ok) throw new Error(r.error || 'ติดตั้งไม่สำเร็จ');
+  const warn = (r.failed && r.failed.length) ? `\n\n⚠️ ล้มเหลวบางตัว: ${r.failed.join(', ')}` : '';
+  alert(`✅ ติดตั้ง CA (auto-trust) ลง Simulator แล้ว: ${r.installed.join(', ')}${warn}\n\nเปิด Safari/แอปใน Simulator ได้เลย — HTTPS จะถูกถอดรหัสทันที`);
 }
 
 async function renderStatus() {

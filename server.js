@@ -858,6 +858,62 @@ app.post('/api/devices/install-ca', express.json(), async (req, res) => {
   }
 });
 
+// ===== iOS Simulator (macOS + Xcode) — ติดตั้ง CA อัตโนมัติ =====
+// simctl keychain <udid> add-root-cert วาง cert ลง trusted root store ของ sim ให้เลย
+// → ไม่ต้องเปิด Certificate Trust Settings เอง (ต่างจากเครื่องจริง) HTTPS ผ่านทันที
+async function listBootedIosSims() {
+  // ต้องมี Xcode command line tools — xcrun หาไม่เจอ/ยังไม่ได้ตั้ง developer dir จะ throw
+  const { stdout } = await execFileP('xcrun', ['simctl', 'list', 'devices', 'booted', '-j'], { timeout: 10000 });
+  const data = JSON.parse(stdout);
+  const sims = [];
+  for (const runtime of Object.keys(data.devices || {})) {
+    // นับเฉพาะ iOS runtime (ตัด watchOS/tvOS ออก)
+    if (!/iOS/i.test(runtime)) continue;
+    for (const d of data.devices[runtime]) {
+      if (d.state === 'Booted') sims.push({ udid: d.udid, name: d.name, runtime: runtime.split('.').pop() });
+    }
+  }
+  return sims;
+}
+
+// list booted sims — ให้ UI เช็คว่ามี sim เปิดอยู่ไหมก่อนโชว์ปุ่ม
+app.get('/api/devices/ios-sims', async (req, res) => {
+  try {
+    res.json({ ok: true, sims: await listBootedIosSims() });
+  } catch (e) {
+    // xcrun ไม่มี/Xcode ไม่ได้ลง = ไม่มี sim ให้ทำ — ไม่ใช่ error ร้ายแรง
+    res.json({ ok: true, sims: [], unavailable: true, error: e.message });
+  }
+});
+
+// ติดตั้ง CA ลง iOS Simulator ที่ booted อยู่ทุกตัว (auto-trust) — ปุ่มเดียวจบ
+app.post('/api/devices/ios-sim/install-ca', express.json(), async (req, res) => {
+  let sims;
+  try {
+    sims = await listBootedIosSims();
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: 'เรียก xcrun/simctl ไม่ได้ — ติดตั้ง Xcode ก่อน (xcode-select --install): ' + e.message });
+  }
+  if (!sims.length) return res.status(400).json({ ok: false, error: 'ไม่พบ iOS Simulator ที่เปิดอยู่ — เปิด Simulator (บูตเครื่องสักตัว) ก่อนแล้วลองใหม่' });
+  let caPath;
+  try {
+    caPath = await ensureMitmCa(); // .cer เป็น PEM — add-root-cert รับได้
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+  const done = [], failed = [];
+  for (const s of sims) {
+    try {
+      await execFileP('xcrun', ['simctl', 'keychain', s.udid, 'add-root-cert', caPath], { timeout: 15000 });
+      done.push(s.name);
+    } catch (e) {
+      failed.push(`${s.name} (${e.message.trim().split('\n').pop()})`);
+    }
+  }
+  if (!done.length) return res.status(500).json({ ok: false, error: 'ติดตั้งไม่สำเร็จ: ' + failed.join(', ') });
+  res.json({ ok: true, installed: done, failed });
+});
+
 // ติดตั้งแอป Proxy Postern (APK) ลงเครื่อง — build ให้ถ้ายังไม่มี แล้ว adb install -r
 const POSTERN_DIR = path.join(__dirname, 'android', 'ProxyPostern');
 const POSTERN_APK = path.join(POSTERN_DIR, 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk');

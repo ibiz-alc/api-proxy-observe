@@ -24,10 +24,18 @@ Proxyman-like web UI.
 - ทดสอบ end-to-end บนเครื่องที่ cask เสียแล้ว: CA download คืนไฟล์ PEM จริง,
   mitm service ฟังพอร์ต 8888, และดักจับ flow จากมือถือ USB จริงได้สำเร็จ.
 
+### iOS Simulator — ติดตั้ง CA อัตโนมัติปุ่มเดียว
+- การ์ด iOS (Status tab) เพิ่มปุ่ม **🤖 ติดตั้ง CA อัตโนมัติ (Simulator)** — กดแล้ววาง CA
+  ลง iOS Simulator ที่บูตอยู่ทุกตัวผ่าน `xcrun simctl keychain <udid> add-root-cert`
+  ซึ่งเข้า **trusted root store** ให้เลย → ไม่ต้องทำ Certificate Trust Settings เอง
+  (ต่างจากเครื่องจริงที่ยังต้องทำ 5 ขั้นตามเดิม)
+- endpoint: `GET /api/devices/ios-sims` (list booted sims), `POST /api/devices/ios-sim/install-ca`
+  ตอบ error ที่อ่านรู้เรื่องเมื่อไม่มี Xcode หรือไม่มี sim บูตอยู่
+
 ### เล็กๆ อื่นๆ วันเดียวกัน
 - `POST /api/proxy/mute` — ปลด/ตั้ง mute ตรงๆ สำหรับการเชื่อมต่อแบบ manual
   (คู่มือ: `docs/manual-connect.md`)
-- UI: flag `USB_ONLY` ซ่อนโหมด Wi-Fi / Proxy Postern / การ์ด iOS ชั่วคราว
+- UI: flag `USB_ONLY` ซ่อนโหมด Wi-Fi / Proxy Postern ของ Android ชั่วคราว (การ์ด iOS ยังโชว์)
 
 ## 2026-07-10
 
