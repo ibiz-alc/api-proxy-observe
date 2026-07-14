@@ -22,8 +22,11 @@ ENV MITMDUMP=/usr/local/bin/mitmdump \
 WORKDIR /app
 
 # ติดตั้ง deps ก่อน (cache layer) — ทั้ง root และ MCP
+# postinstall = patch-package (devDep) จึงต้องลงแบบเต็มพร้อม patches/ แล้วค่อย prune
 COPY package*.json ./
-RUN npm install --omit=dev
+COPY patches ./patches
+# --include=dev: ENV NODE_ENV=production ด้านบนทำให้ npm ตัด devDeps เองถ้าไม่ระบุ
+RUN npm install --include=dev && npm prune --omit=dev
 COPY mcp/package*.json ./mcp/
 RUN npm --prefix mcp install --omit=dev
 
