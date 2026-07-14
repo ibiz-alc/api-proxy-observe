@@ -1693,6 +1693,50 @@ function stCard(icon, title, up, details, actions = []) {
   return card;
 }
 
+// iPhone/iPad เชื่อมผ่าน adb ไม่ได้ — ต้องตั้ง Wi-Fi proxy ด้วยมือบนเครื่อง
+// การ์ดนี้เป็นคู่มือ: โชว์ IP:port ที่ต้องกรอก + ปุ่ม copy + checklist 5 ขั้น
+function renderIosCard(lanIp, mitmUp) {
+  const host = lanIp || '(หา LAN IP ไม่เจอ — เช็คว่า Mac ต่อ Wi-Fi อยู่)';
+  const proxyStr = lanIp ? `${lanIp}:8888` : '';
+  const steps = [
+    'iPhone ต่อ Wi-Fi วงเดียวกับ Mac',
+    `Settings → Wi-Fi → กด (i) → Configure Proxy → Manual → Server = ${host} · Port = 8888`,
+    'เปิด Safari เข้า http://mitm.it → โหลด certificate ของ iOS',
+    'Settings → General → VPN & Device Management → ติดตั้ง profile ที่โหลด',
+    'Settings → General → About → Certificate Trust Settings → เปิดสวิตช์ให้ mitmproxy (ขั้นนี้ห้ามลืม ไม่งั้น HTTPS พัง)',
+  ];
+  const card = el('div', { class: 'st-card ' + (mitmUp ? 'ok' : 'bad') }, [
+    el('div', { class: 'st-head' }, [
+      el('span', { class: 'st-title', text: '🍎 iOS (iPhone/iPad)' }),
+      el('span', { class: 'st-badge ' + (mitmUp ? 'up' : 'down'),
+        text: mitmUp ? '✅ พร้อมให้เชื่อม' : '❌ เปิด mitmproxy ก่อน' }),
+    ]),
+    el('div', { class: 'st-body' }, [
+      el('div', { class: 'st-line', text: 'เชื่อมด้วยมือผ่าน Wi-Fi (adb/USB ใช้กับ iOS ไม่ได้)' }),
+    ]),
+  ]);
+  // แถว proxy + ปุ่ม copy
+  if (lanIp) {
+    const copyBtn = el('button', { class: 'st-action', text: '📋 copy proxy' });
+    copyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(proxyStr).then(() => {
+        const old = copyBtn.textContent; copyBtn.textContent = '✓ คัดลอกแล้ว';
+        setTimeout(() => { copyBtn.textContent = old; }, 1500);
+      });
+    });
+    card.querySelector('.st-body').appendChild(
+      el('div', { class: 'st-line', html: `Proxy ที่ต้องกรอกบน iPhone: <code>${proxyStr}</code>` }));
+    card.appendChild(el('div', { class: 'st-actions' }, [copyBtn]));
+  }
+  // checklist
+  const ol = el('ol', { class: 'st-steps' });
+  for (const s of steps) ol.appendChild(el('li', { text: s }));
+  card.querySelector('.st-body').appendChild(ol);
+  card.querySelector('.st-body').appendChild(
+    el('div', { class: 'st-line', text: '⚠️ แอปที่ทำ certificate pinning (เช่นแอปธนาคาร) จะไม่วิ่งผ่าน proxy แม้ติดตั้ง cert ถูก — เป็นข้อจำกัดของแอปเป้าหมายเอง' }));
+  return card;
+}
+
 async function renderStatus() {
   let d;
   try { d = await (await fetch('/api/status')).json(); }
@@ -1765,6 +1809,9 @@ async function renderStatus() {
     }
     statusCards.appendChild(stCard('📱', `${dev.model} (${dev.transport.toUpperCase()})`, okDev, details, acts));
   }
+
+  // --- iOS (Wi-Fi manual — adb ใช้ไม่ได้กับ iPhone/iPad) ---
+  statusCards.appendChild(renderIosCard(lanIp, sv.mitmproxy.up));
 
   // --- การบันทึก ---
   const recDetails = [

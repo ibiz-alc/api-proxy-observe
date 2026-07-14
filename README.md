@@ -59,6 +59,26 @@ Install the mitmproxy CA on the device with the **Install CA** button (pushes
 the cert and opens the system settings page). Connect / disconnect and CA
 install are all one click from the web.
 
+### Connecting iOS (iPhone / iPad)
+
+adb/USB automation is Android-only, so iOS is connected **manually over Wi-Fi**.
+The **Status** tab shows a 🍎 iOS card with the exact proxy string and a copy
+button. Steps on the device:
+
+1. Join the same Wi-Fi as the Mac.
+2. Settings → Wi-Fi → tap (i) → Configure Proxy → **Manual** →
+   Server = `<Mac LAN IP>`, Port = `8888`.
+3. Open Safari to **http://mitm.it** and install the iOS certificate.
+4. Settings → General → VPN & Device Management → install the downloaded profile.
+5. Settings → General → About → **Certificate Trust Settings** → enable the
+   mitmproxy cert. **Do not skip this** — without it every HTTPS handshake fails.
+
+Map Local and Test Cases work with iOS traffic unchanged (they act on flows at
+the proxy, regardless of client OS). Apps using **certificate pinning** (e.g.
+banking apps) won't traverse the proxy even with the CA trusted — that's a limit
+of the target app, not the setup. The USB and Proxy Postern modes do not apply
+to iOS.
+
 ### Media detection & preview
 
 Responses are classified by **magic bytes / URL extension / content-type** (not
