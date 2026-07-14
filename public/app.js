@@ -1887,7 +1887,8 @@ async function renderStatus() {
   statusCards.appendChild(renderCaCard(lanIp, sv.mitmproxy.up));
 
   // --- iOS (Wi-Fi manual — adb ใช้ไม่ได้กับ iPhone/iPad) ---
-  if (!USB_ONLY) statusCards.appendChild(renderIosCard(lanIp, sv.mitmproxy.up));
+  // การ์ด iOS อยู่นอก USB_ONLY — เป็นคู่มือ download/trust cert ที่ยังต้องใช้
+  statusCards.appendChild(renderIosCard(lanIp, sv.mitmproxy.up));
 
   // --- การบันทึก ---
   const recDetails = [
