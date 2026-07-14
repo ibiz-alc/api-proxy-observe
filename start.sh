@@ -80,6 +80,8 @@ pkill -f "ngrok" 2>/dev/null
 sleep 2
 
 echo "==> 1) ApiTester server (พอร์ต 3000)"
+# ส่ง path เต็มของ mitmdump ให้ node (shell นี้มี PATH เต็ม — กันเคส node หา mitmdump ไม่เจอ)
+export MITMDUMP="$(command -v mitmdump)"
 node server.js > /tmp/apitester.log 2>&1 &
 
 echo "==> 2) mitmproxy + addon (พอร์ต 8888)"

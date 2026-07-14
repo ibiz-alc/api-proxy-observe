@@ -753,14 +753,44 @@ app.post('/api/devices/disconnect', express.json(), async (req, res) => {
 // ฟังก์ชันนี้ trigger การสร้างให้: รัน mitmdump บนพอร์ตชั่วคราวแป๊บเดียวจน cert โผล่แล้วปิด
 // หา path เต็มของ mitmdump — bare 'mitmdump' อาจไม่อยู่ใน PATH ของ process node
 // (เช่น node ที่ start จาก finder/launchd ไม่มี /opt/homebrew/bin) → คืน null ถ้าไม่เจอ
+let _mitmdumpPath = null; // cache เฉพาะผลบวก (path ที่เจอ) — ผลลบไม่ cache เผื่อ user ลงทีหลัง
 function resolveMitmdump() {
-  const candidates = ['/opt/homebrew/bin/mitmdump', '/usr/local/bin/mitmdump', '/usr/bin/mitmdump'];
-  for (const c of candidates) if (fs.existsSync(c)) return c;
+  if (_mitmdumpPath && require('fs').existsSync(_mitmdumpPath)) return _mitmdumpPath;
+  const cp = require('child_process');
+  const home = require('os').homedir();
+  const exists = (p) => { try { return p && fs.existsSync(p); } catch { return false; } };
+
+  // 1) env override — start.sh จะ export MITMDUMP ให้ (มาจาก shell ที่มี PATH เต็ม)
+  if (exists(process.env.MITMDUMP)) return (_mitmdumpPath = process.env.MITMDUMP);
+
+  // 2) probe ที่ลงบ่อยๆ: homebrew (ARM/Intel), pipx/pip --user, MacPorts, ระบบ, Python framework
+  const candidates = [
+    '/opt/homebrew/bin/mitmdump', '/usr/local/bin/mitmdump', '/usr/bin/mitmdump',
+    '/opt/local/bin/mitmdump', path.join(home, '.local/bin/mitmdump'),
+  ];
+  // pip install --user: ~/Library/Python/3.x/bin/mitmdump
   try {
-    const out = require('child_process').execFileSync('/usr/bin/which', ['mitmdump'], { encoding: 'utf8' }).trim();
-    if (out && fs.existsSync(out)) return out;
-  } catch { /* which ไม่เจอ */ }
-  return null;
+    const pyBase = path.join(home, 'Library/Python');
+    if (fs.existsSync(pyBase)) for (const v of fs.readdirSync(pyBase)) candidates.push(path.join(pyBase, v, 'bin/mitmdump'));
+  } catch { /* ignore */ }
+  for (const c of candidates) if (exists(c)) return (_mitmdumpPath = c);
+
+  // 3) which ด้วย PATH ปัจจุบันของ process
+  try {
+    const out = cp.execFileSync('/usr/bin/which', ['mitmdump'], { encoding: 'utf8' }).trim();
+    if (exists(out)) return (_mitmdumpPath = out);
+  } catch { /* ไม่เจอ */ }
+
+  // 4) ทางสุดท้าย: ถาม login shell (source .zprofile/.zshrc) เพื่อได้ PATH เต็มของ user
+  //    ครอบเคสที่ node ถูก start จาก GUI/launchd ที่ PATH ถูกตัด
+  for (const sh of [process.env.SHELL, '/bin/zsh', '/bin/bash'].filter(Boolean)) {
+    try {
+      const out = cp.execFileSync(sh, ['-lic', 'command -v mitmdump'], { encoding: 'utf8', timeout: 5000 })
+        .trim().split('\n').pop();
+      if (exists(out)) return (_mitmdumpPath = out);
+    } catch { /* ลอง shell ตัวถัดไป */ }
+  }
+  return (_mitmdumpPath = null);
 }
 
 async function ensureMitmCa() {
