@@ -786,6 +786,19 @@ async function ensureMitmCa() {
   return caPath;
 }
 
+// ดาวน์โหลด mitmproxy CA แบบ Manual — ไม่พึ่ง adb/USB (ใช้กับ iOS, Android ไม่ต่อสาย, Docker)
+// gen ให้อัตโนมัติถ้ายังไม่มี · ?format=pem|crt เลือกชื่อไฟล์ให้เหมาะกับ OS
+app.get('/api/devices/ca', async (req, res) => {
+  let caPath;
+  try { caPath = await ensureMitmCa(); }
+  catch (e) { return res.status(500).send('โหลด CA ไม่ได้: ' + e.message); }
+  // ไฟล์ .cer ของ mitmproxy เป็น PEM อยู่แล้ว — เสิร์ฟตรงๆ ใช้ได้ทั้ง iOS/Android/desktop
+  const fmt = req.query.format === 'pem' ? 'pem' : 'crt'; // Android ชอบ .crt, iOS รับ .pem/.crt ได้
+  res.set('Content-Type', 'application/x-x509-ca-cert');
+  res.set('Content-Disposition', `attachment; filename="mitmproxy-ca.${fmt}"`);
+  fs.createReadStream(caPath).pipe(res);
+});
+
 app.post('/api/devices/install-ca', express.json(), async (req, res) => {
   const serial = (req.body || {}).serial;
   if (!serial) return res.status(400).json({ ok: false, error: 'ต้องระบุ serial' });

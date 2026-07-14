@@ -1723,6 +1723,41 @@ function attachQrHover(target, url, size = 200) {
   target.addEventListener('mouseleave', hide);
 }
 
+// ติดตั้ง CA แบบ Manual — โหลด cert จากเว็บ (ไม่พึ่ง adb/USB) ใช้ได้ทุก OS + เคส Docker
+// มี QR ของ URL โหลดผ่าน LAN ให้มือถือสแกนโหลดตรงได้เลย
+function renderCaCard(lanIp, mitmUp) {
+  const dlPath = '/api/devices/ca';
+  const lanUrl = lanIp ? `http://${lanIp}:3000${dlPath}` : null;
+  const card = el('div', { class: 'st-card ' + (mitmUp ? 'ok' : 'bad') }, [
+    el('div', { class: 'st-head' }, [
+      el('span', { class: 'st-title', text: '📜 CA Certificate (Manual)' }),
+      el('span', { class: 'st-badge ' + (mitmUp ? 'up' : 'down'),
+        text: mitmUp ? '✅ พร้อมโหลด' : '⚠️ จะ gen ให้ตอนโหลด' }),
+    ]),
+    el('div', { class: 'st-body' }, [
+      el('div', { class: 'st-line', text: 'ติดตั้ง CA เองโดยไม่ต้องต่อ USB — เหมาะกับ iOS, Android ที่ไม่ต่อสาย, หรือรันใน Docker' }),
+    ]),
+  ]);
+  const body = card.querySelector('.st-body');
+  // วิธีติดตั้งย่อ ต่อ OS
+  const ol = el('ol', { class: 'st-steps' });
+  ol.appendChild(el('li', { text: 'โหลดไฟล์ CA (ปุ่มด้านล่าง) หรือให้มือถือสแกน QR โหลดผ่าน Wi-Fi' }));
+  ol.appendChild(el('li', { html: '<b>iOS:</b> ติดตั้ง profile → Settings → General → About → Certificate Trust Settings → เปิดสวิตช์' }));
+  ol.appendChild(el('li', { html: '<b>Android:</b> Settings → Security → Encryption & credentials → Install a certificate → CA certificate' }));
+  body.appendChild(ol);
+
+  const acts = [];
+  const dlBtn = el('a', { class: 'st-action', href: dlPath, download: 'mitmproxy-ca.crt', text: '📥 ดาวน์โหลด CA' });
+  acts.push(dlBtn);
+  if (lanUrl) {
+    const qrIcon = el('span', { class: 'qr-icon', title: 'ชี้เพื่อดู QR ให้มือถือสแกนโหลด CA', text: '🔳 QR โหลด CA' });
+    attachQrHover(qrIcon, lanUrl, 200);
+    acts.push(qrIcon);
+  }
+  card.appendChild(el('div', { class: 'st-actions' }, acts));
+  return card;
+}
+
 // iPhone/iPad เชื่อมผ่าน adb ไม่ได้ — ต้องตั้ง Wi-Fi proxy ด้วยมือบนเครื่อง
 // การ์ดนี้เป็นคู่มือ: โชว์ IP:port ที่ต้องกรอก + ปุ่ม copy + checklist 5 ขั้น
 function renderIosCard(lanIp, mitmUp) {
@@ -1843,6 +1878,9 @@ async function renderStatus() {
     }
     statusCards.appendChild(stCard('📱', `${dev.model} (${dev.transport.toUpperCase()})`, okDev, details, acts));
   }
+
+  // --- CA Certificate (Manual — โหลดเอง ไม่พึ่ง USB) ---
+  statusCards.appendChild(renderCaCard(lanIp, sv.mitmproxy.up));
 
   // --- iOS (Wi-Fi manual — adb ใช้ไม่ได้กับ iPhone/iPad) ---
   statusCards.appendChild(renderIosCard(lanIp, sv.mitmproxy.up));

@@ -942,3 +942,4 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 }
 .qr-popup img { display: block; }
 .qr-popup-cap { margin-top: 4px; font-size: 11px; color: #333; text-align: center; word-break: break-all; }
+a.st-action { text-decoration: none; display: inline-block; }
