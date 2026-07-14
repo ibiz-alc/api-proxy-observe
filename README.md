@@ -285,6 +285,36 @@ npm install -g pm2
 pm2 start server.js --name api-tester
 ```
 
+### Docker (Core: web + mitmproxy + MCP)
+
+One image runs all three services. **adb/USB is not included** — Docker Desktop
+on macOS has no USB passthrough, so connect devices with **manual proxy + manual
+CA** (works for iOS and Android alike).
+
+```bash
+docker compose up -d --build     # build + start
+docker compose logs -f           # watch logs
+docker compose down              # stop
+```
+
+Then on the device:
+
+1. Set Wi-Fi proxy to **`<your computer's LAN IP>`:8888** (same as native Wi-Fi mode).
+2. Install the CA: open the web UI → **Status** tab → **📜 CA Certificate
+   (Manual)** → download or scan the QR. (adb-based "Install CA (USB)" won't work
+   from the container.)
+
+Ports: `3000` web/API · `8888` mitmproxy · `7333` MCP (HTTP).
+
+Persisted via volumes (see `docker-compose.yml`):
+- `./data/mitmproxy` → the mitmproxy CA. **Keep this** so the CA stays stable
+  across restarts and devices don't need to re-trust a new cert every time.
+- `./map-local.json`, `./test-cases` → mock rules and file-based cases.
+
+Config via env (already set in the image): `PORT`, `MCP_PORT`, `MCP_HOST`
+(`0.0.0.0` in the container so MCP is reachable from the host), `MITMDUMP`,
+`APITESTER_URL`.
+
 ## Notes
 
 - Request history and proxy flows are kept **in memory** (200 requests / 300

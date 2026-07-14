@@ -1,0 +1,18 @@
+# ApiTester — Core (web + mitmproxy + MCP) ใน container เดียว
+# ใช้: docker compose up -d --build   |   ปิด: docker compose down
+services:
+  apitester:
+    build: .
+    image: apitester:latest
+    container_name: apitester
+    ports:
+      - "3000:3000"   # web + API
+      - "8888:8888"   # mitmproxy — มือถือตั้ง proxy มาที่ <IP เครื่อง host>:8888
+      - "7333:7333"   # MCP (HTTP) สำหรับ AI agent
+    volumes:
+      # CA ของ mitmproxy — persist ไว้ ไม่งั้น restart แล้ว CA เปลี่ยน ต้องลง cert บนมือถือใหม่
+      - ./data/mitmproxy:/root/.mitmproxy
+      # mock rules + file-based test cases — persist นอก container แก้ได้จากข้างนอก
+      - ./map-local.json:/app/map-local.json
+      - ./test-cases:/app/test-cases
+    restart: unless-stopped

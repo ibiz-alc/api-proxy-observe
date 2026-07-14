@@ -6,11 +6,13 @@ mitmproxy addon สำหรับ ApiTester
 """
 import base64
 import json
+import os
 import time
 import urllib.request
 from mitmproxy import http
 
-APITESTER = "http://127.0.0.1:3000"
+# env APITESTER_URL override ได้ (เช่นตอนแยก container) — default = เครื่องเดียวกัน
+APITESTER = os.environ.get("APITESTER_URL", "http://127.0.0.1:3000").rstrip("/")
 INGEST = APITESTER + "/api/proxy/ingest"
 RULES_URL = APITESTER + "/api/maplocal"
 TC_PATTERNS_URL = APITESTER + "/api/testcase/patterns"

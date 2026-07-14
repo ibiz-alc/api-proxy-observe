@@ -363,8 +363,10 @@ if (HTTP_PORT >= 1 && HTTP_PORT <= 65535) {
   app.get('/mcp', sessionReq);     // server→client stream (SSE)
   app.delete('/mcp', sessionReq);  // ปิด session
 
-  app.listen(HTTP_PORT, '127.0.0.1', () => {
-    console.error(`apitester-mcp (HTTP) → http://127.0.0.1:${HTTP_PORT}/mcp | ApiTester ที่ ${BASE}`);
+  // default 127.0.0.1 (ปลอดภัยตอนรัน local) — ใน container ตั้ง MCP_HOST=0.0.0.0 ให้ต่อจากภายนอกได้
+  const HTTP_HOST = process.env.MCP_HOST || '127.0.0.1';
+  app.listen(HTTP_PORT, HTTP_HOST, () => {
+    console.error(`apitester-mcp (HTTP) → http://${HTTP_HOST}:${HTTP_PORT}/mcp | ApiTester ที่ ${BASE}`);
   }).on('error', (e) => {
     if (e.code === 'EADDRINUSE') {
       const hint = HTTP_PORT === 7000 || HTTP_PORT === 5000

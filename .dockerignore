@@ -1,0 +1,11 @@
+node_modules
+mcp/node_modules
+.git
+.gitignore
+android
+data
+*.log
+/tmp
+.DS_Store
+docs
+RELEASE_NOTES.md
