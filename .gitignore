@@ -2,6 +2,10 @@ node_modules/
 .DS_Store
 .proxy-ca/
 map-local.json
+# pip venv สำรองของ mitmproxy (สร้างเฉพาะเครื่องที่ Homebrew cask เพี้ยน — ดู RELEASE_NOTES 2026-07-14)
+.venv-mitm/
+# สำเนาไฟล์ที่หอบมาจากเครื่องอื่นเพื่อ merge (ไม่ใช่ source)
+Archive/
 
 # แอป Android (repo แยกของตัวเอง)
 android/ProxyPostern/

@@ -4,6 +4,31 @@ API Tester — a web tool for inspecting, sending and mocking API traffic, plus
 MITM decryption of a target Android app's HTTPS traffic, viewed in a
 Proxyman-like web UI.
 
+## 2026-07-14
+
+### mitmdump fallback — Homebrew cask ที่เพี้ยนไม่ทำให้ CA/proxy ใช้งานไม่ได้อีกต่อไป
+- **ปัญหาที่เจอ (เครื่องอื่นที่เอาไปติดตั้ง):** `brew install/reinstall mitmproxy`
+  รายงานว่าสำเร็จ แต่ `/opt/homebrew/Caskroom/mitmproxy/<ver>/mitmproxy.app` ไม่ถูกวางจริง
+  (โฟลเดอร์ว่าง) ทำให้ `/opt/homebrew/bin/mitmdump` เป็น broken symlink —
+  `resolveMitmdump()` หาไบนารีไม่เจอ ส่งผลให้ **CA download/QR (Status tab)** และ
+  **start mitm service** ล้มเหลวด้วย `ไม่พบ mitmdump` แม้ reinstall กี่รอบก็ตาม.
+- **วิธีแก้:** ติดตั้ง mitmproxy ผ่าน pip ใน Python venv ของโปรเจกต์เอง (`.venv-mitm/`,
+  ไม่ commit เข้า git) แทนที่จะพึ่ง Homebrew cask ตัวเดียว
+  - `server.js` (`resolveMitmdump()`) เช็ค `.venv-mitm/bin/mitmdump` เป็นตัวเลือกแรก
+    ก่อนไปหาของ Homebrew (`/opt/homebrew/bin/...` เป็นต้น)
+  - `start.sh` เพิ่มฟังก์ชัน `ensure_mitmdump()`: ลอง Homebrew ก่อน, ถ้าไบนารีที่ได้ใช้
+    งานจริงไม่ได้ (ไม่ใช่แค่เช็คว่ามีคำสั่ง แต่รัน `--version` ยืนยัน) จะสร้าง
+    `.venv-mitm` + `pip install mitmproxy` ให้อัตโนมัติแทน — ไม่ต้อง debug มือซ้ำ
+  - `start.sh` launch mitmdump ผ่าน `$MITMDUMP` (path เต็ม) แทน bare command —
+    ตัว venv ไม่อยู่ใน PATH, bare `mitmdump` จะพังบนเครื่องที่ brew เสีย
+- ทดสอบ end-to-end บนเครื่องที่ cask เสียแล้ว: CA download คืนไฟล์ PEM จริง,
+  mitm service ฟังพอร์ต 8888, และดักจับ flow จากมือถือ USB จริงได้สำเร็จ.
+
+### เล็กๆ อื่นๆ วันเดียวกัน
+- `POST /api/proxy/mute` — ปลด/ตั้ง mute ตรงๆ สำหรับการเชื่อมต่อแบบ manual
+  (คู่มือ: `docs/manual-connect.md`)
+- UI: flag `USB_ONLY` ซ่อนโหมด Wi-Fi / Proxy Postern / การ์ด iOS ชั่วคราว
+
 ## 2026-07-10
 
 ### Dynamic Test Cases (sequenced Map Local)

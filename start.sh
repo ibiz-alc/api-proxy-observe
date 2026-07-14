@@ -56,6 +56,34 @@ ensure_pkg() {
   [ "$required" = "yes" ] && return 1 || return 0
 }
 
+# mitmdump: venv สำรองในโปรเจกต์ (.venv-mitm) มาก่อน — จะถูกสร้างเฉพาะเครื่องที่ Homebrew cask เพี้ยน
+# (เจอจริง: cask รายงานติดตั้งสำเร็จแต่ .app ว่าง → /opt/homebrew/bin/mitmdump เป็น broken symlink,
+#  reinstall กี่รอบก็ไม่หาย) — ตรวจด้วยการรัน --version จริง ไม่ใช่แค่ command -v
+ensure_mitmdump() {
+  if [ -x "$(pwd)/.venv-mitm/bin/mitmdump" ] && "$(pwd)/.venv-mitm/bin/mitmdump" --version >/dev/null 2>&1; then
+    echo "   ✅ mitmdump (venv .venv-mitm)"
+    return 0
+  fi
+  ensure_pkg mitmdump mitmproxy no
+  if command -v mitmdump >/dev/null 2>&1 && mitmdump --version >/dev/null 2>&1; then
+    echo "   ✅ mitmdump ($(command -v mitmdump))"
+    return 0
+  fi
+  echo "   ⚠️ mitmdump จาก Homebrew ใช้งานจริงไม่ได้ (cask เพี้ยน/ไม่ได้ติดตั้ง) — ลง pip venv สำรองแทน…"
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "   ❌ ไม่พบ python3 — ลง venv สำรองไม่ได้ ต้องแก้ mitmdump ของ Homebrew เอง"
+    return 1
+  fi
+  python3 -m venv .venv-mitm || { echo "   ❌ สร้าง venv ไม่สำเร็จ"; return 1; }
+  ./.venv-mitm/bin/pip install --upgrade pip -q && ./.venv-mitm/bin/pip install mitmproxy -q
+  if [ -x "$(pwd)/.venv-mitm/bin/mitmdump" ] && "$(pwd)/.venv-mitm/bin/mitmdump" --version >/dev/null 2>&1; then
+    echo "   ✅ mitmdump (venv .venv-mitm สำรอง) — ติดตั้งสำเร็จ"
+    return 0
+  fi
+  echo "   ❌ ติดตั้ง mitmdump ไม่สำเร็จทั้ง Homebrew และ venv สำรอง"
+  return 1
+}
+
 # ===== โหมด Docker (--docker) =====
 if [ "$DOCKER" = yes ]; then
   command -v docker >/dev/null 2>&1 || { echo "❌ ไม่พบ docker — ติดตั้ง Docker Desktop ก่อน"; exit 1; }
@@ -119,7 +147,7 @@ if [ "$SKIP_SETUP" != yes ]; then
     ensure_pkg python3 python no
   fi
 
-  ensure_pkg mitmdump mitmproxy yes  || exit 1   # จำเป็น: ดัก/ถอดรหัส HTTPS
+  ensure_mitmdump || exit 1   # จำเป็น: ดัก/ถอดรหัส HTTPS (Homebrew ก่อน, venv สำรองถ้าใช้จริงไม่ได้)
   ensure_pkg adb android-platform-tools no       # optional: คุม device Android (iOS ไม่ต้อง)
   [ "$NGROK" = yes ] && ensure_pkg ngrok ngrok no  # optional: remote/4G
 
@@ -149,12 +177,18 @@ sleep 2
 
 echo "==> 1) ApiTester server (พอร์ต 3000)"
 # ส่ง path เต็มของ mitmdump ให้ node (shell นี้มี PATH เต็ม — กันเคส node หา mitmdump ไม่เจอ)
-export MITMDUMP="$(command -v mitmdump)"
+# venv สำรองมาก่อน — ถ้ามีแปลว่าเครื่องนี้ Homebrew cask ใช้ไม่ได้
+if [ -x "$(pwd)/.venv-mitm/bin/mitmdump" ]; then
+  export MITMDUMP="$(pwd)/.venv-mitm/bin/mitmdump"
+else
+  export MITMDUMP="$(command -v mitmdump)"
+fi
 # -u NODE_OPTIONS: กัน preload module จาก env ภายนอก (เช่น sandbox ของ agent) ทำ node ล้มทั้งตัว
 env -u NODE_OPTIONS node server.js > /tmp/apitester.log 2>&1 &
 
 echo "==> 2) mitmproxy + addon (พอร์ต 8888)"
-PYTHONUNBUFFERED=1 mitmdump --listen-host 0.0.0.0 --listen-port 8888 -s "$ADDON" > /tmp/mitmdump.log 2>&1 &
+# ใช้ $MITMDUMP ไม่ใช่ bare mitmdump — ตัว venv ไม่อยู่ใน PATH
+PYTHONUNBUFFERED=1 "${MITMDUMP:-mitmdump}" --listen-host 0.0.0.0 --listen-port 8888 -s "$ADDON" > /tmp/mitmdump.log 2>&1 &
 
 if [ "$NGROK" = yes ]; then
   echo "==> 3) ngrok (proxy tcp 8888 + web 3000)"

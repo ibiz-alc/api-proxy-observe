@@ -771,8 +771,10 @@ function resolveMitmdump() {
   // 1) env override — start.sh จะ export MITMDUMP ให้ (มาจาก shell ที่มี PATH เต็ม)
   if (exists(process.env.MITMDUMP)) return (_mitmdumpPath = process.env.MITMDUMP);
 
-  // 2) probe ที่ลงบ่อยๆ: homebrew (ARM/Intel), pipx/pip --user, MacPorts, ระบบ, Python framework
+  // 2) probe ที่ลงบ่อยๆ: venv สำรองในโปรเจกต์ (สร้างเฉพาะเครื่องที่ Homebrew cask เพี้ยน —
+  //    ดู RELEASE_NOTES 2026-07-14), homebrew (ARM/Intel), pipx/pip --user, MacPorts, ระบบ
   const candidates = [
+    path.join(__dirname, '.venv-mitm', 'bin', 'mitmdump'),
     '/opt/homebrew/bin/mitmdump', '/usr/local/bin/mitmdump', '/usr/bin/mitmdump',
     '/opt/local/bin/mitmdump', path.join(home, '.local/bin/mitmdump'),
   ];
