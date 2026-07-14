@@ -929,3 +929,16 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .st-steps { margin: 6px 0 0; padding-left: 20px; }
 .st-steps li { font-size: 13px; color: var(--muted); margin-bottom: 5px; line-height: 1.5; }
 .st-body code { background: var(--panel-2); padding: 1px 6px; border-radius: 4px; color: var(--accent); }
+.qr-icon {
+  font-size: 12px; padding: 2px 8px; border-radius: 6px; cursor: help;
+  border: 1px solid var(--accent); color: var(--accent);
+  background: rgba(56, 189, 248, 0.08); white-space: nowrap;
+}
+.qr-icon:hover { background: rgba(56, 189, 248, 0.18); }
+.qr-popup {
+  position: fixed; z-index: 9999; pointer-events: none;
+  background: #fff; padding: 8px; border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.5); border: 1px solid var(--border);
+}
+.qr-popup img { display: block; }
+.qr-popup-cap { margin-top: 4px; font-size: 11px; color: #333; text-align: center; word-break: break-all; }

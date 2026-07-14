@@ -1693,6 +1693,36 @@ function stCard(icon, title, up, details, actions = []) {
   return card;
 }
 
+// popup QR ลอยตามเมาส์ — ผูกกับ element ใดก็ได้ที่ให้ผู้ใช้เอาเมาส์ไปชี้
+let _qrPopup = null;
+function attachQrHover(target, url, size = 200) {
+  const show = (e) => {
+    if (!_qrPopup) {
+      _qrPopup = el('div', { class: 'qr-popup' }, [
+        el('img', { width: String(size), height: String(size),
+          src: `/api/qr?data=${encodeURIComponent(url)}&size=${size}` }),
+        el('div', { class: 'qr-popup-cap', text: url }),
+      ]);
+      document.body.appendChild(_qrPopup);
+    }
+    move(e);
+  };
+  const move = (e) => {
+    if (!_qrPopup) return;
+    // วางใกล้เมาส์ กันล้นขอบจอ
+    const pad = 16, w = size + 20, h = size + 40;
+    let x = e.clientX + pad, y = e.clientY + pad;
+    if (x + w > window.innerWidth) x = e.clientX - w - pad;
+    if (y + h > window.innerHeight) y = e.clientY - h - pad;
+    _qrPopup.style.left = Math.max(4, x) + 'px';
+    _qrPopup.style.top = Math.max(4, y) + 'px';
+  };
+  const hide = () => { if (_qrPopup) { _qrPopup.remove(); _qrPopup = null; } };
+  target.addEventListener('mouseenter', show);
+  target.addEventListener('mousemove', move);
+  target.addEventListener('mouseleave', hide);
+}
+
 // iPhone/iPad เชื่อมผ่าน adb ไม่ได้ — ต้องตั้ง Wi-Fi proxy ด้วยมือบนเครื่อง
 // การ์ดนี้เป็นคู่มือ: โชว์ IP:port ที่ต้องกรอก + ปุ่ม copy + checklist 5 ขั้น
 function renderIosCard(lanIp, mitmUp) {
@@ -1701,13 +1731,17 @@ function renderIosCard(lanIp, mitmUp) {
   const steps = [
     'iPhone ต่อ Wi-Fi วงเดียวกับ Mac',
     `Settings → Wi-Fi → กด (i) → Configure Proxy → Manual → Server = ${host} · Port = 8888`,
-    'เปิด Safari เข้า http://mitm.it → โหลด certificate ของ iOS',
+    'เปิด Safari เข้า http://mitm.it → โหลด certificate ของ iOS (ชี้ QR ด้านบนแล้วสแกนด้วยกล้อง iPhone เพื่อเปิดหน้านี้ได้เลย)',
     'Settings → General → VPN & Device Management → ติดตั้ง profile ที่โหลด',
     'Settings → General → About → Certificate Trust Settings → เปิดสวิตช์ให้ mitmproxy (ขั้นนี้ห้ามลืม ไม่งั้น HTTPS พัง)',
   ];
+  // icon QR ของ mitm.it — เอาเมาส์ชี้แล้วโชว์ QR 200x200 ตรงเมาส์ (สแกนด้วยกล้อง iPhone)
+  const qrIcon = el('span', { class: 'qr-icon', title: 'ชี้เพื่อดู QR สแกนเปิด http://mitm.it' , text: '🔳 QR mitm.it' });
+  attachQrHover(qrIcon, 'http://mitm.it', 200);
   const card = el('div', { class: 'st-card ' + (mitmUp ? 'ok' : 'bad') }, [
     el('div', { class: 'st-head' }, [
       el('span', { class: 'st-title', text: '🍎 iOS (iPhone/iPad)' }),
+      qrIcon,
       el('span', { class: 'st-badge ' + (mitmUp ? 'up' : 'down'),
         text: mitmUp ? '✅ พร้อมให้เชื่อม' : '❌ เปิด mitmproxy ก่อน' }),
     ]),

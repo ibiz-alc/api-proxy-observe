@@ -22,11 +22,40 @@ Proxyman-like UI.
 6. **🤖 MCP server** — let an AI agent mock local data, inspect traffic, manage
    scenarios and devices. See [`mcp/`](mcp/).
 
+## Requirements (first-time setup)
+
+| Tool | Required for | Install (macOS) | Notes |
+|------|--------------|-----------------|-------|
+| **Node.js ≥ 18** | web server + MCP | `brew install node` | tested on v22 |
+| **mitmproxy** (`mitmdump`) | Proxy tab / HTTPS capture | `brew install mitmproxy` | provides `mitmdump` on `PATH` |
+| **adb** (Android platform-tools) | USB / Wi-Fi device control | `brew install android-platform-tools` | Android only — not needed for iOS |
+| **ngrok** | remote / 4G access (optional) | `brew install ngrok` | only for `./start.sh --ngrok` |
+
+First-time install:
+
+```bash
+npm install                 # web server deps (root)
+npm --prefix mcp install    # MCP server deps (only if you use the MCP/agent integration)
+```
+
+The mitmproxy CA is generated automatically on the first `mitmdump` run (stored
+under `~/.mitmproxy/`) — install it on each device via the **Install CA** button
+(Android) or the 🍎 iOS card (manual). No CA setup is needed for the web-only
+Inspector/Sender tabs.
+
 ## Getting started
 
 ```bash
 npm install
 npm start          # PORT=8080 npm start to change port (default 3000)
+```
+
+Or start everything (web + mitmproxy, and `--ngrok` for remote) with the helper:
+
+```bash
+./start.sh            # web (:3000) + mitmproxy (:8888) for USB/Wi-Fi
+./start.sh --ngrok    # also start ngrok for remote/4G
+./stop.sh             # stop everything
 ```
 
 Open http://localhost:3000 and try:
@@ -68,7 +97,9 @@ button. Steps on the device:
 1. Join the same Wi-Fi as the Mac.
 2. Settings → Wi-Fi → tap (i) → Configure Proxy → **Manual** →
    Server = `<Mac LAN IP>`, Port = `8888`.
-3. Open Safari to **http://mitm.it** and install the iOS certificate.
+3. Open Safari to **http://mitm.it** and install the iOS certificate. (Hover the
+   **🔳 QR mitm.it** chip on the iOS card to show a QR — scan it with the iPhone
+   camera to open the page directly.)
 4. Settings → General → VPN & Device Management → install the downloaded profile.
 5. Settings → General → About → **Certificate Trust Settings** → enable the
    mitmproxy cert. **Do not skip this** — without it every HTTPS handshake fails.

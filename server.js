@@ -908,6 +908,22 @@ app.post('/api/status/stop/:service', express.json(), async (req, res) => {
   }
 });
 
+// สร้าง QR เป็น PNG ที่ server (offline — ไม่ส่ง URL ออก third-party)
+const QRCode = require('qrcode');
+app.get('/api/qr', async (req, res) => {
+  const data = req.query.data;
+  if (!data) return res.status(400).send('ต้องระบุ ?data=');
+  const size = Math.min(600, Math.max(100, parseInt(req.query.size, 10) || 200));
+  try {
+    const buf = await QRCode.toBuffer(String(data), { width: size, margin: 1, errorCorrectionLevel: 'M' });
+    res.set('Content-Type', 'image/png');
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.send(buf);
+  } catch (e) {
+    res.status(500).send('สร้าง QR ไม่ได้: ' + e.message);
+  }
+});
+
 app.get('/api/proxy/info', (req, res) => {
   // หา IP วง LAN (IPv4 ตัวแรกที่ไม่ใช่ loopback) เพื่อบอกวิธีเชื่อมแบบ Wi-Fi
   let lanIp = null;
