@@ -745,12 +745,36 @@ app.post('/api/devices/disconnect', express.json(), async (req, res) => {
 });
 
 // ดัน CA ของ mitmproxy เข้าเครื่อง (Downloads) + เปิดหน้า Settings ให้ติดตั้ง
+// mitmproxy สร้าง CA ตอนรันครั้งแรกเท่านั้น — บนเครื่องใหม่ที่ยังไม่เคยรัน cert จะไม่มี
+// ฟังก์ชันนี้ trigger การสร้างให้: รัน mitmdump บนพอร์ตชั่วคราวแป๊บเดียวจน cert โผล่แล้วปิด
+async function ensureMitmCa() {
+  const caPath = path.join(require('os').homedir(), '.mitmproxy', 'mitmproxy-ca-cert.cer');
+  if (fs.existsSync(caPath)) return caPath;
+  const { spawn } = require('child_process');
+  const cmd = fs.existsSync('/opt/homebrew/bin/mitmdump') ? '/opt/homebrew/bin/mitmdump' : 'mitmdump';
+  // listen-port 0 = ให้ OS เลือกพอร์ตว่าง (ไม่ชนตัวจริงที่ 8888)
+  const child = spawn(cmd, ['--listen-port', '0'], { stdio: 'ignore', detached: true });
+  try {
+    for (let i = 0; i < 20 && !fs.existsSync(caPath); i++) {
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  } finally {
+    try { process.kill(child.pid, 'SIGTERM'); } catch { /* ปิดไปแล้ว */ }
+  }
+  if (!fs.existsSync(caPath)) throw new Error('สร้าง CA ไม่สำเร็จ — เช็คว่าติดตั้ง mitmproxy แล้ว (brew install mitmproxy)');
+  return caPath;
+}
+
 app.post('/api/devices/install-ca', express.json(), async (req, res) => {
   const serial = (req.body || {}).serial;
   if (!serial) return res.status(400).json({ ok: false, error: 'ต้องระบุ serial' });
   const S = ['-s', serial];
-  const caPath = path.join(require('os').homedir(), '.mitmproxy', 'mitmproxy-ca-cert.cer');
-  if (!fs.existsSync(caPath)) return res.status(500).json({ ok: false, error: 'ไม่พบ CA ของ mitmproxy (รัน mitmproxy ก่อน)' });
+  let caPath;
+  try {
+    caPath = await ensureMitmCa(); // สร้างให้อัตโนมัติถ้ายังไม่มี
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
   try {
     await adb([...S, 'push', caPath, '/sdcard/Download/mitmproxy-ca.crt']);
     await adb([...S, 'shell', 'am', 'start', '-a', 'android.settings.SECURITY_SETTINGS']);
