@@ -13,6 +13,10 @@ const ADB = process.env.ADB || 'adb';
 const MITM_PORT = 8888;
 const POSTERN_PKG = 'com.thaivivat.proxy.postern';
 
+// safety net: อย่าให้ error ลอยๆ (เช่น spawn ล้ม) ทำให้เว็บล่มทั้ง process — log ไว้แล้วรันต่อ
+process.on('uncaughtException', (e) => console.error('uncaughtException (ไม่ล้ม server):', e.message));
+process.on('unhandledRejection', (e) => console.error('unhandledRejection (ไม่ล้ม server):', e && e.message ? e.message : e));
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 const PROXY_PORT = process.env.PROXY_PORT || 9099;
@@ -747,20 +751,37 @@ app.post('/api/devices/disconnect', express.json(), async (req, res) => {
 // ดัน CA ของ mitmproxy เข้าเครื่อง (Downloads) + เปิดหน้า Settings ให้ติดตั้ง
 // mitmproxy สร้าง CA ตอนรันครั้งแรกเท่านั้น — บนเครื่องใหม่ที่ยังไม่เคยรัน cert จะไม่มี
 // ฟังก์ชันนี้ trigger การสร้างให้: รัน mitmdump บนพอร์ตชั่วคราวแป๊บเดียวจน cert โผล่แล้วปิด
+// หา path เต็มของ mitmdump — bare 'mitmdump' อาจไม่อยู่ใน PATH ของ process node
+// (เช่น node ที่ start จาก finder/launchd ไม่มี /opt/homebrew/bin) → คืน null ถ้าไม่เจอ
+function resolveMitmdump() {
+  const candidates = ['/opt/homebrew/bin/mitmdump', '/usr/local/bin/mitmdump', '/usr/bin/mitmdump'];
+  for (const c of candidates) if (fs.existsSync(c)) return c;
+  try {
+    const out = require('child_process').execFileSync('/usr/bin/which', ['mitmdump'], { encoding: 'utf8' }).trim();
+    if (out && fs.existsSync(out)) return out;
+  } catch { /* which ไม่เจอ */ }
+  return null;
+}
+
 async function ensureMitmCa() {
   const caPath = path.join(require('os').homedir(), '.mitmproxy', 'mitmproxy-ca-cert.cer');
   if (fs.existsSync(caPath)) return caPath;
+  const cmd = resolveMitmdump();
+  if (!cmd) throw new Error('ไม่พบ mitmdump — ติดตั้งก่อน: brew install mitmproxy');
   const { spawn } = require('child_process');
-  const cmd = fs.existsSync('/opt/homebrew/bin/mitmdump') ? '/opt/homebrew/bin/mitmdump' : 'mitmdump';
   // listen-port 0 = ให้ OS เลือกพอร์ตว่าง (ไม่ชนตัวจริงที่ 8888)
   const child = spawn(cmd, ['--listen-port', '0'], { stdio: 'ignore', detached: true });
+  // ⚠️ ต้องมี 'error' listener เสมอ — ไม่งั้น spawn ล้ม (ENOENT ฯลฯ) จะเป็น uncaught → node ตายทั้ง process
+  let spawnErr = null;
+  child.on('error', (e) => { spawnErr = e; });
   try {
-    for (let i = 0; i < 20 && !fs.existsSync(caPath); i++) {
+    for (let i = 0; i < 20 && !fs.existsSync(caPath) && !spawnErr; i++) {
       await new Promise((r) => setTimeout(r, 300));
     }
   } finally {
-    try { process.kill(child.pid, 'SIGTERM'); } catch { /* ปิดไปแล้ว */ }
+    try { if (child.pid) process.kill(child.pid, 'SIGTERM'); } catch { /* ปิดไปแล้ว */ }
   }
+  if (spawnErr) throw new Error('รัน mitmdump ไม่สำเร็จ: ' + spawnErr.message);
   if (!fs.existsSync(caPath)) throw new Error('สร้าง CA ไม่สำเร็จ — เช็คว่าติดตั้ง mitmproxy แล้ว (brew install mitmproxy)');
   return caPath;
 }
@@ -870,7 +891,7 @@ app.post('/api/status/start/:service', express.json(), async (req, res) => {
   const defs = {
     mitm: {
       port: MITM_PORT, log: MITM_LOG,
-      cmd: fs.existsSync('/opt/homebrew/bin/mitmdump') ? '/opt/homebrew/bin/mitmdump' : 'mitmdump',
+      cmd: resolveMitmdump() || 'mitmdump',
       args: ['--listen-host', '0.0.0.0', '--listen-port', String(MITM_PORT), '-s', MITM_ADDON],
       env: { ...process.env, PYTHONUNBUFFERED: '1' },
       cwd: __dirname,
@@ -891,14 +912,19 @@ app.post('/api/status/start/:service', express.json(), async (req, res) => {
     const child = spawn(def.cmd, def.args, {
       cwd: def.cwd, env: def.env, detached: true, stdio: ['ignore', logFd, logFd],
     });
+    // ต้องมี 'error' listener — ไม่งั้น ENOENT (หา cmd ไม่เจอ) จะ uncaught → node ตายทั้ง process
+    let spawnErr = null;
+    child.on('error', (e) => { spawnErr = e; });
     child.unref();
     fs.closeSync(logFd);
     // รอพอร์ตขึ้นจริง (สูงสุด ~6 วิ) — spawn สำเร็จไม่ได้แปลว่า service รอด
+    // ('error' emit แบบ async → เช็ค spawnErr ในลูปด้วย ไม่ใช่แค่ทันทีหลัง spawn)
     let up = false;
-    for (let i = 0; i < 12 && !up; i++) {
+    for (let i = 0; i < 12 && !up && !spawnErr; i++) {
       await new Promise((r) => setTimeout(r, 500));
       up = await checkPort(def.port);
     }
+    if (spawnErr) return res.status(500).json({ ok: false, error: `รัน ${svc} ไม่สำเร็จ: ${spawnErr.message} (เช็คว่าติดตั้ง mitmproxy แล้ว)` });
     if (up) return res.json({ ok: true, up: true, pid: child.pid });
     let tail = '';
     try { tail = fs.readFileSync(def.log, 'utf8').split('\n').slice(-8).join('\n'); } catch { /* ignore */ }
