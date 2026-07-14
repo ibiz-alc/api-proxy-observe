@@ -6,6 +6,8 @@ map-local.json
 .venv-mitm/
 # สำเนาไฟล์ที่หอบมาจากเครื่องอื่นเพื่อ merge (ไม่ใช่ source)
 Archive/
+# CA ของ mitmproxy จาก Docker volume — มี private key ห้าม commit
+data/
 
 # แอป Android (repo แยกของตัวเอง)
 android/ProxyPostern/
