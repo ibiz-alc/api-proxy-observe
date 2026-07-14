@@ -9,6 +9,10 @@ window.fetch = (url, opts = {}) => {
   return _origFetch(url, { ...opts, headers });
 };
 
+// ซ่อนโหมดที่ไม่ใช่ USB ไว้ชั่วคราว (Wi-Fi / Proxy Postern / การ์ด iOS) — เอากลับมาด้วย false
+const USB_ONLY = true;
+if (USB_ONLY) document.querySelectorAll('[data-usbonly-hide]').forEach((e) => { e.style.display = 'none'; });
+
 // ================= Tab switching =================
 document.querySelectorAll('.tab-btn').forEach((btn) => {
   btn.addEventListener('click', () => {
@@ -1867,12 +1871,12 @@ async function renderStatus() {
     } else if (dev.posternRunning) {
       details.push('เชื่อมผ่านแอป Proxy Postern (VPN) อยู่');
     } else {
-      details.push('ยังไม่ได้เชื่อม proxy' + (lanIp ? ` (Wi-Fi ใช้ Host ${lanIp}:8888)` : ''));
+      details.push('ยังไม่ได้เชื่อม proxy' + (!USB_ONLY && lanIp ? ` (Wi-Fi ใช้ Host ${lanIp}:8888)` : ''));
     }
     const acts = [];
     if (!okDev) {
       acts.push(stBtn('🔌 เชื่อม USB', () => stConnectDevice(dev.serial, 'usb')));
-      acts.push(stBtn('📶 เชื่อม Wi-Fi', () => stConnectDevice(dev.serial, 'wifi')));
+      if (!USB_ONLY) acts.push(stBtn('📶 เชื่อม Wi-Fi', () => stConnectDevice(dev.serial, 'wifi')));
     } else {
       acts.push(stBtn('⛔ ตัดการเชื่อมต่อ', () => stDisconnectDevice(dev.serial), 'stop'));
     }
@@ -1883,7 +1887,7 @@ async function renderStatus() {
   statusCards.appendChild(renderCaCard(lanIp, sv.mitmproxy.up));
 
   // --- iOS (Wi-Fi manual — adb ใช้ไม่ได้กับ iPhone/iPad) ---
-  statusCards.appendChild(renderIosCard(lanIp, sv.mitmproxy.up));
+  if (!USB_ONLY) statusCards.appendChild(renderIosCard(lanIp, sv.mitmproxy.up));
 
   // --- การบันทึก ---
   const recDetails = [
