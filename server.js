@@ -748,6 +748,14 @@ app.post('/api/devices/disconnect', express.json(), async (req, res) => {
   }
 });
 
+// ตั้ง/ปลด mute ตรงๆ — จำเป็นสำหรับการเชื่อมต่อแบบ manual (ตั้ง proxy เองบนมือถือ
+// โดยไม่กด connect ในเว็บ): ถ้าก่อนหน้ากด disconnect ไว้ mute จะค้าง true และ server
+// จะทิ้งทุก flow เงียบๆ — ปลดด้วย POST {"muted":false}
+app.post('/api/proxy/mute', express.json(), (req, res) => {
+  proxyMuted = !!(req.body || {}).muted;
+  res.json({ ok: true, muted: proxyMuted });
+});
+
 // ดัน CA ของ mitmproxy เข้าเครื่อง (Downloads) + เปิดหน้า Settings ให้ติดตั้ง
 // mitmproxy สร้าง CA ตอนรันครั้งแรกเท่านั้น — บนเครื่องใหม่ที่ยังไม่เคยรัน cert จะไม่มี
 // ฟังก์ชันนี้ trigger การสร้างให้: รัน mitmdump บนพอร์ตชั่วคราวแป๊บเดียวจน cert โผล่แล้วปิด

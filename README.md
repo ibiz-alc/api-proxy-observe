@@ -88,6 +88,12 @@ Install the mitmproxy CA on the device with the **Install CA** button (pushes
 the cert and opens the system settings page). Connect / disconnect and CA
 install are all one click from the web.
 
+Prefer to wire things up by hand (adb commands, on-device settings, enabling
+and disabling each mode)? See the step-by-step guide in
+[`docs/manual-connect.md`](docs/manual-connect.md). Note that manual
+connections must un-mute the recorder themselves via
+`POST /api/proxy/mute {"muted":false}` — the guide covers this.
+
 ### Connecting iOS (iPhone / iPad)
 
 adb/USB automation is Android-only, so iOS is connected **manually over Wi-Fi**.
