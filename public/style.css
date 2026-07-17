@@ -18,7 +18,10 @@ body {
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
+header { flex: 0 0 auto; }
 
 header {
   display: flex;
@@ -55,6 +58,13 @@ nav { display: flex; gap: 8px; }
 
 .tab { display: none; padding: 16px 20px; }
 .tab.active { display: block; }
+/* Proxy tab fills the remaining viewport height (flex column) */
+#tab-proxy.active {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
 
 button {
   cursor: pointer;
@@ -461,8 +471,8 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .proxy-workspace {
   display: flex;
   flex-direction: row;
-  gap: 10px;
-  height: calc(100vh - 190px);
+  gap: 0;
+  flex: 1 1 auto;
   min-height: 0;
 }
 /* device (ซ้าย) — แคบ ไม่ต้องกว้าง */
@@ -499,19 +509,43 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
   transition: background-color 0.15s;
 }
 .proxy-vresizer:hover { background-color: var(--panel-2); }
+/* ตัวลากปรับความกว้าง Devices (ซ้าย) / main (ขวา) */
+.proxy-hresizer {
+  flex: 0 0 10px;
+  width: 10px;
+  margin: 0 2px;
+  align-self: stretch;
+  cursor: col-resize;
+  border-radius: 5px;
+  background:
+    linear-gradient(var(--border), var(--border)) center / 3px 40px no-repeat;
+  transition: background-color 0.15s;
+}
+.proxy-hresizer:hover { background-color: var(--panel-2); }
 .pane-title {
   position: sticky;
   top: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   background: var(--panel-2);
   color: var(--muted);
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  padding: 8px 12px;
+  padding: 6px 12px;
   border-bottom: 1px solid var(--border);
   z-index: 1;
 }
-.pane-title .flow-count-label { text-transform: none; letter-spacing: 0; margin-left: 6px; }
+.pane-title .flow-count-label { text-transform: none; letter-spacing: 0; margin-left: 0; }
+.pane-title-clear {
+  margin-left: auto;
+  padding: 2px 10px;
+  font-size: 0.72rem;
+  text-transform: none;
+  letter-spacing: 0;
+  line-height: 1.4;
+}
 .flow-item {
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
@@ -639,6 +673,21 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .tree-host.active { color: #0f172a; }
 .tree-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tree-count { background: var(--bg); color: var(--muted); border-radius: 10px; padding: 0 8px; font-size: 0.72rem; }
+/* หัวข้อคั่นใน tree (Pinned / Devices) */
+.tree-section {
+  font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--muted); padding: 10px 12px 4px;
+}
+/* pin item — เส้นซ้ายเน้นให้ต่างจาก device */
+.tree-pin { border-left: 3px solid var(--yellow); }
+.tree-pin.active { border-left-color: #0f172a; }
+.pin-remove {
+  flex: 0 0 auto; color: var(--muted); font-size: 0.8rem; padding: 0 4px;
+  border-radius: 4px; opacity: 0.6;
+}
+.tree-pin:hover .pin-remove { opacity: 1; }
+.pin-remove:hover { background: var(--red); color: #fff; }
+.tree-pin.active .pin-remove { color: #0f172a; }
 
 /* detail split (ล่าง) — กินพื้นที่ที่เหลือทั้งหมด */
 .flow-detail {
@@ -929,6 +978,8 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .st-steps { margin: 6px 0 0; padding-left: 20px; }
 .st-steps li { font-size: 13px; color: var(--muted); margin-bottom: 5px; line-height: 1.5; }
 .st-body code { background: var(--panel-2); padding: 1px 6px; border-radius: 4px; color: var(--accent); }
+.st-note { font-size: 12px; color: var(--yellow); margin-top: 6px; line-height: 1.5; }
+.st-star { color: var(--yellow); font-weight: 700; }
 .qr-icon {
   font-size: 12px; padding: 2px 8px; border-radius: 6px; cursor: help;
   border: 1px solid var(--accent); color: var(--accent);
@@ -943,3 +994,63 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .qr-popup img { display: block; }
 .qr-popup-cap { margin-top: 4px; font-size: 11px; color: #333; text-align: center; word-break: break-all; }
 a.st-action { text-decoration: none; display: inline-block; }
+
+/* ===== Repeat / Repeat & Edit — context menu บนแถว flow ===== */
+.flow-ctx-menu {
+  position: fixed; z-index: 10000; min-width: 180px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 8px; padding: 4px; box-shadow: 0 8px 28px rgba(0,0,0,0.55);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.flow-ctx-item {
+  display: block; width: 100%; text-align: left;
+  background: none; border: none; color: var(--text, #e2e8f0);
+  padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 0.85rem;
+}
+.flow-ctx-item:hover { background: var(--panel-2); }
+
+/* ===== Repeat & Edit modal ===== */
+.repeat-overlay {
+  position: fixed; inset: 0; z-index: 10001;
+  background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+}
+.repeat-modal {
+  width: min(1100px, 100%); max-height: 92vh; overflow: auto;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  padding: 24px; box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.repeat-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 4px; }
+.repeat-label { font-size: 0.78rem; color: var(--muted); margin-bottom: 4px; }
+.repeat-col { display: flex; flex-direction: column; }
+/* แถวบน: Method (แคบ) + URL (ยืดเต็ม) อยู่ที่เดิมด้านบน */
+.repeat-topbar { display: flex; gap: 12px; align-items: flex-end; }
+.repeat-method-col { flex: 0 0 140px; }
+.repeat-url-col { flex: 1 1 auto; min-width: 0; }
+/* Headers ซ้าย / Body ขวา — default 2.5:4 (ลาก gutter ปรับได้) */
+.repeat-grid { display: flex; align-items: stretch; }
+.repeat-col-left { flex: 0 0 38.46%; min-width: 0; }
+.repeat-col-right { flex: 1 1 auto; min-width: 0; }
+.repeat-gutter {
+  flex: 0 0 8px; margin: 0 6px; align-self: stretch;
+  cursor: col-resize; background: var(--border); border-radius: 4px;
+}
+.repeat-gutter:hover { background: var(--accent); }
+.repeat-field {
+  width: 100%; box-sizing: border-box;
+  background: var(--bg); color: var(--text, #e2e8f0);
+  border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 0.85rem;
+}
+.repeat-ta { font-family: ui-monospace, monospace; resize: both; min-height: 320px; max-width: 100%; }
+.repeat-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.repeat-exec {
+  background: var(--accent); color: #06283d; border: none; font-weight: 600;
+  padding: 9px 18px; border-radius: 6px; cursor: pointer;
+}
+.repeat-exec:hover { filter: brightness(1.08); }
+.repeat-cancel {
+  background: none; color: var(--muted); border: 1px solid var(--border);
+  padding: 9px 16px; border-radius: 6px; cursor: pointer;
+}
+.repeat-cancel:hover { background: var(--panel-2); }

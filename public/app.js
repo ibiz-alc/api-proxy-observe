@@ -9,7 +9,8 @@ window.fetch = (url, opts = {}) => {
   return _origFetch(url, { ...opts, headers });
 };
 
-// ซ่อนโหมดที่ไม่ใช่ USB ไว้ชั่วคราว (Wi-Fi / Proxy Postern / การ์ด iOS) — เอากลับมาด้วย false
+// ซ่อนโหมด Proxy Postern (แอป VPN) ไว้ชั่วคราว — เอากลับมาด้วย false
+// Wi-Fi กลับมาใช้ได้แล้ว (ไม่อยู่ใต้ flag นี้)
 const USB_ONLY = true;
 if (USB_ONLY) document.querySelectorAll('[data-usbonly-hide]').forEach((e) => { e.style.display = 'none'; });
 
@@ -477,138 +478,27 @@ let flowMatch = 'contains'; // contains | equals
 let flowMediaFilter = ''; // '' | image | video | pdf
 let selDevice = '';      // '' = ทุก device
 let selHost = '';        // '' = ทุก host (ใน device ที่เลือก)
+// Pin base URL (origin scheme://host) — เก็บใน localStorage ให้อยู่ข้าม refresh
+const PINS_KEY = 'apitester_pins';
+let pinnedBaseUrls = (() => { try { return JSON.parse(localStorage.getItem(PINS_KEY)) || []; } catch { return []; } })();
+let selPin = '';         // '' = ไม่ได้เลือก pin
+function flowBaseUrl(f) { return `${f.scheme || 'https'}://${f.host || ''}`; }
+function savePins() { try { localStorage.setItem(PINS_KEY, JSON.stringify(pinnedBaseUrls)); } catch { /* ignore */ } }
+function togglePin(base) {
+  const i = pinnedBaseUrls.indexOf(base);
+  if (i >= 0) { pinnedBaseUrls.splice(i, 1); if (selPin === base) selPin = ''; }
+  else pinnedBaseUrls.push(base);
+  savePins();
+  renderProxy();
+}
 // sub-tabs ของ detail
 let reqTab = 'Header';
 let resTab = 'Body';
 
 (async function initProxy() {
-  const host = location.hostname;
-  const isLocal = host === 'localhost' || host === '127.0.0.1';
-  let lanIp = isLocal ? null : host;
-  try { lanIp = (await (await fetch('/api/proxy/info')).json()).lanIp || lanIp; } catch { /* ใช้ค่า fallback */ }
-  const lanTxt = lanIp || '<IP วง LAN ของ Mac>';
-  const lanEl = document.getElementById('postern-lan'); if (lanEl) lanEl.textContent = lanTxt;
-  const lanEl2 = document.getElementById('postern-lan2'); if (lanEl2) lanEl2.textContent = lanTxt;
   allFlows = await (await fetch('/api/proxy/flows')).json();
   renderProxy();
 })();
-
-// ---- ควบคุมมือถือผ่านเว็บ (ตั้ง global http_proxy ผ่าน adb — ไม่ต้องใช้ Postern) ----
-const pdListEl = document.getElementById('pd-list');
-let pdMode = 'usb'; // โหมดที่กำลังเลือก (usb | wifi | postern)
-
-async function renderDevices() {
-  const isPostern = pdMode === 'postern' || pdMode === 'postern-wifi';
-  // Postern: เลือกโหมดชัดเจนจากปุ่มที่กด (usb = 127.0.0.1 ผ่านสาย / wifi = IP Mac ไม่ต้องพึ่ง USB)
-  const posternMode = pdMode === 'postern-wifi' ? 'wifi' : 'usb';
-  document.getElementById('pd-title').textContent =
-    isPostern ? (posternMode === 'wifi' ? '📶 เลือก device เชื่อม Postern ผ่าน Wi-Fi (IP Mac)' : '📲 เลือก device เชื่อม Postern ผ่าน USB')
-      : pdMode === 'wifi' ? '📶 เลือก device เชื่อมแบบ Wi-Fi' : '🔌 เลือก device เชื่อมแบบ USB';
-  pdListEl.innerHTML = '<span class="hint">กำลังโหลด device…</span>';
-  let data;
-  try { data = await (await fetch('/api/devices')).json(); }
-  catch { pdListEl.innerHTML = '<span class="hint">เรียก API ไม่ได้</span>'; return; }
-  const devices = (data && data.devices) || [];
-  if (!devices.length) {
-    pdListEl.innerHTML = '<span class="hint">ไม่พบ device — เสียบ USB + เปิด USB debugging (จำเป็นทั้ง USB และ Wi-Fi เพื่อให้เว็บสั่ง adb ได้)</span>';
-    return;
-  }
-  pdListEl.innerHTML = '';
-  for (const d of devices) {
-    const active = isPostern ? d.posternRunning : d.connected;
-    const cond = isPostern ? (posternMode === 'wifi' ? 'Wi-Fi' : 'USB') : (d.mode || '');
-    const label = active ? `เชื่อมอยู่${cond ? ` (${cond})` : ''}` : 'ยังไม่เชื่อม';
-    const row = el('div', { class: 'pd-row' }, [
-      el('span', { class: 'pd-dot ' + (active ? 'on' : 'off'), text: active ? '🟢' : '⚪' }),
-      el('div', { class: 'pd-name-wrap' }, [
-        el('div', { class: 'pd-name', text: d.model }),
-        el('div', { class: 'pd-serial', text: `${d.serial} · ${label}` }),
-      ]),
-    ]);
-    const connBtn = el('button', {
-      class: active ? 'pd-btn danger' : 'pd-btn primary',
-      text: active ? 'ตัด' : (isPostern ? (posternMode === 'wifi' ? 'เชื่อม (Wi-Fi)' : 'เชื่อม (USB)') : pdMode === 'wifi' ? 'เชื่อม Wi-Fi' : 'เชื่อม USB'),
-    });
-    connBtn.addEventListener('click', async () => {
-      connBtn.disabled = true; connBtn.textContent = '…';
-      const url = active ? '/api/devices/disconnect' : '/api/devices/connect';
-      const mode = isPostern ? posternMode : pdMode;
-      const method = isPostern ? 'postern' : 'proxy';
-      try {
-        const r = await (await fetch(url, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ serial: d.serial, mode, method }),
-        })).json();
-        if (!r.ok) alert('ไม่สำเร็จ: ' + (r.error || ''));
-        else if (isPostern && !active) {
-          const wifiNote = posternMode === 'wifi'
-            ? `\n\n✅ โหมด Wi-Fi: host = ${r.host}:${r.port} → ถอด USB ได้ traffic ยังวิ่งผ่าน Wi-Fi (มือถือต้องอยู่วงเดียวกับ Mac)`
-            : '\n\n⚠️ โหมด USB: host = 127.0.0.1 → ห้ามถอดสาย USB ไม่งั้น traffic หยุด';
-          alert(`เปิดแอปบน ${d.model} แล้ว${wifiNote}\n\nถ้าเป็นครั้งแรกให้กดอนุญาต VPN + ติดตั้ง CA บนมือถือ`);
-        }
-      } catch (e) { alert('error: ' + e.message); }
-      setTimeout(renderDevices, 1200); // รอ service/VPN ขึ้นก่อนค่อยรีเฟรชสถานะ
-    });
-    const caBtn = el('button', { class: 'pd-btn', text: '📥 CA' });
-    caBtn.addEventListener('click', async () => {
-      caBtn.disabled = true;
-      try {
-        const r = await (await fetch('/api/devices/install-ca', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ serial: d.serial }),
-        })).json();
-        alert(r.ok ? `บันทึก ${r.file} + เปิด Settings แล้ว → เลือก CA certificate ติดตั้ง` : 'ไม่สำเร็จ: ' + (r.error || ''));
-      } catch (e) { alert('error: ' + e.message); }
-      caBtn.disabled = false;
-    });
-    row.appendChild(connBtn);
-    row.appendChild(caBtn);
-    pdListEl.appendChild(row);
-  }
-}
-document.getElementById('pd-refresh').addEventListener('click', renderDevices);
-
-// ปุ่มในแต่ละวิธี (data-mode + data-act)
-document.querySelectorAll('.mode-actions button').forEach((b) => {
-  b.addEventListener('click', async () => {
-    pdMode = b.dataset.mode;
-    if (b.dataset.act === 'show') {
-      document.getElementById('pd-panel').style.display = 'block';
-      renderDevices();
-    } else if (b.dataset.act === 'ca') {
-      // ติดตั้ง CA ให้ device แรกที่เจอ
-      const data = await (await fetch('/api/devices')).json().catch(() => ({}));
-      const dev = (data.devices || [])[0];
-      if (!dev) { alert('ไม่พบ device (เสียบ USB)'); return; }
-      const r = await (await fetch('/api/devices/install-ca', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serial: dev.serial }),
-      })).json();
-      alert(r.ok ? `บันทึก ${r.file} บน ${dev.model} + เปิด Settings → เลือก CA certificate ติดตั้ง` : 'ไม่สำเร็จ: ' + (r.error || ''));
-    } else if (b.dataset.act === 'apk') {
-      // ติดตั้งแอป Proxy Postern (APK) ลง device แรกที่เจอ
-      const data = await (await fetch('/api/devices')).json().catch(() => ({}));
-      const dev = (data.devices || [])[0];
-      if (!dev) { alert('ไม่พบ device (เสียบ USB + เปิด USB debugging)'); return; }
-      const orig = b.textContent;
-      b.disabled = true; b.textContent = '⏳ กำลังติดตั้ง (ครั้งแรก build อาจนาน)…';
-      try {
-        const r = await (await fetch('/api/devices/install-apk', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ serial: dev.serial }),
-        })).json();
-        alert(r.ok ? `✅ ติดตั้งแอป Proxy Postern บน ${dev.model} แล้ว` : 'ไม่สำเร็จ: ' + (r.error || r.output || ''));
-      } catch (e) { alert('error: ' + e.message); }
-      b.disabled = false; b.textContent = orig;
-    }
-  });
-});
-
-// ปุ่ม "❓ วิธีติดตั้ง / เชื่อมต่อ" — เปิด/ปิด
-document.getElementById('proxy-help-btn').addEventListener('click', () => {
-  const box = document.getElementById('postern-modes');
-  box.style.display = box.style.display === 'none' ? 'block' : 'none';
-});
 
 // ตัวลากปรับขนาดรายการ URL (บน) / detail (ล่าง) — เก็บค่าไว้ใน localStorage
 (function initProxyResizer() {
@@ -638,6 +528,36 @@ document.getElementById('proxy-help-btn').addEventListener('click', () => {
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
     localStorage.setItem('proxyListH', String(parseInt(listWrap.style.height, 10) || 230));
+  });
+})();
+
+// ตัวลากปรับความกว้างคอลัมน์ Devices (ซ้าย) — เก็บค่าไว้ใน localStorage
+(function initDeviceResizer() {
+  const resizer = document.getElementById('proxy-hresizer');
+  const tree = document.getElementById('device-tree');
+  if (!resizer || !tree) return;
+  const MIN = 120, MAX = 480;
+  const saved = parseInt(localStorage.getItem('proxyDeviceW') || '', 10);
+  if (saved >= MIN) tree.style.flex = '0 0 ' + Math.min(MAX, saved) + 'px';
+  let dragging = false;
+  resizer.addEventListener('mousedown', (e) => {
+    dragging = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const left = tree.getBoundingClientRect().left;
+    const w = Math.max(MIN, Math.min(MAX, e.clientX - left));
+    tree.style.flex = '0 0 ' + w + 'px';
+  });
+  window.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    localStorage.setItem('proxyDeviceW', String(parseInt(tree.style.flexBasis, 10) || 190));
   });
 })();
 document.getElementById('clear-flows').addEventListener('click', async () => {
@@ -678,6 +598,7 @@ function fmtSize(bytes) {
 // กรองตาม field/ข้อความ และ device/host ที่เลือกจาก tree
 function filteredFlows() {
   return allFlows.filter((f) => {
+    if (selPin && flowBaseUrl(f) !== selPin) return false;
     if (selDevice && f.device !== selDevice) return false;
     if (selHost && f.host !== selHost) return false;
     if (flowFilter) {
@@ -694,11 +615,35 @@ function filteredFlows() {
 // ---- device tree (ซ้าย) ----
 function renderDeviceTree() {
   deviceTreeBody.innerHTML = '';
-  const allItem = el('div', { class: 'tree-item tree-device' + (!selDevice ? ' active' : '') }, [
+
+  // ---- Pinned base URLs (บนสุด) ----
+  if (pinnedBaseUrls.length) {
+    deviceTreeBody.appendChild(el('div', { class: 'tree-section', text: '📌 Pinned' }));
+    for (const base of pinnedBaseUrls) {
+      const count = allFlows.filter((f) => flowBaseUrl(f) === base).length;
+      const removeBtn = el('span', { class: 'pin-remove', title: 'ลบ pin', text: '✕' });
+      removeBtn.addEventListener('click', (ev) => { ev.stopPropagation(); togglePin(base); });
+      const label = base.replace(/^https?:\/\//, '');
+      const pinItem = el('div', { class: 'tree-item tree-pin' + (selPin === base ? ' active' : '') }, [
+        el('span', { class: 'tree-label', title: base, text: label }),
+        el('span', { class: 'tree-count', text: String(count) }),
+        removeBtn,
+      ]);
+      pinItem.addEventListener('click', () => {
+        selPin = selPin === base ? '' : base;
+        selDevice = ''; selHost = '';
+        renderProxy();
+      });
+      deviceTreeBody.appendChild(pinItem);
+    }
+    deviceTreeBody.appendChild(el('div', { class: 'tree-section', text: 'Devices' }));
+  }
+
+  const allItem = el('div', { class: 'tree-item tree-device' + (!selDevice && !selPin ? ' active' : '') }, [
     el('span', { class: 'tree-label', text: '🌐 ทุก device' }),
     el('span', { class: 'tree-count', text: String(allFlows.length) }),
   ]);
-  allItem.addEventListener('click', () => { selDevice = ''; selHost = ''; renderProxy(); });
+  allItem.addEventListener('click', () => { selDevice = ''; selHost = ''; selPin = ''; renderProxy(); });
   deviceTreeBody.appendChild(allItem);
 
   const byDevice = new Map();
@@ -714,7 +659,7 @@ function renderDeviceTree() {
       el('span', { class: 'tree-label', text: '📱 ' + device }),
       el('span', { class: 'tree-count', text: String(total) }),
     ]);
-    devItem.addEventListener('click', () => { selDevice = device; selHost = ''; renderProxy(); });
+    devItem.addEventListener('click', () => { selDevice = device; selHost = ''; selPin = ''; renderProxy(); });
     deviceTreeBody.appendChild(devItem);
     // hosts ของ device นี้ (แสดงเมื่อ device ถูกเลือก)
     if (selDevice === device) {
@@ -769,6 +714,10 @@ function renderFlowTable() {
       renderFlowTable();
       renderFlowDetail(f);
     });
+    item.addEventListener('contextmenu', (ev) => {
+      ev.preventDefault();
+      showFlowContextMenu(ev, f);
+    });
     flowListBody.appendChild(item);
   }
 }
@@ -776,6 +725,157 @@ function renderFlowTable() {
 function renderProxy() {
   renderDeviceTree();
   renderFlowTable();
+}
+
+// ================= Repeat / Repeat & Edit (คลิกขวาที่แถว flow) =================
+let _flowCtxMenu = null;
+function closeFlowContextMenu() {
+  if (_flowCtxMenu) { _flowCtxMenu.remove(); _flowCtxMenu = null; }
+}
+function showFlowContextMenu(ev, f) {
+  closeFlowContextMenu();
+  const repeatBtn = el('button', { class: 'flow-ctx-item', type: 'button', text: '🔁 Repeat' });
+  const editBtn = el('button', { class: 'flow-ctx-item', type: 'button', text: '✏️ Repeat & Edit' });
+  const base = flowBaseUrl(f);
+  const isPinned = pinnedBaseUrls.includes(base);
+  const pinBtn = el('button', { class: 'flow-ctx-item', type: 'button', text: (isPinned ? '📌 Unpin ' : '📌 Pin ') + base });
+  repeatBtn.addEventListener('click', () => { closeFlowContextMenu(); replayFlow(f); });
+  editBtn.addEventListener('click', () => { closeFlowContextMenu(); openRepeatEdit(f); });
+  pinBtn.addEventListener('click', () => { closeFlowContextMenu(); togglePin(base); });
+  const menu = el('div', { class: 'flow-ctx-menu' }, [repeatBtn, editBtn, pinBtn]);
+  document.body.appendChild(menu);
+  // วางใกล้เมาส์ กันล้นขอบจอ
+  const mw = menu.offsetWidth || 190, mh = menu.offsetHeight || 84;
+  let x = ev.clientX, y = ev.clientY;
+  if (x + mw > window.innerWidth) x = window.innerWidth - mw - 8;
+  if (y + mh > window.innerHeight) y = window.innerHeight - mh - 8;
+  menu.style.left = Math.max(4, x) + 'px';
+  menu.style.top = Math.max(4, y) + 'px';
+  _flowCtxMenu = menu;
+}
+document.addEventListener('click', closeFlowContextMenu);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeFlowContextMenu(); });
+
+// parse textarea "Key: Value" (บรรทัดละคู่) -> object
+function parseRawHeaders(text) {
+  const obj = {};
+  for (const line of String(text).split('\n')) {
+    const t = line.trim();
+    if (!t) continue;
+    const i = t.indexOf(':');
+    if (i < 0) continue;
+    const k = t.slice(0, i).trim();
+    const v = t.slice(i + 1).trim();
+    if (k) obj[k] = v;
+  }
+  return obj;
+}
+
+// ยิง request ซ้ำ — override = { method, url, headers, body } (ไม่ส่ง = ใช้ค่าจาก flow เดิม)
+async function replayFlow(f, override) {
+  const payload = {
+    method: (override && override.method) || f.method,
+    url: (override && override.url) || f.url,
+    headers: (override && override.headers) || f.reqHeaders || {},
+    body: override ? override.body : f.reqBody,
+  };
+  try {
+    const r = await (await fetch('/api/proxy/replay', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })).json();
+    if (!r.ok) throw new Error(r.error || 'replay ไม่สำเร็จ');
+    // flow ใหม่จะเด้งเข้าลิสต์เองผ่าน SSE — เลือกให้เลยเพื่อดู response ทันที
+    if (r.flow) {
+      selectedFlowId = r.flow.id;
+      renderFlowTable();
+      renderFlowDetail(r.flow);
+    }
+  } catch (e) {
+    alert('Repeat ล้มเหลว: ' + e.message);
+  }
+}
+
+function openRepeatEdit(f) {
+  const methodSel = el('select', { class: 'repeat-field' });
+  ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].forEach((m) => {
+    methodSel.appendChild(el('option', { value: m, text: m }));
+  });
+  methodSel.value = f.method || 'GET';
+  const urlInput = el('input', { class: 'repeat-field', type: 'text' });
+  urlInput.value = f.url || '';
+  const headersTa = el('textarea', { class: 'repeat-field repeat-ta', spellcheck: 'false' });
+  headersTa.value = headersToRaw(f.reqHeaders || {});
+  const bodyTa = el('textarea', { class: 'repeat-field repeat-ta', spellcheck: 'false' });
+  // pretty-print body ถ้าเป็น JSON (prettyBody parse+reformat ให้; ถ้าไม่ใช่ JSON คืน text เดิม)
+  bodyTa.value = f.reqBody != null ? (prettyBody(f.reqBody) || '') : '';
+
+  const execBtn = el('button', { class: 'repeat-exec', type: 'button', text: '▶️ Execute' });
+  const cancelBtn = el('button', { class: 'repeat-cancel', type: 'button', text: 'Cancel' });
+  const box = el('div', { class: 'repeat-modal' }, [
+    el('div', { class: 'repeat-title', text: '✏️ Repeat & Edit' }),
+    el('div', { class: 'repeat-topbar' }, [
+      el('div', { class: 'repeat-col repeat-method-col' }, [
+        el('label', { class: 'repeat-label', text: 'Method' }), methodSel,
+      ]),
+      el('div', { class: 'repeat-col repeat-url-col' }, [
+        el('label', { class: 'repeat-label', text: 'URL' }), urlInput,
+      ]),
+    ]),
+    el('div', { class: 'repeat-grid' }, [
+      el('div', { class: 'repeat-col repeat-col-left' }, [
+        el('label', { class: 'repeat-label', text: 'Headers (บรรทัดละ Key: Value)' }), headersTa,
+      ]),
+      el('div', { class: 'repeat-gutter', title: 'ลากเพื่อปรับความกว้าง Header : Body' }),
+      el('div', { class: 'repeat-col repeat-col-right' }, [
+        el('label', { class: 'repeat-label', text: 'Body (JSON)' }), bodyTa,
+      ]),
+    ]),
+    el('div', { class: 'repeat-actions' }, [cancelBtn, execBtn]),
+  ]);
+  const overlay = el('div', { class: 'repeat-overlay' }, [box]);
+  const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  cancelBtn.addEventListener('click', close);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  document.addEventListener('keydown', onKey);
+  execBtn.addEventListener('click', () => {
+    const override = {
+      method: methodSel.value,
+      url: urlInput.value.trim(),
+      headers: parseRawHeaders(headersTa.value),
+      body: bodyTa.value === '' ? null : bodyTa.value,
+    };
+    close();
+    replayFlow(f, override);
+  });
+  document.body.appendChild(overlay);
+  urlInput.focus();
+
+  // ลาก gutter เพื่อปรับความกว้าง Header : Body (ซ้าย/ขวา)
+  const grid = box.querySelector('.repeat-grid');
+  const leftCol = box.querySelector('.repeat-col-left');
+  const gutter = box.querySelector('.repeat-gutter');
+  gutter.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const gridW = grid.getBoundingClientRect().width;
+    const startW = leftCol.getBoundingClientRect().width;
+    const onMove = (ev) => {
+      let w = startW + (ev.clientX - startX);
+      w = Math.max(120, Math.min(gridW - 180, w)); // เผื่อ body ขั้นต่ำ
+      leftCol.style.flex = `0 0 ${w}px`;
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+    };
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
 }
 
 function headersToRaw(headers) {
@@ -1762,13 +1862,38 @@ function renderCaCard(lanIp, mitmUp) {
   return card;
 }
 
+// คู่มือเชื่อม Android (USB / Wi-Fi) — ปุ่มเชื่อมจริงอยู่ที่การ์ด device ด้านบน
+function renderAndroidCard(lanIp, mitmUp) {
+  const host = lanIp ? `${lanIp}:8888` : '(หา LAN IP ไม่เจอ — เช็คว่า Mac ต่อ Wi-Fi)';
+  const card = el('div', { class: 'st-card ' + (mitmUp ? 'ok' : 'bad') }, [
+    el('div', { class: 'st-head' }, [
+      el('span', { class: 'st-title', text: '🤖 Android (วิธีเชื่อมต่อ)' }),
+      el('span', { class: 'st-badge ' + (mitmUp ? 'up' : 'down'),
+        text: mitmUp ? '✅ พร้อมให้เชื่อม' : '❌ เปิด mitmproxy ก่อน' }),
+    ]),
+    el('div', { class: 'st-body' }, [
+      el('div', { class: 'st-line', html: '🔌 <b>USB</b> (เสถียร/เร็วสุด): เสียบสาย + เปิด USB debugging → กดปุ่ม “🔌 เชื่อม USB” ที่การ์ด device ด้านบน (จัดการ proxy + adb reverse อัตโนมัติ)' }),
+      el('div', { class: 'st-line', html: `📶 <b>Wi-Fi</b> <span class="st-star">*</span>: มือถืออยู่วง Wi-Fi เดียวกับ Mac แล้วกดปุ่ม “📶 เชื่อม Wi-Fi” (Host = <code>${host}</code>)` }),
+    ]),
+  ]);
+  const body = card.querySelector('.st-body');
+  body.appendChild(el('div', { class: 'st-line', text: 'ติดตั้ง CA:' }));
+  const ol = el('ol', { class: 'st-steps' });
+  ol.appendChild(el('li', { html: 'โหลด CA จากการ์ด “📜 CA Certificate” ด้านล่าง หรือสแกน QR' }));
+  ol.appendChild(el('li', { html: 'Settings → Security → Encryption &amp; credentials → Install a certificate → CA certificate' }));
+  body.appendChild(ol);
+  body.appendChild(el('div', { class: 'st-note',
+    text: '* Wi-Fi: มือถือต้องอยู่วง LAN เดียวกับ Mac ไม่งั้น traffic ไปไม่ถึง (บางที่ Wi-Fi บล็อกพอร์ต — ถ้าไม่ชัวร์ใช้ USB)' }));
+  return card;
+}
+
 // iPhone/iPad เชื่อมผ่าน adb ไม่ได้ — ต้องตั้ง Wi-Fi proxy ด้วยมือบนเครื่อง
 // การ์ดนี้เป็นคู่มือ: โชว์ IP:port ที่ต้องกรอก + ปุ่ม copy + checklist 5 ขั้น
 function renderIosCard(lanIp, mitmUp) {
   const host = lanIp || '(หา LAN IP ไม่เจอ — เช็คว่า Mac ต่อ Wi-Fi อยู่)';
   const proxyStr = lanIp ? `${lanIp}:8888` : '';
   const steps = [
-    'iPhone ต่อ Wi-Fi วงเดียวกับ Mac',
+    'iPhone ต่อ Wi-Fi วงเดียวกับ Mac *',
     `Settings → Wi-Fi → กด (i) → Configure Proxy → Manual → Server = ${host} · Port = 8888`,
     'เปิด Safari เข้า http://mitm.it → โหลด certificate ของ iOS (ชี้ QR ด้านบนแล้วสแกนด้วยกล้อง iPhone เพื่อเปิดหน้านี้ได้เลย)',
     'Settings → General → VPN & Device Management → ติดตั้ง profile ที่โหลด',
@@ -1779,7 +1904,7 @@ function renderIosCard(lanIp, mitmUp) {
   attachQrHover(qrIcon, 'http://mitm.it', 200);
   const card = el('div', { class: 'st-card ' + (mitmUp ? 'ok' : 'bad') }, [
     el('div', { class: 'st-head' }, [
-      el('span', { class: 'st-title', text: '🍎 iOS (iPhone/iPad)' }),
+      el('span', { class: 'st-title', text: '🍎 iOS (วิธีเชื่อมต่อ)' }),
       qrIcon,
       el('span', { class: 'st-badge ' + (mitmUp ? 'up' : 'down'),
         text: mitmUp ? '✅ พร้อมให้เชื่อม' : '❌ เปิด mitmproxy ก่อน' }),
@@ -1816,6 +1941,8 @@ function renderIosCard(lanIp, mitmUp) {
   card.querySelector('.st-body').appendChild(ol);
   card.querySelector('.st-body').appendChild(
     el('div', { class: 'st-line', text: '⚠️ แอปที่ทำ certificate pinning (เช่นแอปธนาคาร) จะไม่วิ่งผ่าน proxy แม้ติดตั้ง cert ถูก — เป็นข้อจำกัดของแอปเป้าหมายเอง' }));
+  card.querySelector('.st-body').appendChild(
+    el('div', { class: 'st-note', text: '* Wi-Fi: iPhone ต้องอยู่วง LAN เดียวกับ Mac ไม่งั้น traffic ไปไม่ถึง' }));
   return card;
 }
 
@@ -1888,24 +2015,28 @@ async function renderStatus() {
     } else if (dev.posternRunning) {
       details.push('เชื่อมผ่านแอป Proxy Postern (VPN) อยู่');
     } else {
-      details.push('ยังไม่ได้เชื่อม proxy' + (!USB_ONLY && lanIp ? ` (Wi-Fi ใช้ Host ${lanIp}:8888)` : ''));
+      details.push('ยังไม่ได้เชื่อม proxy' + (lanIp ? ` (Wi-Fi ใช้ Host ${lanIp}:8888)` : ''));
     }
     const acts = [];
     if (!okDev) {
       acts.push(stBtn('🔌 เชื่อม USB', () => stConnectDevice(dev.serial, 'usb')));
-      if (!USB_ONLY) acts.push(stBtn('📶 เชื่อม Wi-Fi', () => stConnectDevice(dev.serial, 'wifi')));
+      acts.push(stBtn('📶 เชื่อม Wi-Fi', () => stConnectDevice(dev.serial, 'wifi')));
     } else {
       acts.push(stBtn('⛔ ตัดการเชื่อมต่อ', () => stDisconnectDevice(dev.serial), 'stop'));
     }
-    statusCards.appendChild(stCard('📱', `${dev.model} (${dev.transport.toUpperCase()})`, okDev, details, acts));
+    // แสดงสถานะการเชื่อมจริง (โหมด proxy) ไม่ใช่ transport ของ adb
+    const connLabel = dev.connected
+      ? (dev.mode === 'wifi' ? '📶 WIFI' : '🔌 USB')
+      : dev.posternRunning ? '📲 POSTERN' : '⚪ ยังไม่เชื่อม';
+    statusCards.appendChild(stCard('📱', `${dev.model} (${connLabel})`, okDev, details, acts));
   }
+
+  // --- วิธีเชื่อมต่อ: แยกการ์ด Android / iOS ---
+  statusCards.appendChild(renderAndroidCard(lanIp, sv.mitmproxy.up));
+  statusCards.appendChild(renderIosCard(lanIp, sv.mitmproxy.up));
 
   // --- CA Certificate (Manual — โหลดเอง ไม่พึ่ง USB) ---
   statusCards.appendChild(renderCaCard(lanIp, sv.mitmproxy.up));
-
-  // --- iOS (Wi-Fi manual — adb ใช้ไม่ได้กับ iPhone/iPad) ---
-  // การ์ด iOS อยู่นอก USB_ONLY — เป็นคู่มือ download/trust cert ที่ยังต้องใช้
-  statusCards.appendChild(renderIosCard(lanIp, sv.mitmproxy.up));
 
   // --- การบันทึก ---
   const recDetails = [

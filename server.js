@@ -624,6 +624,63 @@ app.delete('/api/proxy/flows', (req, res) => {
   res.json({ ok: true });
 });
 
+// ยิง request ซ้ำจากฝั่ง server (Repeat / Repeat & Edit) — ตรงไป target ไม่ผ่าน mitmproxy
+// ผลลัพธ์ถูกสร้างเป็น flow ใหม่ (device:'replay') push เข้า store + broadcast ให้โผล่ในลิสต์เหมือน flow ปกติ
+app.post('/api/proxy/replay', express.json({ limit: '40mb' }), async (req, res) => {
+  const { method = 'GET', url, headers = {}, body = null } = req.body || {};
+  if (!url) return res.status(400).json({ ok: false, error: 'ต้องระบุ url' });
+  let u;
+  try { u = new URL(url); } catch { return res.status(400).json({ ok: false, error: 'url ไม่ถูกต้อง' }); }
+
+  // ตัด header ที่ทำให้ยิงพัง — ให้ fetch จัดการเอง (host/len/encoding/connection)
+  const DROP = new Set(['host', 'content-length', 'accept-encoding', 'connection']);
+  const outHeaders = {};
+  for (const [k, v] of Object.entries(headers || {})) {
+    if (k && !DROP.has(k.toLowerCase())) outHeaders[k] = String(v);
+  }
+  const m = String(method).toUpperCase();
+  const hasBody = body != null && body !== '' && m !== 'GET' && m !== 'HEAD';
+  const id = crypto.randomUUID();
+  const started = Date.now();
+  const flow = {
+    id,
+    time: new Date().toISOString(),
+    scheme: u.protocol.replace(':', ''),
+    device: 'replay',
+    userAgent: outHeaders['user-agent'] || outHeaders['User-Agent'] || null,
+    method: m,
+    host: u.host,
+    path: u.pathname + u.search,
+    url,
+    reqHeaders: outHeaders,
+    reqBody: hasBody ? String(body) : null,
+    reqSize: hasBody ? Buffer.byteLength(String(body)) : 0,
+    status: null, statusText: '',
+    resHeaders: null, resBody: null, resContentType: null, resSize: 0,
+    durationMs: null, mapped: false, blocked: false, replay: true,
+  };
+  try {
+    const r = await fetch(url, { method: m, headers: outHeaders, body: hasBody ? String(body) : undefined });
+    const text = await r.text();
+    const resHeaders = {};
+    r.headers.forEach((v, k) => { resHeaders[k] = v; });
+    flow.status = r.status;
+    flow.statusText = r.statusText || '';
+    flow.resHeaders = resHeaders;
+    flow.resBody = text;
+    flow.resContentType = resHeaders['content-type'] || null;
+    flow.resSize = Buffer.byteLength(text);
+    flow.durationMs = Date.now() - started;
+  } catch (e) {
+    flow.error = e.message;
+    flow.durationMs = Date.now() - started;
+  }
+  proxyStore.flows.unshift(flow);
+  while (proxyStore.flows.length > 300) proxyStore.flows.pop();
+  broadcast('proxy', flow);
+  res.json({ ok: true, id, flow });
+});
+
 // ================= ควบคุมมือถือผ่าน adb (ตั้ง global http_proxy — ไม่ต้องใช้ Postern) =================
 async function adb(args, timeout = 15000) {
   const { stdout } = await execFileP(ADB, args, { timeout, maxBuffer: 8 * 1024 * 1024 });
