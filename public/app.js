@@ -1001,7 +1001,25 @@ function renderFlowDetail(f) {
   });
   const mapBtn = el('button', { class: 'maplocal-icon-btn', type: 'button', title: 'สร้าง Map Local จาก flow นี้ (prefill response)', text: '🎯 Map Local' });
   mapBtn.addEventListener('click', () => mapLocalFromFlow(f));
-  const reqExtra = el('div', { class: 'detail-extra' }, [copyUrlBtn, mapBtn]);
+  // Pin icon — ปักหมุด base URL (scheme://host) ของ flow นี้
+  const base = flowBaseUrl(f);
+  const pinBtn = el('button', { class: 'maplocal-icon-btn pin-toggle', type: 'button' });
+  pinBtn.textContent = '📌';
+  const syncPin = () => {
+    const pinned = pinnedBaseUrls.includes(base);
+    pinBtn.classList.toggle('active', pinned);
+    pinBtn.title = (pinned ? 'เอาหมุดออก: ' : 'ปักหมุด: ') + base;
+  };
+  syncPin();
+  pinBtn.addEventListener('click', () => { togglePin(base); syncPin(); });
+  // เมนู ⋯ (hover) — Repeat / Repeat & Edit เหมือนคลิกขวาที่แถว flow
+  const repeatItem = el('button', { class: 'flow-ctx-item', type: 'button', text: '🔁 Repeat' });
+  repeatItem.addEventListener('click', () => replayFlow(f));
+  const editItem = el('button', { class: 'flow-ctx-item', type: 'button', text: '✏️ Repeat & Edit' });
+  editItem.addEventListener('click', () => openRepeatEdit(f));
+  const kebabBtn = el('button', { class: 'maplocal-icon-btn kebab-btn', type: 'button', title: 'เพิ่มเติม', text: '⋯' });
+  const kebabWrap = el('div', { class: 'kebab-wrap' }, [kebabBtn, el('div', { class: 'kebab-menu' }, [repeatItem, editItem])]);
+  const reqExtra = el('div', { class: 'detail-extra' }, [copyUrlBtn, mapBtn, pinBtn, kebabWrap]);
   const reqPane = buildDetailPane('Request', reqHeadline, reqTabs, reqTab, (name) => { reqTab = name; renderFlowDetail(f); }, reqExtra);
 
   // ----- Response pane -----

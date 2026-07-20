@@ -733,7 +733,24 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
   white-space: nowrap;
 }
 .maplocal-icon-btn:hover { background: var(--green); color: #0f172a; }
-.detail-extra { margin-left: auto; display: flex; gap: 6px; }
+.detail-extra { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+/* Pin toggle — ใช้สี accent แทนเขียวให้ต่างจาก Map Local */
+.maplocal-icon-btn.pin-toggle { margin-left: 0; border-color: var(--accent); color: var(--accent); }
+.maplocal-icon-btn.pin-toggle:hover { background: var(--accent); color: #0f172a; }
+.maplocal-icon-btn.pin-toggle.active { background: var(--accent); color: #0f172a; }
+/* เมนู ⋯ (hover) */
+.kebab-wrap { position: relative; }
+.maplocal-icon-btn.kebab-btn { margin-left: 0; border-color: var(--border); color: var(--muted); font-weight: 700; padding: 3px 12px; }
+.maplocal-icon-btn.kebab-btn:hover { background: var(--panel-2); color: var(--text); }
+.kebab-menu {
+  display: none; position: absolute; top: calc(100% + 4px); right: 0; z-index: 10000;
+  min-width: 170px; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 8px; padding: 4px; box-shadow: 0 8px 28px rgba(0,0,0,0.55);
+  flex-direction: column; gap: 2px;
+}
+/* hover ค้างบนปุ่มหรือเมนู (padding-top ของ wrap อุดช่องว่างกันเมนูวูบหาย) */
+.kebab-wrap:hover .kebab-menu { display: flex; }
+.kebab-wrap::after { content: ''; position: absolute; top: 100%; right: 0; width: 60px; height: 6px; }
 .img-tab { padding: 4px 0; }
 .img-tab-preview { max-width: 100%; max-height: 280px; border-radius: 8px; border: 1px solid var(--border); display: block; }
 .img-tab-dl { display: inline-block; margin: 8px 0; color: var(--accent); font-size: 0.85rem; }
