@@ -743,12 +743,40 @@ async function resolveTarget(S, mode) {
   return { host: '127.0.0.1', target: `127.0.0.1:${MITM_PORT}` };
 }
 
+// โหมด Wi-Fi ต้องให้มือถืออยู่วง LAN เดียวกับ Mac — ทดสอบว่ามือถือยิงถึง host:MITM_PORT จริงไหม
+// ใช้ nc บนมือถือ (มี /system/bin/nc). คืน: 'reachable' | 'unreachable' | 'unknown'(nc ไม่มี/สั่งไม่ได้)
+async function wifiReachable(S, host) {
+  try {
+    const out = await adb(
+      [...S, 'shell', `which nc >/dev/null 2>&1 && (nc -w 3 -z ${host} ${MITM_PORT} && echo REACHABLE || echo NOPE) || echo NONC`],
+      8000
+    );
+    if (/REACHABLE/.test(out)) return 'reachable';
+    if (/NOPE/.test(out)) return 'unreachable';
+    return 'unknown';
+  } catch { return 'unknown'; }
+}
+
 // เชื่อม: method=proxy → ตั้ง global http_proxy | method=postern → เปิดแอป Proxy Postern พร้อม auto-fill+connect
 app.post('/api/devices/connect', express.json(), async (req, res) => {
   const { serial, mode = 'usb', method = 'proxy' } = req.body || {};
   if (!serial) return res.status(400).json({ ok: false, error: 'ต้องระบุ serial' });
   const S = ['-s', serial];
   try {
+    // Guard โหมด Wi-Fi: มือถือต้องอยู่วง LAN เดียวกับ Mac ไม่งั้นตั้ง proxy ไปก็ยิงไม่ถึง (เงียบๆ)
+    // เช็คก่อนแตะ state ของเครื่อง — ถ้ายิงไม่ถึงคืน warning ทันที ไม่ตั้ง proxy ทิ้งค้าง
+    if (mode === 'wifi') {
+      const lan = getLanIp();
+      if (!lan) return res.status(409).json({ ok: false, unreachable: true,
+        error: 'หา LAN IP ของ Mac ไม่เจอ — ต่อ Wi-Fi/LAN ที่ Mac ก่อน' });
+      const reach = await wifiReachable(S, lan);
+      if (reach === 'unreachable') {
+        return res.status(409).json({ ok: false, unreachable: true, host: lan,
+          error: `มือถือยิงหา Mac (${lan}:${MITM_PORT}) ไม่ถึง — โหมด Wi-Fi ต้องให้มือถืออยู่ Wi-Fi วงเดียวกับ Mac\n`
+            + '(ตอนนี้มือถือน่าจะอยู่บน 4G หรือคนละวง Wi-Fi) · ถ้าเสียบสาย USB อยู่ ให้ใช้โหมด USB แทน' });
+      }
+      // reach === 'unknown' → ตรวจไม่ได้ (nc ไม่มี) ปล่อยผ่านแบบ best-effort
+    }
     if (method === 'postern') {
       // เลือก host: usb=127.0.0.1(+reverse) / wifi=IP Mac
       const phost = (await resolveTarget(S, mode)).host; // usb จะตั้ง adb reverse ให้ด้วย

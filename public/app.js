@@ -1782,6 +1782,8 @@ async function stConnectDevice(serial, mode) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ serial, mode }),
   })).json();
+  // Guard โหมด Wi-Fi: มือถือไม่ได้อยู่วงเดียวกับ Mac → เตือนชัดๆ ไม่ตั้ง proxy ค้าง
+  if (r.unreachable) { alert('⚠️ เชื่อม Wi-Fi ไม่ได้\n\n' + r.error); return; }
   if (!r.ok) throw new Error(r.error || 'connect ไม่สำเร็จ');
 }
 
