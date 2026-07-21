@@ -330,7 +330,7 @@ app.put('/api/testcases/:id', express.json({ limit: '10mb' }), (req, res) => {
   if (idx < 0) return res.status(404).json({ ok: false, error: 'ไม่พบ test case' });
   testCases[idx] = normalizeCase({ ...req.body, id: req.params.id });
   saveTestCases();
-  if (activeCaseId === req.params.id) caseCursors = {}; // แก้แล้ว → เริ่มนับใหม่
+  // ไม่ reset cursor ตอนบันทึก — คง current step เดิมไว้ (resolve/next clamp ให้อยู่ในช่วงอยู่แล้ว)
   res.json({ ok: true, case: caseWithState(testCases[idx]) });
 });
 
