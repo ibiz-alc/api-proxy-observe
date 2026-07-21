@@ -19,6 +19,7 @@ RULES_URL = APITESTER + "/api/maplocal"
 TC_PATTERNS_URL = APITESTER + "/api/testcase/patterns"
 TC_RESOLVE_URL = APITESTER + "/api/testcase/resolve"
 MAX_BODY = 200 * 1024
+MAX_MULTIPART = 20 * 1024 * 1024  # ส่ง raw body ของ multipart สูงสุด 20MB (ไว้ preview parts/รูป + repeat ยิงซ้ำแบบ byte-exact)
 MAX_IMAGE = 12 * 1024 * 1024   # ส่ง image สูงสุด 12MB (ไว้โชว์รูป + EXIF) — รูปจากมือถือมักหลายMB
 MAX_VIDEO = 25 * 1024 * 1024   # ส่ง video สูงสุด 25MB (ไว้ preview) — ใหญ่กว่านี้แค่ติด tag
 MAX_PDF = 25 * 1024 * 1024     # ส่ง pdf สูงสุด 25MB (ไว้ preview)
@@ -344,6 +345,11 @@ def response(flow: http.HTTPFlow):
         "durationMs": int((res.timestamp_end - req.timestamp_start) * 1000)
         if res.timestamp_end and req.timestamp_start else None,
     }
+    # raw body ของ multipart — ส่ง base64 ไว้ให้ server แกะ parts/preview รูป + ยิงซ้ำ (repeat) แบบ byte-exact
+    # (multipart มี binary ของไฟล์ ถ้าเก็บเป็น string จะพัง → "Multipart: Unexpected end of form")
+    req_ct = (req.headers.get("content-type", "") or "").lower()
+    if "multipart/form-data" in req_ct and req.content and len(req.content) <= MAX_MULTIPART:
+        payload["reqBodyB64"] = base64.b64encode(req.content).decode("ascii")
     rq_b64, rq_mime, rq_kind, rq_big = _media(req.content, req.headers, req.pretty_url)
     rs_b64, rs_mime, rs_kind, rs_big = _media(res.content, res.headers, req.pretty_url)
     payload["reqMediaB64"] = rq_b64

@@ -652,11 +652,46 @@ function flowBaseUrl(f) { return `${f.scheme || 'https'}://${f.host || ''}`; }
 function savePins() { try { localStorage.setItem(PINS_KEY, JSON.stringify(pinnedBaseUrls)); } catch { /* ignore */ } }
 function togglePin(base) {
   const i = pinnedBaseUrls.indexOf(base);
-  if (i >= 0) { pinnedBaseUrls.splice(i, 1); if (selPin === base) selPin = ''; }
+  if (i >= 0) { pinnedBaseUrls.splice(i, 1); if (selPin === base) selPin = ''; delete pinColors[base]; savePinColors(); }
   else pinnedBaseUrls.push(base);
   savePins();
   renderProxy();
 }
+// สี tag ของ pin (rainbow 7 สี) — เก็บต่อ base URL แยกใน localStorage (ไม่แตะ format pinnedBaseUrls เดิม), default = yellow
+const PIN_COLORS_KEY = 'apitester_pin_colors';
+const PIN_PALETTE = [
+  { key: 'red', hex: '#ef4444' }, { key: 'orange', hex: '#f97316' }, { key: 'yellow', hex: '#eab308' },
+  { key: 'green', hex: '#22c55e' }, { key: 'blue', hex: '#3b82f6' }, { key: 'indigo', hex: '#6366f1' }, { key: 'violet', hex: '#a855f7' },
+];
+let pinColors = (() => { try { return JSON.parse(localStorage.getItem(PIN_COLORS_KEY)) || {}; } catch { return {}; } })();
+function savePinColors() { try { localStorage.setItem(PIN_COLORS_KEY, JSON.stringify(pinColors)); } catch { /* ignore */ } }
+function pinColorKey(base) { return pinColors[base] || 'yellow'; } // default เหลือง
+function pinColorHex(base) { const c = PIN_PALETTE.find((x) => x.key === pinColorKey(base)); return c ? c.hex : '#eab308'; }
+function setPinColor(base, key) { pinColors[base] = key; savePinColors(); renderProxy(); }
+// เมนูเลือกสี tag (คลิกขวาที่ pin) — จานสี 7 สี rainbow
+let _pinColorMenu = null;
+function closePinColorMenu() { if (_pinColorMenu) { _pinColorMenu.remove(); _pinColorMenu = null; } }
+function showPinColorMenu(ev, base) {
+  closePinColorMenu();
+  const row = el('div', { class: 'pin-color-row' });
+  for (const c of PIN_PALETTE) {
+    const dot = el('span', { class: 'pin-swatch' + (pinColorKey(base) === c.key ? ' sel' : ''), title: c.key });
+    dot.style.background = c.hex;
+    dot.addEventListener('click', (e) => { e.stopPropagation(); setPinColor(base, c.key); closePinColorMenu(); });
+    row.appendChild(dot);
+  }
+  const menu = el('div', { class: 'pin-color-menu' }, [el('div', { class: 'pin-color-menu-title', text: 'สี tag' }), row]);
+  document.body.appendChild(menu);
+  const mw = menu.offsetWidth, mh = menu.offsetHeight;
+  let x = ev.clientX, y = ev.clientY;
+  if (x + mw > window.innerWidth) x = window.innerWidth - mw - 8;
+  if (y + mh > window.innerHeight) y = window.innerHeight - mh - 8;
+  menu.style.left = Math.max(4, x) + 'px';
+  menu.style.top = Math.max(4, y) + 'px';
+  _pinColorMenu = menu;
+}
+document.addEventListener('click', closePinColorMenu);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePinColorMenu(); });
 // sub-tabs ของ detail
 let reqTab = 'Header';
 let resTab = 'Body';
@@ -808,16 +843,18 @@ function renderDeviceTree() {
       const removeBtn = el('span', { class: 'pin-remove', title: 'ลบ pin', text: '✕' });
       removeBtn.addEventListener('click', (ev) => { ev.stopPropagation(); togglePin(base); });
       const label = base.replace(/^https?:\/\//, '');
-      const pinItem = el('div', { class: 'tree-item tree-pin' + (selPin === base ? ' active' : '') }, [
-        el('span', { class: 'tree-label', title: base, text: label }),
+      const pinItem = el('div', { class: 'tree-item tree-pin' + (selPin === base ? ' active' : ''), title: base + '\n(คลิกขวาเพื่อเปลี่ยนสี tag)' }, [
+        el('span', { class: 'tree-label', text: label }),
         el('span', { class: 'tree-count', text: String(count) }),
         removeBtn,
       ]);
+      pinItem.style.borderLeftColor = pinColorHex(base); // แถบสี tag ตามที่เลือก (default เหลือง)
       pinItem.addEventListener('click', () => {
         selPin = selPin === base ? '' : base;
         selDevice = ''; selHost = '';
         renderProxy();
       });
+      pinItem.addEventListener('contextmenu', (ev) => { ev.preventDefault(); ev.stopPropagation(); showPinColorMenu(ev, base); }); // คลิกขวา → เลือกสี
       deviceTreeBody.appendChild(pinItem);
     }
     deviceTreeBody.appendChild(el('div', { class: 'tree-section', text: 'Devices' }));
@@ -905,6 +942,8 @@ function renderFlowTable() {
     const item = el('div', { class: 'flow-item' + (f.id === selectedFlowId ? ' selected' : '') + (f.mapped ? ' mapped' : '') + (f.blocked ? ' blocked' : '') }, [
       el('div', { class: 'flow-item-row' }, row),
     ]);
+    // tag สี: flow ที่อยู่ใน base URL ที่ถูก pin → ติดแถบสีตามที่เลือกไว้กับ pin นั้น
+    if (pinnedBaseUrls.includes(flowBaseUrl(f))) { item.classList.add('flow-pinned'); item.style.borderLeftColor = pinColorHex(flowBaseUrl(f)); }
     item.addEventListener('click', () => {
       selectedFlowId = f.id;
       renderFlowTable();
@@ -1163,8 +1202,11 @@ async function replayFlow(f, override) {
     method: (override && override.method) || f.method,
     url: (override && override.url) || f.url,
     headers: (override && override.headers) || f.reqHeaders || {},
-    body: override ? override.body : f.reqBody,
   };
+  // multipart → ส่ง raw body เดิมแบบ byte-exact ผ่าน fromFlowId (ไม่งั้น "Multipart: Unexpected end of form")
+  // ยกเว้นกรณี override.body ถูกแก้มาจริง (edit เป็น text)
+  if (f.reqMultipart && !(override && override.body != null)) payload.fromFlowId = f.id;
+  else payload.body = override ? override.body : f.reqBody;
   try {
     const r = await (await fetch('/api/proxy/replay', {
       method: 'POST',
@@ -1193,32 +1235,48 @@ function openRepeatEdit(f) {
   urlInput.value = f.url || '';
   const headersTa = el('textarea', { class: 'repeat-field repeat-ta', spellcheck: 'false' });
   headersTa.value = headersToRaw(f.reqHeaders || {});
+  const isMultipart = !!f.reqMultipart; // multipart → body เป็น binary ส่งของเดิมแบบ byte-exact (แก้ไม่ได้)
   const bodyTa = el('textarea', { class: 'repeat-field repeat-ta', spellcheck: 'false' });
-  // pretty-print body ถ้าเป็น JSON (prettyBody parse+reformat ให้; ถ้าไม่ใช่ JSON คืน text เดิม)
-  bodyTa.value = f.reqBody != null ? (prettyBody(f.reqBody) || '') : '';
+  if (isMultipart) {
+    bodyTa.value = '(multipart/form-data — ส่ง body เดิมแบบ byte-exact ผ่าน server, แก้ที่นี่ไม่ได้)\n\nดู/preview แต่ละ part ได้ที่แท็บ 📎 Form Data ในหน้ารายละเอียด';
+    bodyTa.readOnly = true; bodyTa.classList.add('repeat-ta-ro');
+  } else {
+    // pretty-print body ถ้าเป็น JSON (prettyBody parse+reformat ให้; ถ้าไม่ใช่ JSON คืน text เดิม)
+    bodyTa.value = f.reqBody != null ? (prettyBody(f.reqBody) || '') : '';
+  }
+  // จำนวนครั้ง (ยิงพร้อมกันแบบ load test) + สรุปผล
+  const timesInput = el('input', { class: 'repeat-times-input', type: 'number', min: '1', max: '500', value: '1', title: 'ยิงกี่ครั้งพร้อมกัน (load test) — >1 จะสรุปผลรวมแทนการเพิ่มทีละ flow' });
+  const resultBox = el('div', { class: 'repeat-result' });
 
   const execBtn = el('button', { class: 'repeat-exec', type: 'button', text: '▶️ Execute' });
   const cancelBtn = el('button', { class: 'repeat-cancel', type: 'button', text: 'Cancel' });
   const box = el('div', { class: 'repeat-modal' }, [
     el('div', { class: 'repeat-title', text: '✏️ Repeat & Edit' }),
-    el('div', { class: 'repeat-topbar' }, [
-      el('div', { class: 'repeat-col repeat-method-col' }, [
-        el('label', { class: 'repeat-label', text: 'Method' }), methodSel,
+    // เนื้อหากลาง scroll ในกล่อง (title ค้างบน, actions ค้างล่าง)
+    el('div', { class: 'repeat-scroll' }, [
+      el('div', { class: 'repeat-topbar' }, [
+        el('div', { class: 'repeat-col repeat-method-col' }, [
+          el('label', { class: 'repeat-label', text: 'Method' }), methodSel,
+        ]),
+        el('div', { class: 'repeat-col repeat-url-col' }, [
+          el('label', { class: 'repeat-label', text: 'URL' }), urlInput,
+        ]),
       ]),
-      el('div', { class: 'repeat-col repeat-url-col' }, [
-        el('label', { class: 'repeat-label', text: 'URL' }), urlInput,
+      el('div', { class: 'repeat-grid' }, [
+        el('div', { class: 'repeat-col repeat-col-left' }, [
+          el('label', { class: 'repeat-label', text: 'Headers (บรรทัดละ Key: Value)' }), headersTa,
+        ]),
+        el('div', { class: 'repeat-gutter', title: 'ลากเพื่อปรับความกว้าง Header : Body' }),
+        el('div', { class: 'repeat-col repeat-col-right' }, [
+          el('label', { class: 'repeat-label', text: isMultipart ? 'Body (multipart — read-only)' : 'Body (JSON)' }), bodyTa,
+        ]),
       ]),
+      resultBox,
     ]),
-    el('div', { class: 'repeat-grid' }, [
-      el('div', { class: 'repeat-col repeat-col-left' }, [
-        el('label', { class: 'repeat-label', text: 'Headers (บรรทัดละ Key: Value)' }), headersTa,
-      ]),
-      el('div', { class: 'repeat-gutter', title: 'ลากเพื่อปรับความกว้าง Header : Body' }),
-      el('div', { class: 'repeat-col repeat-col-right' }, [
-        el('label', { class: 'repeat-label', text: 'Body (JSON)' }), bodyTa,
-      ]),
+    el('div', { class: 'repeat-actions' }, [
+      el('div', { class: 'repeat-times' }, [el('label', { class: 'repeat-times-label', text: '× ครั้ง (พร้อมกัน)' }), timesInput]),
+      el('div', { class: 'repeat-actions-btns' }, [cancelBtn, execBtn]),
     ]),
-    el('div', { class: 'repeat-actions' }, [cancelBtn, execBtn]),
   ]);
   const overlay = el('div', { class: 'repeat-overlay' }, [box]);
   const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
@@ -1226,15 +1284,56 @@ function openRepeatEdit(f) {
   cancelBtn.addEventListener('click', close);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   document.addEventListener('keydown', onKey);
-  execBtn.addEventListener('click', () => {
-    const override = {
+  execBtn.addEventListener('click', async () => {
+    const times = Math.max(1, Math.min(500, parseInt(timesInput.value, 10) || 1));
+    const base = {
       method: methodSel.value,
       url: urlInput.value.trim(),
       headers: parseRawHeaders(headersTa.value),
-      body: bodyTa.value === '' ? null : bodyTa.value,
     };
-    close();
-    replayFlow(f, override);
+    if (isMultipart) base.fromFlowId = f.id; // ส่ง raw body เดิม (byte-exact) จากที่ server เก็บไว้
+    else base.body = bodyTa.value === '' ? null : bodyTa.value;
+
+    // ยิงครั้งเดียว → ปิด modal เปิด flow detail เหมือนเดิม
+    if (times === 1) {
+      execBtn.disabled = true; execBtn.textContent = '⏳ กำลังยิง…';
+      try {
+        const r = await (await fetch('/api/proxy/replay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(base) })).json();
+        if (!r.ok) throw new Error(r.error || 'ยิงไม่สำเร็จ');
+        close();
+        selectedFlowId = r.flow.id; renderFlowTable(); renderFlowDetail(r.flow);
+      } catch (e) {
+        resultBox.innerHTML = ''; resultBox.appendChild(el('div', { class: 'repeat-result-err', text: '❌ ' + e.message }));
+        execBtn.disabled = false; execBtn.textContent = '▶️ Execute';
+      }
+      return;
+    }
+
+    // load test: ยิงทีละครั้ง (พร้อมกัน) แต่ละครั้งเข้า /api/proxy/replay → โผล่ใน traffic log ผ่าน SSE + โชว์ผลรายครั้ง
+    resultBox.innerHTML = '';
+    const progress = el('div', { class: 'rr-progress', text: `เสร็จ 0/${times}` });
+    const logBox = el('div', { class: 'rr-log' });
+    resultBox.append(progress, logBox);
+    let done = 0, ok = 0, fail = 0;
+    execBtn.disabled = true;
+    const runOne = () => fetch('/api/proxy/replay', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(base) })
+      .then((r) => r.json())
+      .then((r) => (r.flow || { error: r.error || 'ยิงไม่สำเร็จ' }))
+      .catch((e) => ({ error: e.message }))
+      .then((fl) => {
+        done++;
+        const good = fl && !fl.error && fl.status >= 200 && fl.status < 400;
+        const ms = fl && fl.durationMs != null ? ` · ${fl.durationMs}ms` : '';
+        let line;
+        if (good) { ok++; line = `✅ สำเร็จ ${ok}/${times} · ${fl.status}${ms}`; }
+        else { fail++; line = `❌ ล้มเหลว ${fail}/${times} · ${fl && fl.error ? fl.error : (fl && fl.status) || 'ERR'}${ms}`; }
+        logBox.appendChild(el('div', { class: 'rr-line ' + (good ? 'ok' : 'bad'), text: line }));
+        logBox.scrollTop = logBox.scrollHeight;
+        progress.textContent = `เสร็จ ${done}/${times}  ·  ✅ ${ok}  ·  ❌ ${fail}`;
+      });
+    await Promise.all(Array.from({ length: times }, runOne));
+    progress.textContent = `เสร็จทั้งหมด ${times} ครั้ง  ·  ✅ ${ok}  ·  ❌ ${fail}`;
+    execBtn.disabled = false; execBtn.textContent = '▶️ Execute';
   });
   document.body.appendChild(overlay);
   urlInput.focus();
@@ -1267,6 +1366,7 @@ function openRepeatEdit(f) {
 function headersToRaw(headers) {
   return Object.entries(headers || {}).map(([k, v]) => `${k}: ${v}`).join('\n');
 }
+
 
 // ---- Copy as ... helpers ----
 // escape สำหรับ single-quote ใน shell (curl)
@@ -1414,6 +1514,91 @@ function videoTab(f, side) {
   return wrap;
 }
 
+// แท็บ Form Data: แกะ multipart/form-data → โชว์แต่ละ part (field value / ไฟล์ + preview รูป)
+function multipartTab(f) {
+  const wrap = el('div', { class: 'mp-tab' });
+  const parts = (f.reqMultipart && f.reqMultipart.parts) || [];
+  if (!parts.length) { wrap.appendChild(el('p', { class: 'hint', text: 'ไม่มี parts (อาจใหญ่เกิน หรือแกะไม่ได้)' })); return wrap; }
+  parts.forEach((p, i) => {
+    const row = el('div', { class: 'mp-part' });
+    const head = el('div', { class: 'mp-part-head' }, [
+      el('span', { class: 'mp-part-kind ' + p.kind, text: p.kind === 'file' ? '📎 FILE' : '📝 FIELD' }),
+      el('span', { class: 'mp-part-name', text: p.name || '(no name)' }),
+      el('span', { class: 'mp-part-meta', text: p.kind === 'file'
+        ? `${p.filename || '(no filename)'} · ${p.contentType || ''} · ${fmtSize(p.size)}`
+        : fmtSize(p.size) }),
+    ]);
+    row.appendChild(head);
+    if (p.kind === 'field') {
+      row.appendChild(el('pre', { class: 'mp-part-value', text: p.value != null ? p.value : '' }));
+    } else if (!p.stored) {
+      row.appendChild(el('p', { class: 'hint', text: '(ไฟล์ใหญ่เกิน 25MB — ไม่ได้เก็บไว้ดู)' }));
+    } else {
+      const url = `/api/proxy/flows/${f.id}/image?part=${i}`; // เปิดดู inline (ตาม content-type)
+      const dlUrl = url + `&dl=${encodeURIComponent(p.filename || `part${i}`)}`; // บังคับดาวน์โหลด + ชื่อไฟล์
+      if (p.isImage) {
+        const img = el('img', { class: 'mp-part-img', src: url, alt: p.filename || 'image', title: 'คลิกเพื่อเปิดรูปเต็ม' });
+        img.addEventListener('click', () => window.open(url, '_blank'));
+        row.appendChild(img);
+      } else if (p.isPdf) {
+        row.appendChild(el('iframe', { class: 'mp-part-pdf', src: url, title: p.filename || 'pdf' }));
+      }
+      const acts = el('div', { class: 'mp-part-acts' }, [
+        el('a', { class: 'img-tab-dl', href: url, target: '_blank', text: '🔍 เปิดดู' }),
+        el('a', { class: 'img-tab-dl', href: dlUrl, download: p.filename || `part${i}`, text: '⬇ ดาวน์โหลด' }),
+      ]);
+      if (p.isImage) { // ปุ่มดู EXIF metadata (popup) — หลังปุ่มดาวน์โหลด
+        const metaBtn = el('button', { class: 'img-tab-dl mp-meta-btn', type: 'button', text: 'ℹ️ Metadata' });
+        metaBtn.addEventListener('click', () => showImagePartMeta(f, i, p.filename));
+        acts.appendChild(metaBtn);
+      }
+      row.appendChild(acts);
+    }
+    wrap.appendChild(row);
+  });
+  return wrap;
+}
+
+// popup EXIF metadata ของรูปใน multipart request — ดึงแบบ on-demand ตอนกดปุ่ม ℹ️ Metadata
+async function showImagePartMeta(f, partIdx, filename) {
+  const box = el('div', { class: 'repeat-modal meta-popup' });
+  box.appendChild(el('div', { class: 'repeat-title', text: `🖼️ Image Metadata — ${filename || 'image'}` }));
+  const bodyWrap = el('div', { class: 'meta-popup-body' }, [el('p', { class: 'hint', text: '⏳ กำลังอ่าน metadata…' })]);
+  box.appendChild(bodyWrap);
+  const closeBtn = el('button', { class: 'repeat-cancel', type: 'button', text: 'ปิด' });
+  box.appendChild(el('div', { class: 'meta-popup-actions' }, [closeBtn]));
+  const overlay = el('div', { class: 'repeat-overlay' }, [box]);
+  const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  closeBtn.addEventListener('click', close);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(overlay);
+
+  let data;
+  try { data = await (await fetch(`/api/proxy/flows/${f.id}/partmeta?part=${partIdx}`)).json(); }
+  catch (e) { data = { meta: null, error: e.message }; }
+  const m = data && data.meta;
+  bodyWrap.innerHTML = '';
+  if (!m) {
+    bodyWrap.appendChild(el('p', { class: 'hint', text: 'รูปนี้ไม่มี EXIF metadata ฝังอยู่' + (data && data.error ? ` (${data.error})` : '') }));
+    return;
+  }
+  const hi = el('div', { class: 'meta-highlight' });
+  if (m.imageDescription) hi.appendChild(metaCard('📝 คำอธิบายภาพ', String(m.imageDescription)));
+  hi.appendChild(metaCard('📅 วันที่ถ่าย', m.dateTaken ? fmtDate(m.dateTaken) : 'ไม่พบ'));
+  if (m.camera) hi.appendChild(metaCard('📷 กล้อง', m.camera));
+  if (m.width && m.height) hi.appendChild(metaCard('📐 ขนาดภาพ', `${m.width} × ${m.height}`));
+  if (m.latitude != null && m.longitude != null) {
+    const lat = m.latitude.toFixed(6); const lon = m.longitude.toFixed(6);
+    hi.appendChild(metaCard('📍 พิกัด GPS', el('div', { html: `${lat}, ${lon}<br/><a href="https://www.google.com/maps?q=${lat},${lon}" target="_blank">🗺️ เปิด Google Maps</a>` })));
+    if (m.address) hi.appendChild(metaCard('🏠 ที่อยู่', m.address));
+  } else {
+    hi.appendChild(metaCard('📍 พิกัด GPS', 'ไม่พบพิกัดในรูปนี้'));
+  }
+  bodyWrap.appendChild(hi);
+}
+
 // แท็บ PDF: embed preview + ลิงก์เปิดเต็ม
 function pdfTab(f, side) {
   const wrap = el('div', { class: 'img-tab' });
@@ -1437,6 +1622,7 @@ function renderFlowDetail(f) {
     Body: bodyBlock(f.reqBody),
     Raw: el('pre', { class: 'code-block', text: reqRawText }),
   };
+  if (f.reqMultipart) reqTabs['Form Data'] = multipartTab(f); // multipart → แกะ parts + preview รูป
   if (f.reqIsImage) reqTabs['🖼️ Image'] = imageTab(f, 'req');
   if (f.reqIsVideo) reqTabs['🎬 Video'] = videoTab(f, 'req');
   if (f.reqIsPdf) reqTabs['📄 PDF'] = pdfTab(f, 'req');

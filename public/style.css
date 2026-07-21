@@ -1315,12 +1315,14 @@ a.st-action { text-decoration: none; display: inline-block; }
   padding: 24px;
 }
 .repeat-modal {
-  width: min(1100px, 100%); max-height: 92vh; overflow: auto;
+  width: min(1100px, 100%); max-height: 92vh; overflow: hidden;
   background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
   padding: 24px; box-shadow: 0 12px 40px rgba(0,0,0,0.6);
   display: flex; flex-direction: column; gap: 10px;
 }
-.repeat-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 4px; }
+/* เนื้อหากลาง scroll ในกล่อง — title ค้างบน, actions ค้างล่างเสมอ (ไม่โดนเนื้อหาดัน) */
+.repeat-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+.repeat-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 4px; flex-shrink: 0; }
 .repeat-label { font-size: 0.78rem; color: var(--muted); margin-bottom: 4px; }
 .repeat-col { display: flex; flex-direction: column; }
 /* แถวบน: Method (แคบ) + URL (ยืดเต็ม) อยู่ที่เดิมด้านบน */
@@ -1382,3 +1384,68 @@ a.st-action { text-decoration: none; display: inline-block; }
 .st-ca-links { font-size: 12.5px; color: var(--muted); margin: 2px 0 6px; word-break: break-all; }
 .st-ca-link { color: var(--accent); text-decoration: none; }
 .st-ca-link:hover { text-decoration: underline; }
+
+/* ============ Multipart (Form Data) tab ============ */
+.mp-tab { display: flex; flex-direction: column; gap: 10px; padding: 4px 2px; }
+.mp-part { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: var(--panel); }
+.mp-part-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; }
+.mp-part-kind { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 10px; white-space: nowrap; }
+.mp-part-kind.file { background: rgba(250, 204, 21, 0.15); color: var(--yellow); }
+.mp-part-kind.field { background: rgba(56, 189, 248, 0.15); color: var(--accent); }
+.mp-part-name { font-weight: 700; color: var(--text); }
+.mp-part-meta { color: var(--muted); font-family: monospace; word-break: break-all; }
+.mp-part-value { margin: 6px 0 0; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all; max-height: 220px; overflow: auto; }
+.mp-part-img { display: block; margin: 8px 0 4px; max-width: 100%; max-height: 320px; border-radius: 6px; border: 1px solid var(--border); background: #0008; cursor: zoom-in; }
+
+/* ============ Repeat & Edit — times (load test) + result ============ */
+.repeat-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-shrink: 0; margin-top: 0; }
+.repeat-actions-btns { display: flex; gap: 10px; }
+.repeat-times { display: flex; align-items: center; gap: 8px; }
+.repeat-times-label { font-size: 13px; color: var(--muted); white-space: nowrap; }
+.repeat-times-input { width: 76px; padding: 7px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 14px; }
+.repeat-ta-ro { opacity: 0.75; font-style: italic; }
+.repeat-result:empty { display: none; }
+.repeat-result { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin: 4px 0 2px; display: flex; flex-direction: column; gap: 6px; }
+.rr-head { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.rr-stat { font-size: 13px; font-weight: 700; color: var(--text); }
+.rr-stat.ok { color: var(--green); }
+.rr-stat.bad { color: var(--red); }
+.rr-stat.muted { color: var(--muted); }
+.rr-timing { font-size: 12px; color: var(--muted); font-family: ui-monospace, Menlo, monospace; }
+.rr-codes { display: flex; flex-wrap: wrap; gap: 6px; }
+.rr-code { font-size: 11.5px; font-weight: 700; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border); font-family: ui-monospace, Menlo, monospace; }
+.rr-code.status-ok { color: var(--green); border-color: rgba(74,222,128,0.4); }
+.rr-code.status-err { color: var(--red); border-color: rgba(248,113,113,0.4); }
+.repeat-result-err { color: var(--red); font-size: 13px; font-weight: 600; }
+
+/* multipart file part — pdf embed + actions */
+.mp-part-pdf { display: block; width: 100%; height: 360px; margin: 8px 0 4px; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+.mp-part-acts { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
+
+/* Repeat & Edit — live per-request progress (load test) */
+.rr-progress { font-weight: 700; font-size: 13px; color: var(--text); }
+.rr-log { display: flex; flex-direction: column; gap: 3px; max-height: 180px; overflow-y: auto; font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; }
+.rr-line { padding: 2px 6px; border-radius: 5px; }
+.rr-line.ok { color: var(--green); }
+.rr-line.bad { color: var(--red); background: rgba(248,113,113,0.06); }
+
+/* Image metadata popup (multipart file part) */
+.meta-popup { max-width: 520px; width: 92%; }
+.meta-popup-body { max-height: 60vh; overflow-y: auto; }
+.meta-popup-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
+
+/* ปุ่ม Metadata (button) ให้หน้าตาเป็นลิงก์ข้อความเหมือน 🔍 เปิดดู / ⬇ ดาวน์โหลด */
+button.mp-meta-btn { background: none; border: none; padding: 0; cursor: pointer; text-decoration: underline; vertical-align: baseline; }
+button.mp-meta-btn:hover { color: var(--text); }
+
+/* Pin tag color — right-click menu (7 rainbow) + flow-row tag */
+.pin-color-menu {
+  position: fixed; z-index: 10000; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 10px; box-shadow: 0 8px 28px rgba(0,0,0,0.55);
+}
+.pin-color-menu-title { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+.pin-color-row { display: flex; gap: 7px; align-items: center; }
+.pin-swatch { width: 18px; height: 18px; border-radius: 50%; cursor: pointer; border: 1px solid rgba(255,255,255,0.35); box-sizing: border-box; }
+.pin-swatch:hover { transform: scale(1.2); }
+.pin-swatch.sel { outline: 2px solid var(--text); outline-offset: 1px; }
+.flow-item.flow-pinned { border-left: 3px solid var(--yellow); } /* สีจริงตั้ง inline ตาม pin ที่เลือก */

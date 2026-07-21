@@ -1,5 +1,7 @@
 const express = require('express');
 const multer = require('multer');
+const busboy = require('busboy');
+const { Readable } = require('stream');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -36,7 +38,63 @@ function broadcast(event, data) {
 
 // เก็บ flow ที่ proxy ดักได้ (แยกจาก hook requests)
 const proxyStore = { flows: [] };
-const proxyImages = new Map(); // "<flowId>:<req|res>" -> { buf, ct }
+const proxyImages = new Map(); // "<flowId>:<req|res>" หรือ "<flowId>:reqpart<idx>" -> { buf, ct }
+const proxyRawReqBodies = new Map(); // "<flowId>" -> { buf, ct } — raw body ของ multipart ไว้ยิงซ้ำ (repeat) แบบ byte-exact
+
+const MAX_PART = 25 * 1024 * 1024; // เก็บ bytes ของ file part สูงสุด/อัน 25MB (ไว้ดู/ดาวน์โหลด/preview)
+
+// เดา mime จาก magic bytes — เผื่อ client ส่ง content-type เป็น octet-stream แต่จริงเป็นรูป/pdf
+function sniffMime(b) {
+  if (!b || b.length < 4) return null;
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'image/png';
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
+  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) return 'image/gif';
+  if (b.length >= 12 && b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+  if (b.length >= 12 && b.toString('ascii', 4, 8) === 'ftyp' && ['heic', 'heix', 'mif1', 'hevc', 'msf1'].includes(b.toString('ascii', 8, 12))) return 'image/heic';
+  if (b.toString('ascii', 0, 5) === '%PDF-') return 'application/pdf';
+  return null;
+}
+
+// แกะ multipart/form-data จาก Buffer ด้วย busboy → parts (field/file) + bytes ของทุก file (ไว้ดู/ดาวน์โหลด/preview)
+function parseMultipart(buf, contentType) {
+  return new Promise((resolve) => {
+    const parts = [];
+    const fileBufs = []; // { idx, buf, ct }
+    let bb;
+    try { bb = busboy({ headers: { 'content-type': contentType }, limits: { files: 50, fields: 200 } }); }
+    catch { return resolve({ parts: [], fileBufs: [] }); }
+    bb.on('file', (name, stream, info) => {
+      // จอง slot ทันที (busboy ยิง 'file' หลายอันก่อน stream จะ end → parts.length ตอน end ไม่เสถียร/ชนกัน)
+      const idx = parts.length;
+      const part = { kind: 'file', name, filename: info.filename || null, contentType: info.mimeType || 'application/octet-stream', size: 0, isImage: false, isPdf: false, stored: false };
+      parts.push(part);
+      const chunks = [];
+      stream.on('data', (d) => chunks.push(d));
+      stream.on('limit', () => {}); // เกิน limit ก็ตัด — ไม่ throw
+      stream.on('end', () => {
+        const fbuf = Buffer.concat(chunks);
+        const declared = info.mimeType || 'application/octet-stream';
+        const fn = info.filename || '';
+        const sniffed = sniffMime(fbuf);
+        // ถ้า declared เป็น octet-stream แต่ magic bytes บอกชนิดจริง → ใช้ชนิดจริง (จะได้ preview/เปิดดูได้)
+        const ct = (declared === 'application/octet-stream' && sniffed) ? sniffed : declared;
+        part.contentType = ct;
+        part.size = fbuf.length;
+        part.isImage = /^image\//i.test(ct) || /\.(png|jpe?g|gif|webp|heic|heif|bmp|svg)$/i.test(fn);
+        part.isPdf = ct === 'application/pdf' || /\.pdf$/i.test(fn);
+        part.stored = fbuf.length <= MAX_PART;
+        if (part.stored) fileBufs.push({ idx, buf: fbuf, ct }); // เก็บทุกไฟล์ ไม่ใช่แค่รูป → ดู/ดาวน์โหลดได้ทุกชนิด
+      });
+    });
+    bb.on('field', (name, val) => {
+      const s = String(val);
+      parts.push({ kind: 'field', name, size: Buffer.byteLength(s), value: s.length > 4000 ? s.slice(0, 4000) + '…(ตัด)' : s });
+    });
+    bb.on('close', () => resolve({ parts, fileBufs }));
+    bb.on('error', () => resolve({ parts, fileBufs }));
+    Readable.from(buf).pipe(bb);
+  });
+}
 let proxyCaPath = null;
 // mute แบบหมดอายุเอง: เก็บ "เวลาที่ mute จะหมด" แทน boolean ค้าง
 // - disconnect → mute สั้นๆ กลืน straggler จากแอปที่ยัง cache proxy แล้ว "ปลดเอง" อัตโนมัติ
@@ -692,11 +750,29 @@ app.post('/api/proxy/ingest', express.json({ limit: '40mb' }), async (req, res) 
       }
     } catch { /* ignore bad media */ }
   }
+  // raw body ของ multipart — เก็บไว้ยิงซ้ำ (repeat) + แกะ parts ไว้แสดง/preview รูป
+  if (b.reqBodyB64) {
+    try {
+      const rawBuf = Buffer.from(b.reqBodyB64, 'base64');
+      const ct = flow.reqHeaders['content-type'] || flow.reqHeaders['Content-Type'] || '';
+      proxyRawReqBodies.set(id, { buf: rawBuf, ct });
+      if (ct.toLowerCase().includes('multipart/form-data')) {
+        const { parts, fileBufs } = await parseMultipart(rawBuf, ct);
+        flow.reqMultipart = { parts };
+        for (const fb of fileBufs) proxyImages.set(`${id}:reqpart${fb.idx}`, { buf: fb.buf, ct: fb.ct });
+        // แกะ EXIF ของ "รูปแรก" (ไม่ใช่ไฟล์แรก) — fileBufs ตอนนี้เก็บทุกไฟล์
+        const firstImg = fileBufs.find((fb) => parts[fb.idx] && parts[fb.idx].isImage);
+        if (firstImg) { try { flow.reqImageMeta = await extractImageMetadata(firstImg.buf, { withAddress: true }); } catch { /* ignore */ } }
+      }
+    } catch { /* ignore bad body */ }
+  }
   proxyStore.flows.unshift(flow);
   while (proxyStore.flows.length > 300) {
     const removed = proxyStore.flows.pop();
     proxyImages.delete(`${removed.id}:req`);
     proxyImages.delete(`${removed.id}:res`);
+    proxyRawReqBodies.delete(removed.id);
+    for (const k of proxyImages.keys()) { if (k.startsWith(`${removed.id}:reqpart`)) proxyImages.delete(k); }
   }
   broadcast('proxy', flow);
   res.json({ ok: true, id });
@@ -704,11 +780,29 @@ app.post('/api/proxy/ingest', express.json({ limit: '40mb' }), async (req, res) 
 
 // ส่งรูปที่ดักได้ (req/res) ให้หน้าเว็บโชว์
 app.get('/api/proxy/flows/:id/image', (req, res) => {
-  const side = req.query.side === 'req' ? 'req' : 'res';
-  const img = proxyImages.get(`${req.params.id}:${side}`);
+  // side=req|res (media ปกติ) หรือ part=<idx> (ไฟล์รูปใน multipart request)
+  let key;
+  if (req.query.part != null && /^\d+$/.test(String(req.query.part))) key = `${req.params.id}:reqpart${req.query.part}`;
+  else key = `${req.params.id}:${req.query.side === 'req' ? 'req' : 'res'}`;
+  const img = proxyImages.get(key);
   if (!img) return res.status(404).json({ error: 'no image' });
   res.setHeader('Content-Type', img.ct || 'application/octet-stream');
+  // ?dl=<filename> → บังคับดาวน์โหลด (แนบชื่อไฟล์); ไม่งั้นเปิดดู inline ตาม content-type
+  if (req.query.dl) res.setHeader('Content-Disposition', `attachment; filename="${String(req.query.dl).replace(/[^\w.\-]/g, '_')}"`);
   res.send(img.buf);
+});
+
+// EXIF metadata ของไฟล์รูปใน multipart request (คำนวณตอนกด — ไม่ถ่วง ingest)
+app.get('/api/proxy/flows/:id/partmeta', async (req, res) => {
+  if (!/^\d+$/.test(String(req.query.part))) return res.status(400).json({ error: 'ต้องระบุ part' });
+  const img = proxyImages.get(`${req.params.id}:reqpart${req.query.part}`);
+  if (!img) return res.status(404).json({ error: 'no file' });
+  try {
+    const meta = await extractImageMetadata(img.buf, { withAddress: true });
+    res.json({ ok: true, meta });
+  } catch (e) {
+    res.json({ ok: true, meta: null, error: e.message });
+  }
 });
 
 app.delete('/api/proxy/flows', (req, res) => {
@@ -717,22 +811,22 @@ app.delete('/api/proxy/flows', (req, res) => {
   res.json({ ok: true });
 });
 
-// ยิง request ซ้ำจากฝั่ง server (Repeat / Repeat & Edit) — ตรงไป target ไม่ผ่าน mitmproxy
-// ผลลัพธ์ถูกสร้างเป็น flow ใหม่ (device:'replay') push เข้า store + broadcast ให้โผล่ในลิสต์เหมือน flow ปกติ
-app.post('/api/proxy/replay', express.json({ limit: '40mb' }), async (req, res) => {
-  const { method = 'GET', url, headers = {}, body = null } = req.body || {};
-  if (!url) return res.status(400).json({ ok: false, error: 'ต้องระบุ url' });
-  let u;
-  try { u = new URL(url); } catch { return res.status(400).json({ ok: false, error: 'url ไม่ถูกต้อง' }); }
-
-  // ตัด header ที่ทำให้ยิงพัง — ให้ fetch จัดการเอง (host/len/encoding/connection)
+// ยิง request ซ้ำ 1 ครั้ง — คืน flow object. rawBuf = raw bytes (multipart) ส่งตรงแบบ byte-exact
+// addToStore=false ใช้ตอน load test (times>1) เพื่อไม่ให้ flow ท่วมลิสต์ (คืนแค่สถิติ)
+async function performReplay({ method = 'GET', url, headers = {}, body = null, rawBuf = null, addToStore = true }) {
+  const u = new URL(url);
+  // ตัด header ที่ทำให้ยิงพัง — ให้ fetch จัดการเอง (host/len/encoding/connection). *คง content-type ไว้* (boundary ของ multipart)
   const DROP = new Set(['host', 'content-length', 'accept-encoding', 'connection']);
   const outHeaders = {};
   for (const [k, v] of Object.entries(headers || {})) {
     if (k && !DROP.has(k.toLowerCase())) outHeaders[k] = String(v);
   }
   const m = String(method).toUpperCase();
-  const hasBody = body != null && body !== '' && m !== 'GET' && m !== 'HEAD';
+  const noBodyMethod = (m === 'GET' || m === 'HEAD');
+  const hasRaw = !!rawBuf && rawBuf.length > 0 && !noBodyMethod; // multipart/binary → ส่ง Buffer ตรงๆ
+  const hasText = !hasRaw && body != null && body !== '' && !noBodyMethod;
+  const ct = outHeaders['content-type'] || outHeaders['Content-Type'] || '';
+  const isMultipart = ct.toLowerCase().includes('multipart/form-data');
   const id = crypto.randomUUID();
   const started = Date.now();
   const flow = {
@@ -746,17 +840,33 @@ app.post('/api/proxy/replay', express.json({ limit: '40mb' }), async (req, res) 
     path: u.pathname + u.search,
     url,
     reqHeaders: outHeaders,
-    reqBody: hasBody ? String(body) : null,
-    reqSize: hasBody ? Buffer.byteLength(String(body)) : 0,
+    reqBody: hasRaw ? `(binary ${rawBuf.length} bytes${isMultipart ? ', multipart/form-data' : ''})` : (hasText ? String(body) : null),
+    reqSize: hasRaw ? rawBuf.length : (hasText ? Buffer.byteLength(String(body)) : 0),
     status: null, statusText: '',
     resHeaders: null, resBody: null, resContentType: null, resSize: 0,
     durationMs: null, mapped: false, blocked: false, replay: true,
   };
+  // เก็บ raw + แกะ parts ไว้แสดง/preview รูป (เฉพาะตอนจะเก็บลงลิสต์)
+  if (hasRaw && addToStore) {
+    proxyRawReqBodies.set(id, { buf: rawBuf, ct });
+    if (isMultipart) {
+      const { parts, fileBufs } = await parseMultipart(rawBuf, ct);
+      flow.reqMultipart = { parts };
+      for (const fb of fileBufs) proxyImages.set(`${id}:reqpart${fb.idx}`, { buf: fb.buf, ct: fb.ct });
+    }
+  }
   const finalize = () => {
-    proxyStore.flows.unshift(flow);
-    while (proxyStore.flows.length > 300) proxyStore.flows.pop();
-    broadcast('proxy', flow);
-    res.json({ ok: true, id, flow });
+    if (addToStore) {
+      proxyStore.flows.unshift(flow);
+      while (proxyStore.flows.length > 300) {
+        const removed = proxyStore.flows.pop();
+        proxyImages.delete(`${removed.id}:req`); proxyImages.delete(`${removed.id}:res`);
+        proxyRawReqBodies.delete(removed.id);
+        for (const k of proxyImages.keys()) { if (k.startsWith(`${removed.id}:reqpart`)) proxyImages.delete(k); }
+      }
+      broadcast('proxy', flow);
+    }
+    return flow;
   };
 
   // repeat ให้เคารพ Map Local / Test Case เหมือน proxy จริง (priority: Map Local ก่อน)
@@ -765,7 +875,7 @@ app.post('/api/proxy/replay', express.json({ limit: '40mb' }), async (req, res) 
   if (mlRule) {
     flow.mapped = true;
     flow.mapLocal = { ruleId: mlRule.id, name: mlRule.name, mode: mlRule.mode || 'mock' };
-    if (mlRule.mode !== 'passthrough') { // mock — ตอบ body ที่ตั้งไว้ ไม่ยิงจริง
+    if (mlRule.mode !== 'passthrough') {
       flow.status = Number(mlRule.status) || 200; flow.statusText = 'OK';
       flow.resContentType = mlRule.contentType || 'application/json';
       flow.resHeaders = { 'content-type': flow.resContentType, 'x-api-tester': 'map-local' };
@@ -774,7 +884,7 @@ app.post('/api/proxy/replay', express.json({ limit: '40mb' }), async (req, res) 
       flow.durationMs = Date.now() - started;
       return finalize();
     }
-  } else { // ไม่มี Map Local ชน → ลอง Test Case (peek step ปัจจุบัน ไม่ advance เพื่อไม่รบกวน sequence)
+  } else {
     const tc = activeCase();
     const ep = tc && matchEndpoint(tc, m, url);
     if (ep) {
@@ -783,9 +893,9 @@ app.post('/api/proxy/replay', express.json({ limit: '40mb' }), async (req, res) 
         const cur = Math.min(caseCursors[cursorKey(ep)] || 0, enabledSteps.length - 1);
         const step = enabledSteps[cur];
         flow.testCase = { caseId: tc.id, caseName: tc.name, step: ep.steps.indexOf(step), label: step.label, pattern: ep.urlPattern };
-        if (step.mode === 'passthrough') { // ยิงจริง แล้ว override ด้านล่าง
+        if (step.mode === 'passthrough') {
           tcPassthroughOverrides = step.overrides || [];
-        } else { // mock — ตอบ body ที่ตั้งไว้ ไม่ยิงจริง
+        } else {
           flow.status = Number(step.status) || 200; flow.statusText = 'OK';
           flow.resContentType = step.contentType || 'application/json';
           flow.resHeaders = { 'content-type': flow.resContentType, 'x-api-tester': 'test-case' };
@@ -799,11 +909,10 @@ app.post('/api/proxy/replay', express.json({ limit: '40mb' }), async (req, res) 
   }
 
   try {
-    const r = await fetch(url, { method: m, headers: outHeaders, body: hasBody ? String(body) : undefined });
+    const r = await fetch(url, { method: m, headers: outHeaders, body: hasRaw ? rawBuf : (hasText ? String(body) : undefined) });
     let text = await r.text();
     const resHeaders = {};
     r.headers.forEach((v, k) => { resHeaders[k] = v; });
-    // Map Local / Test Case passthrough → แก้เฉพาะ key ใน response จริง
     if (mlRule && mlRule.mode === 'passthrough' && (mlRule.overrides || []).length) text = applyOverrides(text, mlRule.overrides);
     if (tcPassthroughOverrides && tcPassthroughOverrides.length) text = applyOverrides(text, tcPassthroughOverrides);
     flow.status = r.status;
@@ -817,7 +926,53 @@ app.post('/api/proxy/replay', express.json({ limit: '40mb' }), async (req, res) 
     flow.error = e.message;
     flow.durationMs = Date.now() - started;
   }
-  finalize();
+  return finalize();
+}
+
+// resolve raw multipart body จาก bodyB64 (ส่งมาตรงๆ) หรือ fromFlowId (ใช้ที่ server เก็บไว้)
+function resolveRawBody(b) {
+  if (b.bodyB64) { try { return Buffer.from(b.bodyB64, 'base64'); } catch { return null; } }
+  if (b.fromFlowId && proxyRawReqBodies.has(b.fromFlowId)) return proxyRawReqBodies.get(b.fromFlowId).buf;
+  return null;
+}
+
+// ยิง request ซ้ำจากฝั่ง server (Repeat / Repeat & Edit) — ตรงไป target ไม่ผ่าน mitmproxy
+app.post('/api/proxy/replay', express.json({ limit: '40mb' }), async (req, res) => {
+  const b = req.body || {};
+  if (!b.url) return res.status(400).json({ ok: false, error: 'ต้องระบุ url' });
+  try { new URL(b.url); } catch { return res.status(400).json({ ok: false, error: 'url ไม่ถูกต้อง' }); }
+  const rawBuf = resolveRawBody(b);
+  const flow = await performReplay({ method: b.method, url: b.url, headers: b.headers, body: b.body, rawBuf, addToStore: true });
+  res.json({ ok: true, id: flow.id, flow });
+});
+
+// ยิงซ้ำหลายครั้งพร้อมกัน (load test) — คืนสถิติรวม ไม่เก็บ flow ทีละอันกันลิสต์ท่วม (ยกเว้น times=1)
+app.post('/api/proxy/replay-batch', express.json({ limit: '40mb' }), async (req, res) => {
+  const b = req.body || {};
+  if (!b.url) return res.status(400).json({ ok: false, error: 'ต้องระบุ url' });
+  try { new URL(b.url); } catch { return res.status(400).json({ ok: false, error: 'url ไม่ถูกต้อง' }); }
+  const N = Math.max(1, Math.min(500, Number(b.times) || 1)); // cap 500 กันยิงถล่มตัวเอง
+  const rawBuf = resolveRawBody(b);
+  const started = Date.now();
+  const results = await Promise.all(Array.from({ length: N }, () =>
+    performReplay({ method: b.method, url: b.url, headers: b.headers, body: b.body, rawBuf, addToStore: N === 1 })
+      .catch((e) => ({ error: e.message }))));
+  const totalMs = Date.now() - started;
+  const statuses = {}; let success = 0, failed = 0; const durs = [];
+  for (const f of results) {
+    if (!f || f.error) { failed++; continue; }
+    statuses[f.status] = (statuses[f.status] || 0) + 1;
+    if (f.status >= 200 && f.status < 400) success++; else failed++;
+    if (f.durationMs != null) durs.push(f.durationMs);
+  }
+  durs.sort((a, b2) => a - b2);
+  const pick = (p) => durs.length ? durs[Math.min(durs.length - 1, Math.floor(durs.length * p))] : null;
+  const timing = durs.length ? {
+    min: durs[0], max: durs[durs.length - 1],
+    avg: Math.round(durs.reduce((a, c) => a + c, 0) / durs.length),
+    p50: pick(0.5), p95: pick(0.95),
+  } : null;
+  res.json({ ok: true, times: N, success, failed, statuses, timing, totalMs, flow: N === 1 ? results[0] : null });
 });
 
 // ================= ควบคุมมือถือผ่าน adb (ตั้ง global http_proxy — ไม่ต้องใช้ Postern) =================
