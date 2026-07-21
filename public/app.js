@@ -1759,9 +1759,8 @@ function renderMapEditor(rule) {
   function syncMode() {
     const pt = getMode() === 'passthrough';
     passthroughNote.style.display = pt ? 'block' : 'none';
-    bodyEd.wrap.style.opacity = pt ? '0.5' : '1';
-    bodyEd.textarea.readOnly = pt;                     // Passthrough → ห้ามแก้ Response body
-    bodyEd.wrap.style.pointerEvents = pt ? 'none' : ''; // กันคลิก/พิมพ์
+    bodyEd.textarea.readOnly = pt;                     // Passthrough → แก้ไม่ได้ แต่ยัง scroll/เลือก/ดูได้
+    bodyEd.wrap.classList.toggle('je-readonly', pt);
     fmtBtn.disabled = pt;                               // ปิดปุ่ม Format ด้วย
     overrideEd.setEnabled(pt); // override ใช้ได้เฉพาะ Passthrough (Mock แก้ body ตรงๆ)
   }
@@ -1942,7 +1941,43 @@ function renderTcList() {
     ]);
     item.addEventListener('click', () => { tcSelectedId = c.id; renderTcList(); renderTcEditor(c); });
     tcListEl.appendChild(item);
+    // เคสที่เลือก → กาง tree: endpoints > steps คลิกเลื่อนไปที่ตัวนั้นใน editor + highlight step ที่กำลังทำงาน
+    if (c.id === tcSelectedId) {
+      const cursors = c.cursors || {};
+      const tree = el('div', { class: 'tc-nav' });
+      tree.appendChild(el('div', { class: 'tc-nav-summary', text: `${c.source === 'file' ? '🗂️ FILE' : '✎ INLINE'} · ${c.endpoints.length} ENDPOINTS${active ? ' · ▶ RUNNING' : ''}` }));
+      c.endpoints.forEach((ep, ei) => {
+        const curFull = active ? tcCurFull(ep, cursors[`${ep.method} ${ep.urlPattern}`]) : undefined;
+        const epNode = el('div', { class: 'tc-nav-ep' + (curFull != null ? ' has-current' : ''), title: 'ไปที่ endpoint นี้' }, [
+          el('span', { class: 'tc-nav-method m-' + (ep.method || 'any').toLowerCase(), text: ep.method || 'ANY' }),
+          el('span', { class: 'tc-nav-ep-path', text: ep.urlPattern || '(no pattern)' }),
+        ]);
+        epNode.addEventListener('click', (e) => { e.stopPropagation(); scrollTcTo(`.tc-ep[data-ep-idx="${ei}"]`, 'start'); });
+        tree.appendChild(epNode);
+        (ep.steps || []).forEach((st, si) => {
+          const stOff = st.enabled === false;
+          const cur = active && curFull === si;
+          const stNode = el('div', { class: 'tc-nav-step' + (cur ? ' current' : '') + (stOff ? ' off' : ''), title: 'ไปที่ step นี้' }, [
+            el('span', { class: 'tc-nav-bullet', text: cur ? '▶' : `#${si + 1}` }),
+            el('span', { class: 'tc-nav-step-label', text: st.label || `step ${si + 1}` }),
+            stOff ? el('span', { class: 'tc-nav-off-tag', text: 'ปิด' }) : el('span'),
+          ]);
+          stNode.addEventListener('click', (e) => { e.stopPropagation(); scrollTcTo(`.tc-step[data-ep-idx="${ei}"][data-step="${si}"]`, 'start'); });
+          tree.appendChild(stNode);
+        });
+      });
+      tcListEl.appendChild(tree);
+    }
   }
+}
+
+// เลื่อน editor ไปที่ endpoint/step ที่เลือกจาก tree ด้านซ้าย + flash ให้เห็น
+function scrollTcTo(selector, block = 'center') {
+  const t = tcEditorEl.querySelector(selector);
+  if (!t) return;
+  t.scrollIntoView({ block, behavior: 'smooth' });
+  t.classList.add('tc-step-flash');
+  setTimeout(() => t.classList.remove('tc-step-flash'), 1600);
 }
 
 // cursor เก็บเป็น index ของ "step ที่เปิด" (sublist) → แปลงเป็น index จริงใน list เต็ม เพื่อไฮไลต์ถูกช่อง
@@ -2067,7 +2102,7 @@ function renderTcEditor(caseObj) {
 
     scroll.appendChild(el('div', { class: 'map-label', text: 'Endpoints (แต่ละ endpoint ตอบตามลำดับ step)' }));
     model.endpoints.forEach((ep, ei) => {
-      const box = el('div', { class: 'tc-ep' });
+      const box = el('div', { class: 'tc-ep', 'data-ep-idx': String(ei) });
       const mSel = el('select', { class: 'tc-ep-method' });
       for (const m of ['ANY', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE']) { const o = el('option', { value: m, text: m }); if (ep.method === m) o.selected = true; mSel.appendChild(o); }
       mSel.addEventListener('change', () => { ep.method = mSel.value; });
@@ -2083,7 +2118,7 @@ function renderTcEditor(caseObj) {
       ep.steps.forEach((st, si) => {
         const isCur = model.id === tcActiveId && curFull === si;
         const off = st.enabled === false;
-        const stBox = el('div', { class: 'tc-step' + (isCur ? ' current' : '') + (off ? ' tc-step-off' : ''), 'data-pattern': ep.urlPattern, 'data-step': String(si) });
+        const stBox = el('div', { class: 'tc-step' + (isCur ? ' current' : '') + (off ? ' tc-step-off' : ''), 'data-ep-idx': String(ei), 'data-pattern': ep.urlPattern, 'data-step': String(si) });
         const sLabel = el('input', { type: 'text', class: 'tc-step-label', value: st.label, placeholder: `label step ${si + 1}` });
         sLabel.addEventListener('input', () => { st.label = sLabel.value; });
         const sStatus = el('input', { type: 'text', class: 'tc-step-status', value: String(st.status), placeholder: 'status' });
@@ -2118,10 +2153,9 @@ function renderTcEditor(caseObj) {
         const ovEd = makeOverrideEditor(st.overrides, (ovs) => { st.overrides = ovs; });
         stBox.appendChild(el('div', { class: 'map-label', text: '🔧 Override เฉพาะ key' }));
         stBox.appendChild(ovEd.el);
-        // mirror Map Local: passthrough → body read-only + override เปิด; mock → body แก้ได้ + override ปิด
+        // mirror Map Local: passthrough → body read-only (ยัง scroll/ดูได้) + override เปิด; mock → body แก้ได้ + override ปิด
         bodyEd.textarea.readOnly = pt;
-        bodyEd.wrap.style.opacity = pt ? '0.5' : '1';
-        bodyEd.wrap.style.pointerEvents = pt ? 'none' : '';
+        bodyEd.wrap.classList.toggle('je-readonly', pt);
         ovEd.setEnabled(pt);
         box.appendChild(stBox);
       });

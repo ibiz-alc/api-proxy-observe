@@ -888,6 +888,50 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .map-item-toggle.off { color: var(--muted); }
 .map-item-toggle.on:hover { background: rgba(74, 222, 128, 0.16); }
 .map-item-toggle.off:hover { background: var(--accent); color: #0f172a; }
+/* ===== Test Case left-panel tree (endpoints > steps) ===== */
+.tc-nav { border-bottom: 1px solid var(--border); background: rgba(0, 0, 0, 0.22); padding: 4px 0 8px; }
+.tc-nav-summary { font-size: 0.64rem; color: var(--muted); letter-spacing: 0.06em; padding: 6px 12px 4px; }
+/* endpoint node */
+.tc-nav-ep {
+  display: flex; align-items: center; gap: 7px; padding: 5px 12px 5px 16px;
+  cursor: pointer; position: relative; border-left: 2px solid transparent;
+}
+.tc-nav-ep:hover { background: var(--panel-2); }
+.tc-nav-ep.has-current { border-left-color: var(--accent); }
+.tc-nav-method {
+  flex-shrink: 0; font-size: 0.6rem; font-weight: 800; letter-spacing: 0.03em;
+  padding: 1px 5px; border-radius: 4px; background: var(--panel-2); color: var(--muted);
+}
+.tc-nav-method.m-get { background: rgba(74,222,128,0.16); color: var(--green); }
+.tc-nav-method.m-post { background: rgba(56,189,248,0.16); color: var(--accent); }
+.tc-nav-method.m-put, .tc-nav-method.m-patch { background: rgba(250,204,21,0.16); color: var(--yellow); }
+.tc-nav-method.m-delete { background: rgba(248,113,113,0.16); color: var(--red); }
+.tc-nav-ep-path { font-size: 0.78rem; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* step node — มีเส้น guide ทางซ้าย */
+.tc-nav-step {
+  display: flex; align-items: center; gap: 8px; padding: 3px 12px 3px 34px;
+  cursor: pointer; position: relative; font-size: 0.76rem; color: var(--muted);
+  border-left: 2px solid transparent;
+}
+.tc-nav-step::before { /* เส้นเชื่อม hierarchy */
+  content: ''; position: absolute; left: 23px; top: 0; bottom: 0; border-left: 1px solid var(--border);
+}
+.tc-nav-step:hover { background: var(--panel-2); color: var(--text); }
+.tc-nav-bullet { flex-shrink: 0; min-width: 20px; font-size: 0.66rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tc-nav-step-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-nav-off-tag { margin-left: auto; font-size: 0.6rem; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; }
+.tc-nav-step.off { opacity: 0.5; }
+/* step ที่กำลังทำงาน */
+.tc-nav-step.current {
+  background: rgba(56,189,248,0.14); color: var(--text); font-weight: 700; border-left-color: var(--accent);
+}
+.tc-nav-step.current .tc-nav-bullet { color: var(--accent); }
+.tc-nav-step.current::after {
+  content: 'ตอนนี้'; margin-left: auto; font-size: 0.6rem; font-weight: 700;
+  color: #0f172a; background: var(--accent); border-radius: 4px; padding: 0 6px;
+}
+/* เว้นระยะจากขอบบนตอนคลิกเลื่อนไปหา (block:start) — คงไว้ตามที่แก้แล้ว */
+.tc-ep, .tc-step { scroll-margin-top: 12px; }
 
 #maplocal-editor {
   background: var(--panel);
@@ -945,6 +989,9 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
   flex: none; min-height: 0;
 }
 .je-input::placeholder { color: var(--muted); }
+/* body แบบ read-only (โหมด Passthrough) — อ่าน/scroll ได้ แต่แก้ไม่ได้ */
+.je-wrap.je-readonly { border-style: dashed; opacity: 0.85; }
+.je-wrap.je-readonly .je-input { cursor: default; }
 
 /* ---------- Test Cases ---------- */
 #tc-editor { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
