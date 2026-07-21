@@ -924,40 +924,98 @@ function renderProxy() {
   renderTcProxyPopup();
 }
 
-// ===== Popup ในหน้า Proxy: คุม current step ของ Test Case ที่ active (ลากย้ายได้) =====
+// ===== Panel ในหน้า Proxy: เอา list/tree ของ Test Case มาไว้ (dock ซ้าย/ขวา, ย่อ/ขยาย, ปรับกว้าง) =====
 let _tcPopupEl = null;
-let _tcPopupPos = null; // จำตำแหน่งที่ลากไว้
-function tcNavToCase(c, scrollSel) {
-  tcSelectedId = c.id;
-  document.querySelector('.tab-btn[data-tab="testcases"]').click();
-  renderTcList();
-  const s = tcData.find((x) => x.id === c.id);
-  if (s) renderTcEditor(s);
-  if (scrollSel) setTimeout(() => scrollTcTo(scrollSel, 'start'), 90);
-}
-async function tcPopupRefresh() {
-  try { const d = await (await fetch('/api/testcases')).json(); tcData = d.cases || []; tcActiveId = d.activeCaseId || null; } catch { return; }
-  renderTcList();
-  renderTcProxyPopup();
-  const sel = tcData.find((c) => c.id === tcSelectedId);
-  if (sel && document.getElementById('tab-testcases').classList.contains('active')) renderTcEditor(sel);
-}
+const _tcPopup = { side: 'right', width: 320, mode: 'full', height: null, top: null }; // mode: full | compact | mini
 function tcPopupDraggable(handle, box) {
-  handle.style.cursor = 'move';
+  if (handle._dragBound) return; // กัน bind ซ้ำ (mini ใช้ element เดิม → traffic ทุกครั้งจะ bind เพิ่ม)
+  handle._dragBound = true;
   handle.addEventListener('mousedown', (e) => {
-    if (e.target.closest('button, .tc-popup-open')) return; // อย่าลากตอนกดปุ่ม
+    if (e.target.closest('button, .tc-popup-toggle, .tc-popup-resizer, .tc-popup-mini-btn')) return;
     e.preventDefault();
-    const r = box.getBoundingClientRect();
-    const ox = e.clientX - r.left, oy = e.clientY - r.top;
+    box.classList.add('dragging');
+    const move = (ev) => { box.style.left = (ev.clientX - 50) + 'px'; box.style.top = Math.max(0, ev.clientY - 12) + 'px'; box.style.right = 'auto'; box.style.bottom = 'auto'; };
+    const up = (ev) => {
+      document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
+      box.classList.remove('dragging');
+      _tcPopup.side = ev.clientX < window.innerWidth / 2 ? 'left' : 'right'; // snap แกน X ริมที่ใกล้สุด
+      _tcPopup.top = Math.max(0, Math.min(window.innerHeight - 80, box.getBoundingClientRect().top)); // แกน Y คงตำแหน่งที่ปล่อย
+      renderTcProxyPopup();
+    };
+    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+  });
+}
+function tcPopupResizer(res, box) {
+  res.addEventListener('mousedown', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const startX = e.clientX, startW = box.getBoundingClientRect().width, side = _tcPopup.side;
     const move = (ev) => {
-      const left = Math.max(0, Math.min(window.innerWidth - 60, ev.clientX - ox));
-      const top = Math.max(0, Math.min(window.innerHeight - 24, ev.clientY - oy));
-      box.style.left = left + 'px'; box.style.top = top + 'px'; box.style.right = 'auto'; box.style.bottom = 'auto';
-      _tcPopupPos = { left: box.style.left, top: box.style.top };
+      const dx = ev.clientX - startX;
+      _tcPopup.width = Math.max(220, Math.min(600, side === 'right' ? startW - dx : startW + dx));
+      box.style.width = _tcPopup.width + 'px';
     };
     const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
     document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
   });
+}
+function tcPopupVResizer(res, box) {
+  res.addEventListener('mousedown', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const startY = e.clientY, startH = box.getBoundingClientRect().height;
+    const move = (ev) => {
+      _tcPopup.height = Math.max(120, Math.min(window.innerHeight - 64, startH + (ev.clientY - startY)));
+      box.style.height = _tcPopup.height + 'px';
+    };
+    const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+  });
+}
+// compact = โชว์เฉพาะเคส active + step ปัจจุบันของแต่ละ endpoint (ตามภาพ)
+function buildTcCompactInto(host, c) {
+  host.innerHTML = '';
+  const active = c.id === tcActiveId;
+  host.appendChild(el('div', { class: 'tc-cmp-case' }, [
+    el('span', { class: 'map-dot ' + (active ? 'on' : 'off'), text: active ? '●' : '○' }),
+    el('span', { class: 'tc-cmp-name', text: c.name || '(ไม่มีชื่อ)' }),
+    el('span', { class: 'tc-cmp-en' + (active ? ' on' : ''), text: active ? 'Enabled' : 'Disabled' }),
+  ]));
+  const flags = [];
+  if (c.autoAdvance !== false) flags.push('⚡ AUTO');
+  if (c.loop) flags.push('🔁 LOOP');
+  if (active) flags.push('▶ RUNNING');
+  host.appendChild(el('div', { class: 'tc-nav-summary', text: `${c.source === 'file' ? 'FILE' : 'INLINE'} · ${c.endpoints.length} ENDPOINTS${flags.length ? ' · ' + flags.join(' · ') : ''}` }));
+  const cursors = c.cursors || {}; const hits = c.hits || {};
+  c.endpoints.forEach((ep, ei) => {
+    const enabled = ep.steps.map((s, idx) => ({ s, idx })).filter((x) => x.s.enabled !== false);
+    if (!enabled.length) return;
+    const k = `${ep.method || 'ANY'} ${ep.urlPattern}`;
+    const cur = Math.min(cursors[k] || 0, enabled.length - 1);
+    const curStep = enabled[cur].s; const curFull = enabled[cur].idx;
+    const times = Math.max(1, curStep.times || 1); const hitN = hits[k] || 0;
+    const epNode = el('div', { class: 'tc-nav-ep', title: 'ไปที่ endpoint นี้' }, [
+      el('span', { class: 'tc-nav-method m-' + (ep.method || 'any').toLowerCase(), text: ep.method || 'ANY' }),
+      el('span', { class: 'tc-nav-ep-path', text: ep.urlPattern || '(no pattern)' }),
+    ]);
+    epNode.addEventListener('click', () => { tcSelectedId = c.id; scrollTcTo(`.tc-ep[data-ep-idx="${ei}"]`, 'start'); });
+    host.appendChild(epNode);
+    const stNode = el('div', { class: 'tc-nav-step current', title: 'ไปที่ step ปัจจุบัน' }, [
+      el('span', { class: 'tc-nav-bullet', text: `#${curFull + 1}` }),
+      el('span', { class: 'tc-nav-step-label', text: curStep.label || `step ${curFull + 1}` }),
+      times > 1 ? el('span', { class: 'tc-nav-times', title: `เหลือ ${times - hitN} ครั้งถึง step ถัดไป`, text: `⏭ ${times - hitN}` }) : el('span'),
+    ]);
+    stNode.addEventListener('click', () => { tcSelectedId = c.id; scrollTcTo(`.tc-step[data-ep-idx="${ei}"][data-step="${curFull}"]`, 'start'); });
+    host.appendChild(stNode);
+    // ปุ่มเปลี่ยน current step (ย้อน/ถัดไป) ในโหมด compact
+    const prev = el('button', { class: 'tc-cmp-btn', type: 'button', title: 'ย้อน step', text: '◀' });
+    const nxt = el('button', { class: 'tc-cmp-btn', type: 'button', title: 'ไป step ถัดไป', text: '▶' });
+    prev.addEventListener('click', async (e) => { e.stopPropagation(); const to = (cur - 1 + enabled.length) % enabled.length; await fetch('/api/testcases/goto', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pattern: ep.urlPattern, index: to }) }); await tcAfterChange(); });
+    nxt.addEventListener('click', async (e) => { e.stopPropagation(); await fetch('/api/testcases/next', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pattern: ep.urlPattern }) }); await tcAfterChange(); });
+    host.appendChild(el('div', { class: 'tc-cmp-ctrls' }, [prev, nxt, el('span', { class: 'tc-cmp-hint', text: 'เปลี่ยน step' })]));
+  });
+}
+async function tcAfterChange() { // เปลี่ยน current step แล้ว refresh popup+panel+highlight
+  try { const d = await (await fetch('/api/testcases')).json(); tcData = d.cases || []; tcActiveId = d.activeCaseId || null; } catch { return; }
+  renderTcList(); renderTcProxyPopup(); updateTcEditorHighlight();
 }
 function renderTcProxyPopup() {
   if (!_tcPopupEl) { _tcPopupEl = el('div', { class: 'tc-popup', id: 'tc-popup' }); document.body.appendChild(_tcPopupEl); }
@@ -965,43 +1023,49 @@ function renderTcProxyPopup() {
   const onProxy = document.getElementById('tab-proxy').classList.contains('active');
   const c = tcData.find((x) => x.id === tcActiveId);
   if (!onProxy || !c) { pop.style.display = 'none'; return; }
-  pop.style.display = 'block';
+  const mode = _tcPopup.mode || 'full';
+  pop.style.display = 'flex';
+  pop.style.left = ''; pop.style.right = ''; pop.style.bottom = '';
+  pop.className = 'tc-popup dock-' + _tcPopup.side + ' mode-' + mode;
+  pop.style.top = _tcPopup.top != null ? _tcPopup.top + 'px' : '';
   pop.innerHTML = '';
-  const openBtn = el('span', { class: 'tc-popup-open', title: 'เปิดในแท็บ Test Case', text: '↗' });
-  openBtn.addEventListener('click', () => tcNavToCase(c));
-  const head = el('div', { class: 'tc-popup-head' }, [el('span', { class: 'tc-popup-title', text: '🎬 ' + (c.name || 'Test Case') }), openBtn]);
+
+  // === mini: หุบไปมุมติดจอ — "Test Cases" หมุน 90° + ปุ่ม » ขยาย ===
+  if (mode === 'mini') {
+    pop.style.width = ''; pop.style.height = ''; pop.style.maxHeight = '';
+    const expand = el('span', { class: 'tc-popup-mini-btn', title: 'ขยาย', text: '»' });
+    expand.addEventListener('click', (e) => { e.stopPropagation(); _tcPopup.mode = 'full'; renderTcProxyPopup(); });
+    pop.append(expand, el('span', { class: 'tc-popup-mini-label', text: 'Test Cases' }));
+    tcPopupDraggable(pop, pop);
+    return;
+  }
+
+  pop.style.width = _tcPopup.width + 'px';
+  pop.style.height = (mode === 'full' && _tcPopup.height) ? _tcPopup.height + 'px' : ''; // compact = auto ตาม content
+  pop.style.maxHeight = 'calc(100vh - ' + ((_tcPopup.top != null ? _tcPopup.top : 52) + 12) + 'px)';
+  // header + ปุ่ม: ย่อ/ขยาย (▾/▸) และ _ หุบไปมุม
+  const cmpBtn = el('span', { class: 'tc-popup-toggle', title: mode === 'compact' ? 'ขยายเต็ม' : 'ย่อ (โชว์ step ปัจจุบัน)', text: mode === 'compact' ? '▸' : '▾' });
+  cmpBtn.addEventListener('click', (e) => { e.stopPropagation(); _tcPopup.mode = mode === 'compact' ? 'full' : 'compact'; renderTcProxyPopup(); });
+  const miniBtn = el('span', { class: 'tc-popup-toggle', title: 'หุบไปมุมจอ', text: '_' });
+  miniBtn.addEventListener('click', (e) => { e.stopPropagation(); _tcPopup.mode = 'mini'; renderTcProxyPopup(); });
+  const head = el('div', { class: 'tc-popup-head' }, [el('span', { class: 'tc-popup-title', text: '🎬 Test Cases' }), el('div', { class: 'tc-popup-head-btns' }, [cmpBtn, miniBtn])]);
   pop.appendChild(head);
-  const cursors = c.cursors || {}; const hits = c.hits || {};
-  const body = el('div', { class: 'tc-popup-body' });
-  c.endpoints.forEach((ep, ei) => {
-    const enabled = ep.steps.map((s, idx) => ({ s, idx })).filter((x) => x.s.enabled !== false);
-    if (!enabled.length) return;
-    const k = `${ep.method || 'ANY'} ${ep.urlPattern}`;
-    const cur = Math.min(cursors[k] || 0, enabled.length - 1);
-    const curStep = enabled[cur].s; const curFull = enabled[cur].idx;
-    const h = hits[k] || 0; const times = Math.max(1, curStep.times || 1);
-    const nextI = c.loop ? (cur + 1) % enabled.length : Math.min(cur + 1, enabled.length - 1);
-    const epLine = el('div', { class: 'tc-popup-ep', title: 'ไปที่ endpoint นี้' }, [
-      el('span', { class: 'tc-nav-method m-' + (ep.method || 'any').toLowerCase(), text: ep.method || 'ANY' }),
-      el('span', { class: 'tc-popup-path', text: ep.urlPattern || '(no pattern)' }),
-    ]);
-    epLine.addEventListener('click', () => tcNavToCase(c, `.tc-ep[data-ep-idx="${ei}"]`));
-    const curLine = el('div', { class: 'tc-popup-cur', title: 'ไปที่ step นี้' }, [
-      el('span', { class: 'tc-popup-badge', text: 'ตอนนี้' }),
-      el('span', { class: 'tc-popup-step', text: `#${curFull + 1} ${curStep.label || ''}` }),
-      times > 1 ? el('span', { class: 'tc-popup-times', text: `${h + 1}/${times}` }) : el('span'),
-    ]);
-    curLine.addEventListener('click', () => tcNavToCase(c, `.tc-step[data-ep-idx="${ei}"][data-step="${curFull}"]`));
-    const nextLine = el('div', { class: 'tc-popup-next', text: `→ ถัดไป: #${enabled[nextI].idx + 1} ${enabled[nextI].s.label || ''}` });
-    const prev = el('button', { class: 'tc-popup-btn', type: 'button', title: 'ย้อน step', text: '◀' });
-    const nxt = el('button', { class: 'tc-popup-btn', type: 'button', title: 'ไป step ถัดไป', text: '▶' });
-    prev.addEventListener('click', async (e) => { e.stopPropagation(); const to = (cur - 1 + enabled.length) % enabled.length; await fetch('/api/testcases/goto', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pattern: ep.urlPattern, index: to }) }); await tcPopupRefresh(); });
-    nxt.addEventListener('click', async (e) => { e.stopPropagation(); await fetch('/api/testcases/next', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pattern: ep.urlPattern }) }); await tcPopupRefresh(); });
-    body.append(epLine, curLine, nextLine, el('div', { class: 'tc-popup-ctrls' }, [prev, nxt, el('span', { class: 'tc-popup-hint', text: 'เปลี่ยน step ปัจจุบัน' })]));
-  });
-  pop.appendChild(body);
-  if (_tcPopupPos) { pop.style.left = _tcPopupPos.left; pop.style.top = _tcPopupPos.top; pop.style.right = 'auto'; pop.style.bottom = 'auto'; }
   tcPopupDraggable(head, pop);
+
+  if (mode === 'compact') {
+    const cbody = el('div', { class: 'tc-popup-list tc-popup-compact' });
+    pop.appendChild(cbody);
+    buildTcCompactInto(cbody, c);
+    return;
+  }
+  // full
+  const resizer = el('div', { class: 'tc-popup-resizer' });
+  const vresizer = el('div', { class: 'tc-popup-vresizer' });
+  const listBox = el('div', { class: 'tc-popup-list' });
+  pop.append(resizer, listBox, vresizer);
+  tcPopupResizer(resizer, pop);
+  tcPopupVResizer(vresizer, pop);
+  buildTcListInto(listBox);
 }
 
 // คลิก tag Map Local ในแท็บ Proxy → ไปแท็บ Map Local + เปิดกฎนั้น
@@ -2054,15 +2118,37 @@ async function refreshTcCursors() {
     tcData = d.cases || []; tcActiveId = d.activeCaseId || null;
   } catch { return; }
   renderTcList();
-  const onTc = document.getElementById('tab-testcases').classList.contains('active');
-  const editing = document.activeElement && tcEditorEl.contains(document.activeElement);
-  const sel = tcData.find((c) => c.id === tcSelectedId);
-  if (sel && onTc && !editing) renderTcEditor(sel);
+  updateTcEditorHighlight(); // ปรับ highlight ใน editor แบบ in-place ทุกครั้ง (ไม่ rebuild → โฟกัสไม่หลุด, ไม่ติด editing guard)
+}
+// เลื่อน highlight step ปัจจุบันใน editor โดยไม่ rebuild (toggle .current + อัปเดต ⏭ badge)
+function updateTcEditorHighlight() {
+  const c = tcData.find((x) => x.id === tcSelectedId);
+  if (!c || c.id !== tcActiveId) { tcEditorEl.querySelectorAll('.tc-step.current').forEach((b) => b.classList.remove('current')); return; }
+  const cursors = c.cursors || {}; const hits = c.hits || {};
+  c.endpoints.forEach((ep, ei) => {
+    const curFull = tcCurFull(ep, cursors[`${ep.method} ${ep.urlPattern}`]);
+    const hitN = hits[`${ep.method} ${ep.urlPattern}`] || 0;
+    ep.steps.forEach((st, si) => {
+      const box = tcEditorEl.querySelector(`.tc-step[data-ep-idx="${ei}"][data-step="${si}"]`);
+      if (box) box.classList.toggle('current', curFull === si);
+    });
+    // อัปเดตตัวเลขครั้งบนช่อง times ของ step ปัจจุบัน (ไม่บังคับ) — ข้ามได้
+    void hitN;
+  });
 }
 
+// render list+tree ลง container ไหนก็ได้ (ใช้ทั้ง panel ซ้าย และ popup หน้า Proxy → CSS เหมือนกัน)
 function renderTcList() {
-  tcListEl.innerHTML = '';
-  if (!tcData.length) { tcListEl.appendChild(el('p', { class: 'empty-msg', html: 'ยังไม่มีเคส<br/>กด "เพิ่มเคส" เพื่อสร้าง' })); return; }
+  buildTcListInto(tcListEl);
+  // อัปเดต popup เฉพาะโหมด full (compact/mini rebuild ผ่าน renderTcProxyPopup เอง — กันเนื้อหา compact โดนทับด้วย tree เต็ม)
+  if (_tcPopupEl && _tcPopupEl.style.display !== 'none' && _tcPopup.mode === 'full') {
+    const pl = _tcPopupEl.querySelector('.tc-popup-list');
+    if (pl) buildTcListInto(pl);
+  }
+}
+function buildTcListInto(host) {
+  host.innerHTML = '';
+  if (!tcData.length) { host.appendChild(el('p', { class: 'empty-msg', html: 'ยังไม่มีเคส<br/>กด "เพิ่มเคส" เพื่อสร้าง' })); return; }
   for (const c of tcData) {
     const active = c.id === tcActiveId;
     const tog = el('button', { class: 'map-item-toggle ' + (active ? 'on' : 'off'), type: 'button', text: active ? 'Enabled' : 'Disabled', title: 'คลิกเพื่อเปิด/ปิดใช้เคสนี้ (เปิดได้ทีละเคส)' });
@@ -2080,7 +2166,7 @@ function renderTcList() {
       tog,
     ]);
     item.addEventListener('click', () => { tcSelectedId = c.id; renderTcList(); renderTcEditor(c); });
-    tcListEl.appendChild(item);
+    host.appendChild(item);
     // เคสที่เลือก → กาง tree: endpoints > steps คลิกเลื่อนไปที่ตัวนั้นใน editor + highlight step ที่กำลังทำงาน
     if (c.id === tcSelectedId) {
       const cursors = c.cursors || {};
@@ -2101,10 +2187,14 @@ function renderTcList() {
         (ep.steps || []).forEach((st, si) => {
           const stOff = st.enabled === false;
           const cur = active && curFull === si;
+          const times = Math.max(1, st.times || 1);
+          const hitN = (c.hits || {})[`${ep.method} ${ep.urlPattern}`] || 0;
           const stNode = el('div', { class: 'tc-nav-step' + (cur ? ' current' : '') + (stOff ? ' off' : ''), title: 'ไปที่ step นี้' }, [
             el('span', { class: 'tc-nav-bullet', text: `#${si + 1}` }),
             el('span', { class: 'tc-nav-step-label', text: st.label || `step ${si + 1}` }),
-            stOff ? el('span', { class: 'tc-nav-off-tag', text: 'ปิด' }) : el('span'),
+            stOff ? el('span', { class: 'tc-nav-off-tag', text: 'ปิด' })
+              : cur ? el('span', { class: 'tc-nav-times', title: `เหลืออีก ${times - hitN} ครั้งถึง step ถัดไป (ครั้งที่ ${hitN + 1}/${times})`, text: `⏭ ${times - hitN}` })
+                : (times > 1 ? el('span', { class: 'tc-nav-times dim', text: `×${times}` }) : el('span')),
           ]);
           // ไอคอน "ตั้งเป็น step ปัจจุบัน" — เฉพาะเคส active + step ที่เปิด + ยังไม่ใช่ตัวปัจจุบัน
           if (active && !stOff && !cur) {
@@ -2121,18 +2211,27 @@ function renderTcList() {
           tree.appendChild(stNode);
         });
       });
-      tcListEl.appendChild(tree);
+      host.appendChild(tree);
     }
   }
 }
 
 // เลื่อน editor ไปที่ endpoint/step ที่เลือกจาก tree ด้านซ้าย + flash ให้เห็น
 function scrollTcTo(selector, block = 'center') {
-  const t = tcEditorEl.querySelector(selector);
-  if (!t) return;
-  t.scrollIntoView({ block, behavior: 'smooth' });
-  t.classList.add('tc-step-flash');
-  setTimeout(() => t.classList.remove('tc-step-flash'), 1600);
+  // ถ้าคลิกจาก popup (อยู่แท็บ Proxy) → สลับไปแท็บ Test Case + render editor ของเคสที่เลือกก่อน แล้วค่อยเลื่อน
+  const onTc = document.getElementById('tab-testcases').classList.contains('active');
+  if (!onTc) {
+    document.querySelector('.tab-btn[data-tab="testcases"]').click();
+    const sel = tcData.find((c) => c.id === tcSelectedId);
+    if (sel) renderTcEditor(sel);
+  }
+  setTimeout(() => {
+    const t = tcEditorEl.querySelector(selector);
+    if (!t) return;
+    t.scrollIntoView({ block, behavior: 'smooth' });
+    t.classList.add('tc-step-flash');
+    setTimeout(() => t.classList.remove('tc-step-flash'), 1600);
+  }, onTc ? 0 : 90);
 }
 
 // เมนูย้าย/คัดลอก step ไป endpoint อื่น (บนสุด/ล่างสุด ของแต่ละ endpoint) — mode: 'move' | 'copy'
@@ -2315,7 +2414,11 @@ function renderTcEditor(caseObj) {
       dupEp.addEventListener('click', () => { model.endpoints.splice(ei + 1, 0, JSON.parse(JSON.stringify(ep))); draw(); });
       const rmEp = el('button', { class: 'tc-x', title: 'ลบ endpoint', text: '✕' });
       rmEp.addEventListener('click', () => { model.endpoints.splice(ei, 1); if (!model.endpoints.length) model.endpoints.push(newEndpoint()); draw(); });
-      box.appendChild(el('div', { class: 'tc-ep-head' }, [mSel, pat, dupEp, rmEp]));
+      // apply times ทุก step ใน endpoint นี้ (ย้ายมาอยู่หัว endpoint หลัง URL)
+      const applyInput = el('input', { type: 'number', min: '1', value: String((ep.steps[0] && ep.steps[0].times) || 1), class: 'tc-apply-times', title: 'จำนวนครั้ง (times)' });
+      const applyBtn = el('button', { class: 'tc-apply-btn', type: 'button', title: 'ตั้ง times ทุก step ใน endpoint นี้ให้เท่ากัน', text: '× ทุก step' });
+      applyBtn.addEventListener('click', () => { const v = Math.max(1, parseInt(applyInput.value, 10) || 1); ep.steps.forEach((s) => { s.times = v; }); draw(); });
+      box.appendChild(el('div', { class: 'tc-ep-head' }, [mSel, pat, applyInput, applyBtn, dupEp, rmEp]));
 
       const curFull = tcCurFull(ep, cursors[`${ep.method} ${ep.urlPattern}`]);
       ep.steps.forEach((st, si) => {
@@ -2369,7 +2472,7 @@ function renderTcEditor(caseObj) {
       });
       const addStep = el('button', { class: 'tc-add-step', text: '+ step' });
       addStep.addEventListener('click', () => { ep.steps.push(newStep()); draw(); });
-      box.appendChild(addStep);
+      box.appendChild(el('div', { class: 'tc-step-foot' }, [addStep])); // apply-times ย้ายไปหัว endpoint แล้ว
       scroll.appendChild(box);
     });
 

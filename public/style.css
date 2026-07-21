@@ -937,8 +937,8 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 }
 .tc-nav-step:hover { background: var(--panel-2); color: var(--text); }
 .tc-nav-bullet { flex-shrink: 0; min-width: 20px; font-size: 0.66rem; color: var(--muted); font-variant-numeric: tabular-nums; }
-.tc-nav-step-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tc-nav-off-tag { margin-left: auto; font-size: 0.6rem; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; }
+.tc-nav-step-label { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-nav-off-tag { flex-shrink: 0; margin-left: 6px; font-size: 0.6rem; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; }
 .tc-nav-step.off { opacity: 0.5; }
 /* step ที่กำลังทำงาน */
 .tc-nav-step.current {
@@ -946,7 +946,7 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 }
 .tc-nav-step.current .tc-nav-bullet { color: var(--accent); }
 /* ไอคอนตั้ง step ปัจจุบัน — โผล่ตอน hover แถว step */
-.tc-nav-set { margin-left: auto; flex-shrink: 0; color: var(--muted); opacity: 0; cursor: pointer; padding: 0 4px; font-size: 0.9rem; }
+.tc-nav-set { margin-left: 6px; flex-shrink: 0; color: var(--muted); opacity: 0; cursor: pointer; padding: 0 4px; font-size: 0.9rem; }
 .tc-nav-step:hover .tc-nav-set { opacity: 0.7; }
 .tc-nav-set:hover { opacity: 1 !important; color: var(--accent); }
 /* เว้นระยะจากขอบบนตอนคลิกเลื่อนไปหา (block:start) — คงไว้ตามที่แก้แล้ว */
@@ -1039,11 +1039,23 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .tc-step-head { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
 .tc-step-num { font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
 .tc-step.current .tc-step-num { color: var(--accent); font-weight: 600; }
-.tc-step-label { flex: 1 1 auto; }              /* กว้างขึ้น (กินพื้นที่ที่เหลือ) */
-.tc-step-status { flex: 0 0 52px; }             /* พอสำหรับ ~5 ตัวอักษร */
-.tc-step-ct { flex: 0 0 78px; }                 /* เล็กลงครึ่งนึง */
+/* prefix #tc-editor เพื่อชนะ global input[type=text]{flex:1} */
+#tc-editor .tc-step-label { flex: 1 1 auto; min-width: 0; }  /* ยึดพื้นที่ที่เหลือ */
+#tc-editor .tc-step-status { flex: 0 0 48px; min-width: 0; }  /* status code */
+#tc-editor .tc-step-ct { flex: 0 0 128px; min-width: 0; }     /* content-type */
 .tc-times-x { color: var(--muted); font-size: 0.8rem; }
-.tc-step-times { flex: 0 0 46px; }              /* ช่อง times (×N) */
+#tc-editor .tc-step-times { flex: 0 0 48px; min-width: 0; }   /* ช่อง times (×N) — design เหมือน status */
+/* ซ่อนลูกศร spinner ของ number → หน้าตาเหมือนช่อง status */
+#tc-editor .tc-step-times, #tc-editor .tc-apply-times { -moz-appearance: textfield; text-align: center; }
+#tc-editor .tc-step-times::-webkit-inner-spin-button, #tc-editor .tc-step-times::-webkit-outer-spin-button,
+#tc-editor .tc-apply-times::-webkit-inner-spin-button, #tc-editor .tc-apply-times::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+/* apply-times ที่หัว endpoint (หลัง URL) */
+#tc-editor .tc-apply-times { flex: 0 0 40px; min-width: 0; }
+.tc-apply-btn { flex-shrink: 0; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 3px 10px; font-size: 0.78rem; cursor: pointer; white-space: nowrap; }
+.tc-apply-btn:hover { border-color: var(--accent); color: var(--accent); }
+.tc-step-foot { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
+/* sticky header ของแต่ละ endpoint — scroll ถึง endpoint ถัดไปจะดันอันเดิมขึ้น */
+.tc-ep-head { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 4px 0; border-bottom: 1px solid var(--border); }
 .tc-step-body { height: 130px; flex: none; margin-top: 4px; }
 .tc-x { background: transparent; border: 1px solid var(--border); color: var(--red); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
 .tc-dup { background: transparent; border: 1px solid var(--border); color: var(--accent); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
@@ -1060,31 +1072,52 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .smm-btn { flex-shrink: 0; font-size: 0.7rem; padding: 2px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text); cursor: pointer; white-space: nowrap; }
 .smm-btn:hover { background: var(--accent); color: #0f172a; border-color: var(--accent); }
 
-/* ===== Popup Test Case ในหน้า Proxy (ลากย้ายได้) ===== */
+/* ===== Panel Test Case ในหน้า Proxy — dock ซ้าย/ขวา, ย่อ/ขยาย, ปรับกว้าง ===== */
 .tc-popup {
-  position: fixed; right: 20px; bottom: 20px; z-index: 9000;
-  width: 310px; max-height: 62vh; overflow-y: auto;
-  background: var(--panel); border: 1px solid var(--accent); border-radius: 10px;
-  box-shadow: 0 12px 44px rgba(0, 0, 0, 0.6); font-size: 0.82rem;
+  position: fixed; top: 52px; z-index: 9000;
+  display: flex; flex-direction: column; min-width: 220px;
+  max-height: calc(100vh - 64px);       /* สูงตาม content แต่ไม่เกินจอ (เกินแล้ว list scroll) */
+  background: var(--panel); border: 1px solid var(--accent);
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.55); font-size: 0.82rem;
 }
-.tc-popup-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; background: var(--panel-2); border-bottom: 1px solid var(--border); border-radius: 10px 10px 0 0; }
-.tc-popup-title { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tc-popup-open { cursor: pointer; color: var(--accent); font-size: 1rem; padding: 0 4px; }
-.tc-popup-open:hover { color: var(--text); }
-.tc-popup-body { padding: 6px 12px 12px; }
-.tc-popup-ep { display: flex; align-items: center; gap: 6px; margin-top: 10px; cursor: pointer; }
-.tc-popup-ep:hover .tc-popup-path { color: var(--accent); }
-.tc-popup-path { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tc-popup-cur { display: flex; align-items: center; gap: 6px; padding: 5px 0; cursor: pointer; }
-.tc-popup-cur:hover .tc-popup-step { color: var(--accent); }
-.tc-popup-badge { flex-shrink: 0; font-size: 0.6rem; font-weight: 700; color: #0f172a; background: var(--accent); border-radius: 4px; padding: 1px 6px; }
-.tc-popup-step { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tc-popup-times { margin-left: auto; flex-shrink: 0; font-size: 0.72rem; color: var(--yellow); font-weight: 700; }
-.tc-popup-next { color: var(--muted); font-size: 0.76rem; padding-left: 2px; }
-.tc-popup-ctrls { display: flex; align-items: center; gap: 6px; margin: 6px 0 2px; }
-.tc-popup-btn { border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: 6px; padding: 2px 12px; cursor: pointer; }
-.tc-popup-btn:hover { background: var(--accent); color: #0f172a; border-color: var(--accent); }
-.tc-popup-hint { font-size: 0.68rem; color: var(--muted); }
+.tc-popup { border-radius: 10px; overflow: hidden; } /* กรอบโค้งมนทุกมุม + clip เนื้อหาให้ตามโค้ง */
+.tc-popup.dock-right { right: 0; }
+.tc-popup.dock-left { left: 0; }
+.tc-popup.dragging { opacity: 0.95; box-shadow: 0 14px 54px rgba(0, 0, 0, 0.7); transition: none; }
+.tc-popup.collapsed { width: auto !important; min-width: 0; }
+/* ตัวลากปรับความสูง (ขอบล่าง) */
+.tc-popup-vresizer { position: absolute; left: 0; right: 0; bottom: 0; height: 7px; cursor: row-resize; z-index: 3; }
+.tc-popup-vresizer:hover { background: var(--accent); }
+.tc-popup-head-btns { display: flex; align-items: center; gap: 10px; }
+/* compact = โชว์เคส active + step ปัจจุบัน (สูงตาม content) */
+.tc-popup.mode-compact .tc-popup-list { overflow: visible; }
+.tc-cmp-case { display: flex; align-items: center; gap: 8px; padding: 8px 12px 4px; }
+.tc-cmp-name { flex: 1 1 auto; min-width: 0; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-cmp-en { flex-shrink: 0; font-size: 0.7rem; font-weight: 700; color: var(--muted); }
+.tc-cmp-en.on { color: var(--green); }
+.tc-cmp-ctrls { display: flex; align-items: center; gap: 6px; padding: 4px 12px 8px 34px; }
+.tc-cmp-btn { border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: 6px; padding: 1px 10px; cursor: pointer; }
+.tc-cmp-btn:hover { background: var(--accent); color: #0f172a; border-color: var(--accent); }
+.tc-cmp-hint { font-size: 0.68rem; color: var(--muted); }
+/* mini = หุบไปมุมจอ: "Test Cases" หมุน 90° + ปุ่ม » */
+.tc-popup.mode-mini { top: 60px; width: auto !important; min-width: 0; max-height: none; padding: 8px 3px; flex-direction: column; align-items: center; gap: 8px; cursor: move; }
+.tc-popup-mini-label { writing-mode: vertical-rl; text-orientation: mixed; transform: rotate(180deg); font-weight: 700; letter-spacing: 2px; color: var(--text); white-space: nowrap; }
+.tc-popup-mini-btn { cursor: pointer; color: var(--accent); font-size: 1.15rem; font-weight: 800; }
+.tc-popup-mini-btn:hover { color: var(--text); }
+.tc-popup-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; background: var(--panel-2); border-bottom: 1px solid var(--border); cursor: move; flex-shrink: 0; }
+.tc-popup.collapsed .tc-popup-head { border-bottom: none; }
+.tc-popup-title { font-weight: 700; white-space: nowrap; }
+.tc-popup-toggle { cursor: pointer; color: var(--muted); padding: 2px 8px; font-size: 1.35rem; line-height: 1; font-weight: 700; }
+.tc-popup-toggle:hover { color: var(--accent); }
+.tc-popup-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.tc-popup.collapsed .tc-popup-list { display: none; }
+.tc-popup-resizer { position: absolute; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 2; }
+.tc-popup.dock-right .tc-popup-resizer { left: 0; }
+.tc-popup.dock-left .tc-popup-resizer { right: 0; }
+.tc-popup-resizer:hover { background: var(--accent); }
+/* item ที่เลือกใน tree ขวาสุด: ให้ label ยืด แล้ว badge/set ไปชิดขวา */
+.tc-nav-times { flex-shrink: 0; margin-left: 6px; font-size: 0.72rem; color: var(--yellow); font-weight: 700; }
+.tc-nav-times.dim { color: var(--muted); font-weight: 500; }
 /* toggle เปิด/ปิด step + สภาพ step ที่ปิด */
 .tc-step-toggle { background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 2px 10px; font-size: 0.72rem; font-weight: 700; cursor: pointer; white-space: nowrap; }
 .tc-step-toggle.on { border-color: var(--green); color: var(--green); }
