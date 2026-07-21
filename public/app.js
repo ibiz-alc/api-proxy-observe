@@ -680,7 +680,7 @@ function showPinColorMenu(ev, base) {
     dot.addEventListener('click', (e) => { e.stopPropagation(); setPinColor(base, c.key); closePinColorMenu(); });
     row.appendChild(dot);
   }
-  const menu = el('div', { class: 'pin-color-menu' }, [el('div', { class: 'pin-color-menu-title', text: 'สี tag' }), row]);
+  const menu = el('div', { class: 'pin-color-menu' }, [el('div', { class: 'pin-color-menu-title', text: 'tag' }), row]);
   document.body.appendChild(menu);
   const mw = menu.offsetWidth, mh = menu.offsetHeight;
   let x = ev.clientX, y = ev.clientY;
