@@ -118,10 +118,18 @@ function applyOverrides(bodyStr, overrides) {
     let cur = obj;
     let ok = true;
     for (let i = 0; i < segs.length - 1; i++) {
+      const seg = segs[i], next = segs[i + 1];
       if (cur == null || typeof cur !== 'object') { ok = false; break; }
-      cur = cur[segs[i]];
+      // สร้าง path ที่ยังไม่มี: segment ถัดไปเป็นตัวเลข → array, ไม่งั้น → object
+      if (cur[seg] == null || typeof cur[seg] !== 'object') cur[seg] = (typeof next === 'number') ? [] : {};
+      if (Array.isArray(cur[seg]) && typeof next === 'number') { while (cur[seg].length <= next) cur[seg].push(null); }
+      cur = cur[seg];
     }
-    if (ok && cur != null && typeof cur === 'object') cur[segs[segs.length - 1]] = val;
+    if (ok && cur != null && typeof cur === 'object') {
+      const lastKey = segs[segs.length - 1];
+      if (Array.isArray(cur) && typeof lastKey === 'number') { while (cur.length <= lastKey) cur.push(null); }
+      cur[lastKey] = val;
+    }
   }
   try { return JSON.stringify(obj); } catch { return bodyStr; }
 }

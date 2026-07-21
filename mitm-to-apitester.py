@@ -203,15 +203,32 @@ def _apply_overrides(body_str, overrides):
         if not segs:
             continue
         cur, ok = obj, True
-        for s in segs[:-1]:
+        for i in range(len(segs) - 1):
+            seg, nxt = segs[i], segs[i + 1]
+            if not isinstance(cur, (dict, list)):
+                ok = False
+                break
             try:
-                cur = cur[s]
+                # สร้าง path ที่ยังไม่มี: segment ถัดไปเป็นตัวเลข → list, ไม่งั้น → dict
+                if isinstance(cur, list):
+                    while len(cur) <= seg:
+                        cur.append(None)
+                    if not isinstance(cur[seg], (dict, list)):
+                        cur[seg] = [] if isinstance(nxt, int) else {}
+                else:
+                    if not isinstance(cur.get(seg), (dict, list)):
+                        cur[seg] = [] if isinstance(nxt, int) else {}
+                cur = cur[seg]
             except Exception:
                 ok = False
                 break
-        if ok:
+        if ok and isinstance(cur, (dict, list)):
             try:
-                cur[segs[-1]] = val
+                last = segs[-1]
+                if isinstance(cur, list) and isinstance(last, int):
+                    while len(cur) <= last:
+                        cur.append(None)
+                cur[last] = val
             except Exception:
                 pass
     try:
