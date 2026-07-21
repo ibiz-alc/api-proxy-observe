@@ -278,6 +278,7 @@ loadFileCases();
 
 let activeCaseId = null;
 let caseCursors = {}; // "<METHOD> <urlPattern>" -> index (state ของ case ที่ active, in-memory)
+let caseHits = {};    // "<METHOD> <urlPattern>" -> จำนวนครั้งที่ step ปัจจุบันถูกเรียกแล้ว (สำหรับ times)
 const cursorKey = (ep) => `${ep.method || 'ANY'} ${ep.urlPattern}`;
 // รวมเคสจากไฟล์ (read-only) + เคส inline (store) เข้าด้วยกัน
 const allCases = () => [...fileCases, ...testCases.map((c) => ({ ...c, source: 'store' }))];
@@ -299,15 +300,16 @@ function normalizeCase(b) {
         body: s.body != null ? String(s.body) : '',
         enabled: s.enabled !== false,               // ปิด step ได้โดยไม่ต้องลบ (ถูกข้ามใน sequence)
         mode: s.mode === 'passthrough' ? 'passthrough' : 'mock', // mock=ตอบ body / passthrough=ยิงจริงแล้ว override
+        times: Math.max(1, Number(s.times) || 1),   // ต้องเรียก step นี้กี่ครั้งก่อนเลื่อนไป step ถัดไป (default 1)
         overrides: normalizeOverrides(s.overrides), // แก้เฉพาะบาง key (mock ทับ body / passthrough ทับ response จริง)
       })) : [],
     })) : [],
   };
 }
 function caseWithState(c) {
-  const cursors = {};
-  if (c.id === activeCaseId) for (const ep of c.endpoints) cursors[cursorKey(ep)] = caseCursors[cursorKey(ep)] || 0;
-  return { ...c, source: c.source || 'store', active: c.id === activeCaseId, cursors };
+  const cursors = {}; const hits = {};
+  if (c.id === activeCaseId) for (const ep of c.endpoints) { const k = cursorKey(ep); cursors[k] = caseCursors[k] || 0; hits[k] = caseHits[k] || 0; }
+  return { ...c, source: c.source || 'store', active: c.id === activeCaseId, cursors, hits };
 }
 // เลือก endpoint ใน case ที่ตรง request (เจาะจง/ยาวกว่าชนะ เหมือน findMapRule)
 function matchEndpoint(c, method, url) {
@@ -345,7 +347,7 @@ app.put('/api/testcases/:id', express.json({ limit: '10mb' }), (req, res) => {
 app.delete('/api/testcases/:id', (req, res) => {
   if (req.params.id.startsWith('file:')) return res.status(400).json({ ok: false, error: 'เคสแบบไฟล์ ลบที่โฟลเดอร์ test-cases/<dir> เอง' });
   testCases = testCases.filter((c) => c.id !== req.params.id);
-  if (activeCaseId === req.params.id) { activeCaseId = null; caseCursors = {}; }
+  if (activeCaseId === req.params.id) { activeCaseId = null; caseCursors = {}; caseHits = {}; }
   saveTestCases();
   res.json({ ok: true });
 });
@@ -354,18 +356,18 @@ app.post('/api/testcases/:id/activate', express.json(), (req, res) => {
   const c = allCases().find((x) => x.id === req.params.id);
   if (!c) return res.status(404).json({ ok: false, error: 'ไม่พบ test case' });
   activeCaseId = c.id; // exclusive: active ได้ทีละ case
-  if ((req.body || {}).resetOnActivate !== false) caseCursors = {}; // default reset cursor
+  if ((req.body || {}).resetOnActivate !== false) { caseCursors = {}; caseHits = {}; } // default reset cursor+hits
   unmute();
   res.json({ ok: true, active: caseWithState(c) });
 });
 
 app.post('/api/testcases/deactivate', (req, res) => {
-  activeCaseId = null; caseCursors = {};
+  activeCaseId = null; caseCursors = {}; caseHits = {};
   res.json({ ok: true });
 });
 
 app.post('/api/testcases/reset', (req, res) => {
-  caseCursors = {};
+  caseCursors = {}; caseHits = {};
   const c = activeCase();
   res.json({ ok: true, activeCaseId, cursors: c ? caseWithState(c).cursors : {} });
 });
@@ -381,6 +383,7 @@ app.post('/api/testcases/next', express.json(), (req, res) => {
     const k = cursorKey(ep);
     // ปุ่ม Next วนเสมอ (นับเฉพาะ step ที่เปิด): ถึงตัวสุดท้ายแล้วกดต่อ → กลับตัวแรก
     caseCursors[k] = ((caseCursors[k] || 0) + 1) % enabledLen;
+    caseHits[k] = 0; // เปลี่ยน step → เริ่มนับ times ใหม่
   }
   res.json({ ok: true, cursors: caseWithState(c).cursors });
 });
@@ -394,6 +397,7 @@ app.post('/api/testcases/goto', express.json(), (req, res) => {
   // index = ตำแหน่งใน enabled-sublist (เหมือน cursor)
   const enabledLen = ep.steps.filter((s) => s.enabled !== false).length;
   caseCursors[cursorKey(ep)] = Math.max(0, Math.min(Number(index) || 0, Math.max(0, enabledLen - 1)));
+  caseHits[cursorKey(ep)] = 0; // ตั้ง step ปัจจุบันเอง → เริ่มนับ times ใหม่
   res.json({ ok: true, cursors: caseWithState(c).cursors });
 });
 
@@ -410,8 +414,16 @@ app.post('/api/testcase/resolve', express.json({ limit: '2mb' }), (req, res) => 
   const i = Math.min(caseCursors[k] || 0, enabled.length - 1);
   const step = enabled[i];
   if (c.autoAdvance !== false) {
-    const nx = i + 1;
-    caseCursors[k] = c.loop ? nx % enabled.length : Math.min(nx, enabled.length - 1);
+    // นับครั้งที่ step นี้ถูกเรียก — ครบ times แล้วค่อยเลื่อนไป step ถัดไป (รีเซ็ตตัวนับ)
+    const hits = (caseHits[k] || 0) + 1;
+    const times = Math.max(1, Number(step.times) || 1);
+    if (hits >= times) {
+      const nx = i + 1;
+      caseCursors[k] = c.loop ? nx % enabled.length : Math.min(nx, enabled.length - 1);
+      caseHits[k] = 0;
+    } else {
+      caseHits[k] = hits; // ยังไม่ครบ times → อยู่ step เดิม
+    }
   }
   const fullIdx = ep.steps.indexOf(step); // index จริงใน list เต็ม (ให้ frontend ไฮไลต์/เลื่อนถูกช่อง)
   const base = { matched: true, step: fullIdx, label: step.label, pattern: ep.urlPattern, caseId: c.id, caseName: c.name };

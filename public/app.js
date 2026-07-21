@@ -21,6 +21,7 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
     document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    if (typeof renderTcProxyPopup === 'function') renderTcProxyPopup(); // โชว์/ซ่อน popup Test Case ในหน้า Proxy
   });
 });
 
@@ -920,6 +921,87 @@ function renderFlowTable() {
 function renderProxy() {
   renderDeviceTree();
   renderFlowTable();
+  renderTcProxyPopup();
+}
+
+// ===== Popup ในหน้า Proxy: คุม current step ของ Test Case ที่ active (ลากย้ายได้) =====
+let _tcPopupEl = null;
+let _tcPopupPos = null; // จำตำแหน่งที่ลากไว้
+function tcNavToCase(c, scrollSel) {
+  tcSelectedId = c.id;
+  document.querySelector('.tab-btn[data-tab="testcases"]').click();
+  renderTcList();
+  const s = tcData.find((x) => x.id === c.id);
+  if (s) renderTcEditor(s);
+  if (scrollSel) setTimeout(() => scrollTcTo(scrollSel, 'start'), 90);
+}
+async function tcPopupRefresh() {
+  try { const d = await (await fetch('/api/testcases')).json(); tcData = d.cases || []; tcActiveId = d.activeCaseId || null; } catch { return; }
+  renderTcList();
+  renderTcProxyPopup();
+  const sel = tcData.find((c) => c.id === tcSelectedId);
+  if (sel && document.getElementById('tab-testcases').classList.contains('active')) renderTcEditor(sel);
+}
+function tcPopupDraggable(handle, box) {
+  handle.style.cursor = 'move';
+  handle.addEventListener('mousedown', (e) => {
+    if (e.target.closest('button, .tc-popup-open')) return; // อย่าลากตอนกดปุ่ม
+    e.preventDefault();
+    const r = box.getBoundingClientRect();
+    const ox = e.clientX - r.left, oy = e.clientY - r.top;
+    const move = (ev) => {
+      const left = Math.max(0, Math.min(window.innerWidth - 60, ev.clientX - ox));
+      const top = Math.max(0, Math.min(window.innerHeight - 24, ev.clientY - oy));
+      box.style.left = left + 'px'; box.style.top = top + 'px'; box.style.right = 'auto'; box.style.bottom = 'auto';
+      _tcPopupPos = { left: box.style.left, top: box.style.top };
+    };
+    const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+  });
+}
+function renderTcProxyPopup() {
+  if (!_tcPopupEl) { _tcPopupEl = el('div', { class: 'tc-popup', id: 'tc-popup' }); document.body.appendChild(_tcPopupEl); }
+  const pop = _tcPopupEl;
+  const onProxy = document.getElementById('tab-proxy').classList.contains('active');
+  const c = tcData.find((x) => x.id === tcActiveId);
+  if (!onProxy || !c) { pop.style.display = 'none'; return; }
+  pop.style.display = 'block';
+  pop.innerHTML = '';
+  const openBtn = el('span', { class: 'tc-popup-open', title: 'เปิดในแท็บ Test Case', text: '↗' });
+  openBtn.addEventListener('click', () => tcNavToCase(c));
+  const head = el('div', { class: 'tc-popup-head' }, [el('span', { class: 'tc-popup-title', text: '🎬 ' + (c.name || 'Test Case') }), openBtn]);
+  pop.appendChild(head);
+  const cursors = c.cursors || {}; const hits = c.hits || {};
+  const body = el('div', { class: 'tc-popup-body' });
+  c.endpoints.forEach((ep, ei) => {
+    const enabled = ep.steps.map((s, idx) => ({ s, idx })).filter((x) => x.s.enabled !== false);
+    if (!enabled.length) return;
+    const k = `${ep.method || 'ANY'} ${ep.urlPattern}`;
+    const cur = Math.min(cursors[k] || 0, enabled.length - 1);
+    const curStep = enabled[cur].s; const curFull = enabled[cur].idx;
+    const h = hits[k] || 0; const times = Math.max(1, curStep.times || 1);
+    const nextI = c.loop ? (cur + 1) % enabled.length : Math.min(cur + 1, enabled.length - 1);
+    const epLine = el('div', { class: 'tc-popup-ep', title: 'ไปที่ endpoint นี้' }, [
+      el('span', { class: 'tc-nav-method m-' + (ep.method || 'any').toLowerCase(), text: ep.method || 'ANY' }),
+      el('span', { class: 'tc-popup-path', text: ep.urlPattern || '(no pattern)' }),
+    ]);
+    epLine.addEventListener('click', () => tcNavToCase(c, `.tc-ep[data-ep-idx="${ei}"]`));
+    const curLine = el('div', { class: 'tc-popup-cur', title: 'ไปที่ step นี้' }, [
+      el('span', { class: 'tc-popup-badge', text: 'ตอนนี้' }),
+      el('span', { class: 'tc-popup-step', text: `#${curFull + 1} ${curStep.label || ''}` }),
+      times > 1 ? el('span', { class: 'tc-popup-times', text: `${h + 1}/${times}` }) : el('span'),
+    ]);
+    curLine.addEventListener('click', () => tcNavToCase(c, `.tc-step[data-ep-idx="${ei}"][data-step="${curFull}"]`));
+    const nextLine = el('div', { class: 'tc-popup-next', text: `→ ถัดไป: #${enabled[nextI].idx + 1} ${enabled[nextI].s.label || ''}` });
+    const prev = el('button', { class: 'tc-popup-btn', type: 'button', title: 'ย้อน step', text: '◀' });
+    const nxt = el('button', { class: 'tc-popup-btn', type: 'button', title: 'ไป step ถัดไป', text: '▶' });
+    prev.addEventListener('click', async (e) => { e.stopPropagation(); const to = (cur - 1 + enabled.length) % enabled.length; await fetch('/api/testcases/goto', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pattern: ep.urlPattern, index: to }) }); await tcPopupRefresh(); });
+    nxt.addEventListener('click', async (e) => { e.stopPropagation(); await fetch('/api/testcases/next', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pattern: ep.urlPattern }) }); await tcPopupRefresh(); });
+    body.append(epLine, curLine, nextLine, el('div', { class: 'tc-popup-ctrls' }, [prev, nxt, el('span', { class: 'tc-popup-hint', text: 'เปลี่ยน step ปัจจุบัน' })]));
+  });
+  pop.appendChild(body);
+  if (_tcPopupPos) { pop.style.left = _tcPopupPos.left; pop.style.top = _tcPopupPos.top; pop.style.right = 'auto'; pop.style.bottom = 'auto'; }
+  tcPopupDraggable(head, pop);
 }
 
 // คลิก tag Map Local ในแท็บ Proxy → ไปแท็บ Map Local + เปิดกฎนั้น
@@ -1949,7 +2031,7 @@ const tcEditorEl = document.getElementById('tc-editor');
 let tcData = [];
 let tcActiveId = null;
 let tcSelectedId = null;
-const newStep = () => ({ label: '', status: 200, contentType: 'application/json', body: '', enabled: true, mode: 'mock', overrides: [] });
+const newStep = () => ({ label: '', status: 200, contentType: 'application/json', body: '', enabled: true, mode: 'mock', times: 1, overrides: [] });
 const newEndpoint = () => ({ method: 'GET', urlPattern: '', steps: [newStep()] });
 
 async function loadCases() {
@@ -1960,6 +2042,7 @@ async function loadCases() {
   // auto-focus: ยังไม่ได้เลือก + มีเคสที่ active → เปิดเคสนั้นให้เลย
   if (!tcSelectedId && tcActiveId && tcData.some((c) => c.id === tcActiveId)) tcSelectedId = tcActiveId;
   renderTcList();
+  renderTcProxyPopup(); // เผื่อ active case เปลี่ยน → อัปเดต popup ในหน้า Proxy
   const sel = tcData.find((c) => c.id === tcSelectedId);
   if (sel) renderTcEditor(sel);
 }
@@ -2175,7 +2258,7 @@ function renderTcEditor(caseObj) {
     loop: caseObj.loop === true,
     endpoints: (caseObj.endpoints || []).map((e) => ({
       method: e.method || 'GET', urlPattern: e.urlPattern || '',
-      steps: (e.steps || []).map((s) => ({ label: s.label || '', status: s.status || 200, contentType: s.contentType || 'application/json', body: s.body || '', enabled: s.enabled !== false, mode: s.mode === 'passthrough' ? 'passthrough' : 'mock', overrides: Array.isArray(s.overrides) ? s.overrides : [] })),
+      steps: (e.steps || []).map((s) => ({ label: s.label || '', status: s.status || 200, contentType: s.contentType || 'application/json', body: s.body || '', enabled: s.enabled !== false, mode: s.mode === 'passthrough' ? 'passthrough' : 'mock', times: Math.max(1, Number(s.times) || 1), overrides: Array.isArray(s.overrides) ? s.overrides : [] })),
     })),
   };
   if (!model.endpoints.length) model.endpoints.push(newEndpoint());
@@ -2245,6 +2328,9 @@ function renderTcEditor(caseObj) {
         sStatus.addEventListener('input', () => { st.status = parseInt(sStatus.value, 10) || 200; });
         const sCt = el('input', { type: 'text', class: 'tc-step-ct', value: st.contentType, placeholder: 'content-type' });
         sCt.addEventListener('input', () => { st.contentType = sCt.value; });
+        // times = ต้องเรียกกี่ครั้งก่อนไป step ถัดไป (default 1)
+        const sTimes = el('input', { type: 'number', class: 'tc-step-times', min: '1', value: String(st.times || 1), title: 'เรียกกี่ครั้งก่อนไป step ถัดไป (×N)' });
+        sTimes.addEventListener('input', () => { st.times = Math.max(1, parseInt(sTimes.value, 10) || 1); });
         // โหมด Mock/Passthrough ต่อ step (เหมือน Map Local) — chip เล็กหลัง content-type สูงเท่าปุ่มเปิด
         const pt = st.mode === 'passthrough';
         const mkStepMode = (val, txt, title) => {
@@ -2268,7 +2354,7 @@ function renderTcEditor(caseObj) {
         const bodyEd = makeJsonEditor(st.body);
         bodyEd.textarea.addEventListener('input', () => { st.body = bodyEd.textarea.value; });
         bodyEd.wrap.classList.add('tc-step-body');
-        stBox.appendChild(el('div', { class: 'tc-step-head' }, [el('span', { class: 'tc-step-num', text: `#${si + 1}${off ? ' · ปิด' : ''}` }), sLabel, sStatus, sCt, modeGroup, enToggle, moveSt, dupSt, rmSt]));
+        stBox.appendChild(el('div', { class: 'tc-step-head' }, [el('span', { class: 'tc-step-num', text: `#${si + 1}${off ? ' · ปิด' : ''}` }), sLabel, sStatus, sCt, el('span', { class: 'tc-times-x', text: '×' }), sTimes, modeGroup, enToggle, moveSt, dupSt, rmSt]));
         if (pt) stBox.appendChild(el('div', { class: 'tc-file-banner', text: '🔀 Passthrough: ใช้ response จริงจาก server — body ด้านล่างไม่ถูกใช้ (แก้ด้วย Override)' }));
         stBox.appendChild(bodyEd.wrap);
         // override เฉพาะ key ของ step นี้ — เปิดใช้เฉพาะ Passthrough (เหมือน Map Local; Mock แก้ body ตรงๆ)

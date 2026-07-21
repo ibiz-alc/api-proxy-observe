@@ -1039,9 +1039,11 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .tc-step-head { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
 .tc-step-num { font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
 .tc-step.current .tc-step-num { color: var(--accent); font-weight: 600; }
-.tc-step-label { flex: 1; }
-.tc-step-status { flex: 0 0 66px; }
-.tc-step-ct { flex: 0 0 150px; }
+.tc-step-label { flex: 1 1 auto; }              /* กว้างขึ้น (กินพื้นที่ที่เหลือ) */
+.tc-step-status { flex: 0 0 52px; }             /* พอสำหรับ ~5 ตัวอักษร */
+.tc-step-ct { flex: 0 0 78px; }                 /* เล็กลงครึ่งนึง */
+.tc-times-x { color: var(--muted); font-size: 0.8rem; }
+.tc-step-times { flex: 0 0 46px; }              /* ช่อง times (×N) */
 .tc-step-body { height: 130px; flex: none; margin-top: 4px; }
 .tc-x { background: transparent; border: 1px solid var(--border); color: var(--red); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
 .tc-dup { background: transparent; border: 1px solid var(--border); color: var(--accent); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
@@ -1057,6 +1059,32 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .smm-ep { flex: 1; min-width: 0; font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .smm-btn { flex-shrink: 0; font-size: 0.7rem; padding: 2px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text); cursor: pointer; white-space: nowrap; }
 .smm-btn:hover { background: var(--accent); color: #0f172a; border-color: var(--accent); }
+
+/* ===== Popup Test Case ในหน้า Proxy (ลากย้ายได้) ===== */
+.tc-popup {
+  position: fixed; right: 20px; bottom: 20px; z-index: 9000;
+  width: 310px; max-height: 62vh; overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--accent); border-radius: 10px;
+  box-shadow: 0 12px 44px rgba(0, 0, 0, 0.6); font-size: 0.82rem;
+}
+.tc-popup-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; background: var(--panel-2); border-bottom: 1px solid var(--border); border-radius: 10px 10px 0 0; }
+.tc-popup-title { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-popup-open { cursor: pointer; color: var(--accent); font-size: 1rem; padding: 0 4px; }
+.tc-popup-open:hover { color: var(--text); }
+.tc-popup-body { padding: 6px 12px 12px; }
+.tc-popup-ep { display: flex; align-items: center; gap: 6px; margin-top: 10px; cursor: pointer; }
+.tc-popup-ep:hover .tc-popup-path { color: var(--accent); }
+.tc-popup-path { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-popup-cur { display: flex; align-items: center; gap: 6px; padding: 5px 0; cursor: pointer; }
+.tc-popup-cur:hover .tc-popup-step { color: var(--accent); }
+.tc-popup-badge { flex-shrink: 0; font-size: 0.6rem; font-weight: 700; color: #0f172a; background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+.tc-popup-step { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-popup-times { margin-left: auto; flex-shrink: 0; font-size: 0.72rem; color: var(--yellow); font-weight: 700; }
+.tc-popup-next { color: var(--muted); font-size: 0.76rem; padding-left: 2px; }
+.tc-popup-ctrls { display: flex; align-items: center; gap: 6px; margin: 6px 0 2px; }
+.tc-popup-btn { border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: 6px; padding: 2px 12px; cursor: pointer; }
+.tc-popup-btn:hover { background: var(--accent); color: #0f172a; border-color: var(--accent); }
+.tc-popup-hint { font-size: 0.68rem; color: var(--muted); }
 /* toggle เปิด/ปิด step + สภาพ step ที่ปิด */
 .tc-step-toggle { background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 2px 10px; font-size: 0.72rem; font-weight: 700; cursor: pointer; white-space: nowrap; }
 .tc-step-toggle.on { border-color: var(--green); color: var(--green); }
