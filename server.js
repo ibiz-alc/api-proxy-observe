@@ -383,7 +383,9 @@ app.post('/api/testcases/goto', express.json(), (req, res) => {
   const { pattern, index } = req.body || {};
   const ep = c.endpoints.find((e) => e.urlPattern === pattern);
   if (!ep) return res.status(404).json({ ok: false, error: 'ไม่พบ endpoint pattern นี้ใน case' });
-  caseCursors[cursorKey(ep)] = Math.max(0, Math.min(Number(index) || 0, Math.max(0, ep.steps.length - 1)));
+  // index = ตำแหน่งใน enabled-sublist (เหมือน cursor)
+  const enabledLen = ep.steps.filter((s) => s.enabled !== false).length;
+  caseCursors[cursorKey(ep)] = Math.max(0, Math.min(Number(index) || 0, Math.max(0, enabledLen - 1)));
   res.json({ ok: true, cursors: caseWithState(c).cursors });
 });
 

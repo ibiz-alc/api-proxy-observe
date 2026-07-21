@@ -239,11 +239,13 @@ pre.code-block {
 
 /* code block + ปุ่ม copy มุมขวาบน */
 .code-wrap { position: relative; }
+/* sticky + float → ปุ่มค้างมุมบนขวาเสมอ ไม่ scroll หายไปกับเนื้อหา */
 .copy-btn {
-  position: absolute;
+  position: sticky;
   top: 6px;
-  right: 6px;
-  z-index: 2;
+  float: right;
+  margin: 0 6px 0 8px;
+  z-index: 3;
   background: var(--panel-2);
   border: 1px solid var(--border);
   color: var(--muted);
@@ -254,8 +256,9 @@ pre.code-block {
 }
 .code-wrap:hover .copy-btn { opacity: 1; }
 .copy-btn:hover { color: var(--accent); border-color: var(--accent); }
-.code-wrap .code-block { padding-top: 30px; }
-.detail-pane-body .code-wrap .code-block { padding: 26px 0 0; }
+/* ไม่ต้องเว้น padding-top แล้ว เพราะปุ่ม float อยู่ในบรรทัดแรก (JSON ขึ้น { ซ้าย ปุ่มอยู่ขวา ไม่ทับ) */
+.code-wrap .code-block { padding-top: 0; }
+.detail-pane-body .code-wrap .code-block { padding: 0; }
 
 /* JSON syntax highlight */
 pre.code-block.json { color: #cbd5e1; }
@@ -270,6 +273,22 @@ pre.code-block.json { color: #cbd5e1; }
 .json-num { color: #fca5a5; }    /* แดงอ่อน — number */
 .json-bool { color: #fcd34d; font-weight: 600; }  /* เหลือง — boolean */
 .json-null { color: #94a3b8; font-style: italic; } /* เทา — null */
+
+/* ===== JSON tree viewer (พับได้ + เส้น guide) ===== */
+.jt { font-family: ui-monospace, Menlo, monospace; font-size: 0.86rem; line-height: 1.55; color: #cbd5e1; }
+.jt-line { white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 3px; }
+.jt-head { cursor: pointer; }
+.jt-head:hover { background: rgba(255, 255, 255, 0.05); }
+.jt-toggle { display: inline-block; width: 1.15em; margin-left: -1.15em; color: var(--muted); user-select: none; text-align: center; }
+.jt-head:hover .jt-toggle { color: var(--accent); }
+/* เส้น guide บอกระดับ/ว่า data อยู่ใน object ไหน (ยิ่ง hover ยิ่งเด่นเป็นเส้นทางไล่ระดับ) */
+.jt-children { padding-left: 16px; margin-left: 3px; border-left: 1px solid var(--border); }
+.jt-node:hover > .jt-children { border-left-color: var(--accent); }
+.jt-index { color: var(--muted); }
+.jt-colon, .jt-punct { color: var(--muted); }
+.jt-summary { color: var(--muted); font-size: 0.82em; opacity: 0.75; }
+.jt-ellipsis { color: var(--muted); }
+.jt-scroll { overflow: auto; }
 
 .file-chip {
   display: inline-block;
@@ -926,10 +945,10 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
   background: rgba(56,189,248,0.14); color: var(--text); font-weight: 700; border-left-color: var(--accent);
 }
 .tc-nav-step.current .tc-nav-bullet { color: var(--accent); }
-.tc-nav-step.current::after {
-  content: 'ตอนนี้'; margin-left: auto; font-size: 0.6rem; font-weight: 700;
-  color: #0f172a; background: var(--accent); border-radius: 4px; padding: 0 6px;
-}
+/* ไอคอนตั้ง step ปัจจุบัน — โผล่ตอน hover แถว step */
+.tc-nav-set { margin-left: auto; flex-shrink: 0; color: var(--muted); opacity: 0; cursor: pointer; padding: 0 4px; font-size: 0.9rem; }
+.tc-nav-step:hover .tc-nav-set { opacity: 0.7; }
+.tc-nav-set:hover { opacity: 1 !important; color: var(--accent); }
 /* เว้นระยะจากขอบบนตอนคลิกเลื่อนไปหา (block:start) — คงไว้ตามที่แก้แล้ว */
 .tc-ep, .tc-step { scroll-margin-top: 12px; }
 
@@ -1012,8 +1031,11 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .tc-ep-head { display: flex; gap: 6px; align-items: center; }
 .tc-ep-method { flex: 0 0 90px; }
 .tc-ep-pattern { flex: 1; }
-.tc-step { border-left: 3px solid var(--border); padding: 6px 0 6px 8px; margin: 8px 0; }
+.tc-step { border-left: 3px solid var(--border); padding: 6px 0 6px 8px; margin: 8px 0; transition: opacity 0.12s, background 0.12s; }
 .tc-step.current { border-left-color: var(--accent); background: rgba(96, 165, 250, 0.06); }
+/* กำลังแก้ step ไหน → เน้นกล่องนั้น, step อื่นใน endpoint เดียวกันจางลง (กันลายตาเวลาข้อมูลเยอะ) */
+.tc-ep:focus-within .tc-step { opacity: 0.4; }
+.tc-ep:focus-within .tc-step:focus-within { opacity: 1; border-left-color: var(--accent); background: rgba(56, 189, 248, 0.07); }
 .tc-step-head { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
 .tc-step-num { font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
 .tc-step.current .tc-step-num { color: var(--accent); font-weight: 600; }
@@ -1024,6 +1046,17 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .tc-x { background: transparent; border: 1px solid var(--border); color: var(--red); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
 .tc-dup { background: transparent; border: 1px solid var(--border); color: var(--accent); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
 .tc-dup:hover { background: var(--accent); color: #0f172a; }
+/* เมนูย้าย/คัดลอก step ไป endpoint */
+.step-move-menu { min-width: 250px; max-width: 360px; max-height: 60vh; overflow-y: auto; }
+.smm-title { font-size: 0.72rem; color: var(--muted); padding: 4px 10px 6px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.smm-row { display: flex; align-items: center; gap: 6px; padding: 4px 8px; }
+.smm-row:hover { background: var(--panel-2); }
+.smm-ep-head { font-size: 0.7rem; font-weight: 700; color: var(--accent); padding: 6px 10px 3px; }
+.smm-empty { font-size: 0.72rem; color: var(--muted); padding: 2px 14px 4px; }
+.smm-row.smm-self { opacity: 0.6; }
+.smm-ep { flex: 1; min-width: 0; font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.smm-btn { flex-shrink: 0; font-size: 0.7rem; padding: 2px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text); cursor: pointer; white-space: nowrap; }
+.smm-btn:hover { background: var(--accent); color: #0f172a; border-color: var(--accent); }
 /* toggle เปิด/ปิด step + สภาพ step ที่ปิด */
 .tc-step-toggle { background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 2px 10px; font-size: 0.72rem; font-weight: 700; cursor: pointer; white-space: nowrap; }
 .tc-step-toggle.on { border-color: var(--green); color: var(--green); }
