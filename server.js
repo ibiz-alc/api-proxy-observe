@@ -38,8 +38,16 @@ function broadcast(event, data) {
 const proxyStore = { flows: [] };
 const proxyImages = new Map(); // "<flowId>:<req|res>" -> { buf, ct }
 let proxyCaPath = null;
-// เมื่อกด disconnect ที่เว็บ → mute ทันที (แอปที่ยัง cache proxy ไว้จะยิงต่อ แต่เราไม่รับ/ไม่โชว์)
-let proxyMuted = false;
+// mute แบบหมดอายุเอง: เก็บ "เวลาที่ mute จะหมด" แทน boolean ค้าง
+// - disconnect → mute สั้นๆ กลืน straggler จากแอปที่ยัง cache proxy แล้ว "ปลดเอง" อัตโนมัติ
+// - เดิมเป็น boolean ค้าง true ตลอด → ตั้ง proxy เองบนมือถือ/เสียบสายใหม่โดยไม่กด connect ที่เว็บ
+//   จะทำให้ server ทิ้งทุก flow เงียบๆ (ดูเหมือน "เชื่อมไม่ได้") — timebox แก้ตรงนี้
+// disconnect → mute "ค้าง" จนกว่าจะ connect ใหม่/สั่งปลด/รีสตาร์ท server (ผู้ใช้ต้องการ "ตัดแล้วเงียบ")
+// กัน bug เดิม (ทิ้ง flow เงียบๆ จนงง): นับจำนวน flow ที่ถูกทิ้งตอน mute แล้วโชว์ใน status ให้เห็น + มีปุ่มปลด
+let muteUntil = 0;             // flow จะถูกทิ้งเมื่อ Date.now() < muteUntil (Infinity = ค้างจนสั่งปลด)
+let mutedDropCount = 0;        // จำนวน flow ที่ถูกทิ้งระหว่าง mute (โชว์ให้ผู้ใช้เห็น ไม่ให้เงียบ)
+const isMuted = () => Date.now() < muteUntil;
+const unmute = () => { muteUntil = 0; mutedDropCount = 0; }; // เปิดรับ flow + รีเซ็ตตัวนับ
 
 // ================= Map Local (mock rules) =================
 let mapRules = [];
@@ -292,7 +300,7 @@ app.post('/api/testcases/:id/activate', express.json(), (req, res) => {
   if (!c) return res.status(404).json({ ok: false, error: 'ไม่พบ test case' });
   activeCaseId = c.id; // exclusive: active ได้ทีละ case
   if ((req.body || {}).resetOnActivate !== false) caseCursors = {}; // default reset cursor
-  proxyMuted = false;
+  unmute();
   res.json({ ok: true, active: caseWithState(c) });
 });
 
@@ -553,7 +561,7 @@ app.get('/api/proxy/flows', (req, res) => {
 
 // รับ flow ที่ถอดรหัสจาก mitmproxy (ผ่าน addon) มาแสดงในแท็บ Proxy — รองรับ HTTPS/h2 เต็มรูปแบบ
 app.post('/api/proxy/ingest', express.json({ limit: '40mb' }), async (req, res) => {
-  if (proxyMuted) return res.json({ ok: true, muted: true }); // ตัดการเชื่อมต่อแล้ว — ไม่รับ flow
+  if (isMuted()) { mutedDropCount++; return res.json({ ok: true, muted: true, dropped: mutedDropCount }); } // mute อยู่ (หลัง disconnect) — ทิ้ง flow แต่ยังนับให้เห็น
   const b = req.body || {};
   const id = b.id || crypto.randomUUID();
   const flow = {
@@ -722,7 +730,8 @@ async function listDevices() {
     } catch { /* ignore */ }
     // adb-over-wifi serial จะเป็น ip:port → เลือกเงื่อนไข Wi-Fi ให้อัตโนมัติ
     const transport = /^\d+\.\d+\.\d+\.\d+:\d+$/.test(serial) ? 'wifi' : 'usb';
-    devices.push({ serial, model: model.replace(/_/g, ' '), connected, proxy: connected ? proxy : null, mode, posternRunning, transport });
+    const emulator = /^emulator-/.test(serial); // emulator → รองรับติดตั้ง CA เข้า system store อัตโนมัติ
+    devices.push({ serial, model: model.replace(/_/g, ' '), connected, proxy: connected ? proxy : null, mode, posternRunning, transport, emulator });
   }
   return devices;
 }
@@ -792,7 +801,7 @@ app.post('/api/devices/connect', express.json(), async (req, res) => {
         '--es', 'apitester_host', phost,
         '--ei', 'apitester_port', String(pport),
         '--ez', 'apitester_connect', 'true']);
-      proxyMuted = false;
+      unmute();
       return res.json({ ok: true, connected: true, method, mode, host: phost, port: pport });
     }
     const { target } = await resolveTarget(S, mode);
@@ -800,7 +809,7 @@ app.post('/api/devices/connect', express.json(), async (req, res) => {
     // loopback/reverse tunnel ทำให้ http_proxy 127.0.0.1:8888 ส่งไม่ถึง mitmproxy
     await adb([...S, 'shell', 'am', 'force-stop', POSTERN_PKG]).catch(() => {});
     await adb([...S, 'shell', 'settings', 'put', 'global', 'http_proxy', target]);
-    proxyMuted = false; // เปิดรับ flow อีกครั้ง
+    unmute(); // เปิดรับ flow อีกครั้ง
     res.json({ ok: true, connected: true, method, mode, proxy: target });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -818,12 +827,23 @@ app.post('/api/devices/disconnect', express.json(), async (req, res) => {
         '--es', 'apitester_host', '127.0.0.1',
         '--ez', 'apitester_disconnect', 'true']);
     } else {
+      // ตัด proxy จริงบนเครื่อง — เคลียร์ทุก key (global + split host/port + pac/exclusion) ให้เกลี้ยง
+      // (ทั้ง USB และ Wi-Fi ใช้ global http_proxy เหมือนกัน; delete http_proxy ปกติล้าง split key ให้ด้วย
+      //  แต่ลบตรงๆ ทุกตัวกันเหนียว เผื่อบางรุ่นค้าง)
       await adb([...S, 'shell', 'settings', 'put', 'global', 'http_proxy', ':0']);
-      await adb([...S, 'shell', 'settings', 'delete', 'global', 'http_proxy']).catch(() => {});
+      for (const k of ['http_proxy', 'global_http_proxy_host', 'global_http_proxy_port',
+        'global_http_proxy_exclusion_list', 'global_proxy_pac_url']) {
+        await adb([...S, 'shell', 'settings', 'delete', 'global', k]).catch(() => {});
+      }
+      // แจ้งแอปให้รับรู้ทันที ไม่ต้องรอ network reconfigure (Wi-Fi ที่ยัง cache proxy อยู่)
+      await adb([...S, 'shell', 'am', 'broadcast', '-a', 'android.intent.action.PROXY_CHANGE']).catch(() => {});
+      // ตัด reverse tunnel (USB/emulator) — path ไปหา mitmproxy ขาดทันที
       await adb([...S, 'reverse', '--remove', `tcp:${MITM_PORT}`]).catch(() => {});
     }
-    // mute + ล้าง flow list — กันแอปที่ cache proxy ไว้ยิงต่อแล้วโผล่ใหม่
-    proxyMuted = true;
+    // mute ค้าง (จนกว่าจะ connect ใหม่/สั่งปลด) + ล้าง flow list — "ตัดแล้วเงียบ"
+    // ถ้าเครื่องยัง cache proxy แล้วยิงต่อ flow จะถูกทิ้ง (นับไว้ที่ mutedDropCount โชว์ใน status)
+    muteUntil = Infinity;
+    mutedDropCount = 0;
     proxyStore.flows.length = 0;
     proxyImages.clear();
     broadcast('proxy-clear', {});
@@ -837,8 +857,9 @@ app.post('/api/devices/disconnect', express.json(), async (req, res) => {
 // โดยไม่กด connect ในเว็บ): ถ้าก่อนหน้ากด disconnect ไว้ mute จะค้าง true และ server
 // จะทิ้งทุก flow เงียบๆ — ปลดด้วย POST {"muted":false}
 app.post('/api/proxy/mute', express.json(), (req, res) => {
-  proxyMuted = !!(req.body || {}).muted;
-  res.json({ ok: true, muted: proxyMuted });
+  // สั่งเอง: muted:true = mute ค้าง (Infinity), muted:false = ปลด + รีเซ็ตตัวนับ
+  if ((req.body || {}).muted) muteUntil = Infinity; else unmute();
+  res.json({ ok: true, muted: isMuted() });
 });
 
 // ดัน CA ของ mitmproxy เข้าเครื่อง (Downloads) + เปิดหน้า Settings ให้ติดตั้ง
@@ -999,6 +1020,82 @@ app.post('/api/devices/ios-sim/install-ca', express.json(), async (req, res) => 
   res.json({ ok: true, installed: done, failed });
 });
 
+// ===== Android Emulator — ติดตั้ง CA ลง SYSTEM trust store อัตโนมัติ (auto-trust) =====
+// เครื่องจริง (ไม่ root) ลง CA ได้แค่ user store ซึ่งแอปส่วนใหญ่ไม่เชื่อ → HTTPS ไม่ผ่าน
+// แต่ emulator แบบ userdebug root ได้ → ยัด CA เข้า system store ให้เลย HTTPS ทะลุทันที (ยกเว้นแอปที่ pin cert)
+// เทคนิค Android 14+ (API 34+): trust store ย้ายไป Conscrypt APEX (/apex/.../cacerts) ซึ่ง read-only
+//   → tmpfs ทับ /system/etc/security/cacerts (ใส่ CA ระบบเดิม+ตัวเรา ครบ) แล้ว bind ทับ apex
+//   → propagate mount เข้า namespace ของ zygote + restart framework (stop;start) ให้ USAP pool/แอปเกิดใหม่เห็น mount
+async function isEmulator(serial) {
+  try {
+    const qemu = (await adb(['-s', serial, 'shell', 'getprop', 'ro.boot.qemu'])).trim();
+    const kqemu = (await adb(['-s', serial, 'shell', 'getprop', 'ro.kernel.qemu'])).trim();
+    return serial.startsWith('emulator-') || qemu === '1' || kqemu === '1';
+  } catch { return serial.startsWith('emulator-'); }
+}
+
+app.post('/api/devices/install-ca-emulator', express.json(), async (req, res) => {
+  const serial = (req.body || {}).serial;
+  if (!serial) return res.status(400).json({ ok: false, error: 'ต้องระบุ serial' });
+  const S = ['-s', serial];
+  try {
+    if (!(await isEmulator(serial))) {
+      return res.status(400).json({ ok: false, error: 'ใช้ได้เฉพาะ Android Emulator — เครื่องจริงลง system CA ไม่ได้ (ไม่มี root) ใช้ปุ่ม "ติดตั้ง CA (คู่มือ)" แทน' });
+    }
+    const caPath = await ensureMitmCa();
+    // Android เก็บ CA เป็นไฟล์ชื่อ <subject_hash_old>.0
+    const { stdout: hashOut } = await execFileP('openssl', ['x509', '-inform', 'PEM', '-subject_hash_old', '-noout', '-in', caPath], { timeout: 8000 });
+    const hash = hashOut.trim().split('\n')[0];
+    if (!/^[0-9a-f]{8}$/.test(hash)) throw new Error('คำนวณ hash ของ CA ไม่ได้: ' + hash);
+
+    // ต้อง root ก่อน (userdebug/emulator เท่านั้น) — Play image จะ fail ตรงนี้
+    try { await adb([...S, 'root'], 20000); } catch (e) { /* already root or transient */ }
+    await new Promise((r) => setTimeout(r, 1500));
+    await adb([...S, 'wait-for-device'], 20000);
+    const who = (await adb([...S, 'shell', 'id', '-u'])).trim();
+    if (who !== '0') throw new Error('adb root ไม่สำเร็จ (ได้ uid=' + who + ') — emulator ต้องเป็น image แบบ userdebug/ไม่ใช่ Google Play');
+
+    await adb([...S, 'push', caPath, `/data/local/tmp/${hash}.0`]);
+    // สคริปต์ติดตั้ง (รันเป็น root) — ดูคอมเมนต์บล็อกด้านบน
+    const script = [
+      `HASH=${hash}`,
+      'CERTS=/apex/com.android.conscrypt/cacerts',
+      'SYS=/system/etc/security/cacerts',
+      'TMP=/data/local/tmp/cacerts-work',
+      'rm -rf $TMP; mkdir -p $TMP',
+      'cp $CERTS/* $TMP/ 2>/dev/null || true',
+      'cp /data/local/tmp/$HASH.0 $TMP/',
+      'chown root:root $TMP/* 2>/dev/null; chmod 644 $TMP/*',
+      'mount -t tmpfs tmpfs $SYS 2>/dev/null || true',
+      'cp $TMP/* $SYS/',
+      'chown root:root $SYS/* 2>/dev/null; chmod 644 $SYS/*',
+      'chcon u:object_r:system_security_cacerts_file:s0 $SYS/* 2>/dev/null || true',
+      'mount --bind $SYS $CERTS',
+      'for pid in $(pgrep zygote) $(pgrep zygote64); do nsenter --mount=/proc/$pid/ns/mnt -- mount --bind $SYS $CERTS 2>/dev/null || true; done',
+      'echo INSTALL_OK',
+    ].join('\n');
+    const out = await adb([...S, 'shell', 'su', '0', 'sh', '-c', script], 30000);
+    // ยืนยันว่าไฟล์อยู่ใน apex store จริง
+    const check = await adb([...S, 'shell', 'ls', `/apex/com.android.conscrypt/cacerts/${hash}.0`]).catch(() => '');
+    if (!check.includes(`${hash}.0`)) throw new Error('ติดตั้งไม่สำเร็จ (ไม่พบไฟล์ใน apex store)\n' + out);
+
+    // restart framework ให้ zygote + USAP pool + แอปทั้งหมดเกิดใหม่ภายใต้ mount ใหม่ (tmpfs อยู่ใน init ns → รอด)
+    await adb([...S, 'shell', 'su', '0', 'stop'], 15000).catch(() => {});
+    await adb([...S, 'shell', 'su', '0', 'start'], 15000).catch(() => {});
+    // รอ boot_completed กลับมา
+    let booted = false;
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      const b = (await adb([...S, 'shell', 'getprop', 'sys.boot_completed']).catch(() => '')).trim();
+      if (b === '1') { booted = true; break; }
+    }
+    res.json({ ok: true, hash, booted,
+      note: 'ติดตั้ง CA เข้า system store แล้ว (restart framework เรียบร้อย) — HTTPS ถอดรหัสได้เลย ยกเว้นแอปที่ทำ certificate pinning' });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ติดตั้งแอป Proxy Postern (APK) ลงเครื่อง — build ให้ถ้ายังไม่มี แล้ว adb install -r
 const POSTERN_DIR = path.join(__dirname, 'android', 'ProxyPostern');
 const POSTERN_APK = path.join(POSTERN_DIR, 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk');
@@ -1069,7 +1166,8 @@ app.get('/api/status', async (req, res) => {
         mcp: { up: mcpUp, port: MCP_PORT, url: `http://127.0.0.1:${MCP_PORT}/mcp` },
       },
       devices,
-      muted: proxyMuted,
+      muted: isMuted(),
+      mutedDropped: mutedDropCount,
       flows: { count: proxyStore.flows.length, lastAt: lastFlowAt },
       lanIp: getLanIp(),
     });

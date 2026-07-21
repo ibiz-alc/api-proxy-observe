@@ -649,7 +649,7 @@ function renderDeviceTree() {
   }
 
   const allItem = el('div', { class: 'tree-item tree-device' + (!selDevice && !selPin ? ' active' : '') }, [
-    el('span', { class: 'tree-label', text: '🌐 ทุก device' }),
+    el('span', { class: 'tree-label', text: '🌐 Devices' }),
     el('span', { class: 'tree-count', text: String(allFlows.length) }),
   ]);
   allItem.addEventListener('click', () => { selDevice = ''; selHost = ''; selPin = ''; renderProxy(); });
@@ -1874,6 +1874,29 @@ async function stDisconnectDevice(serial) {
   if (!r.ok) throw new Error(r.error || 'disconnect ไม่สำเร็จ');
 }
 
+// ติดตั้ง CA เข้า system store ของ Android Emulator อัตโนมัติ (auto-trust HTTPS)
+// stBtn ครอบ busy state + จับ error ให้แล้ว — ที่นี่แค่ยิง endpoint + แจ้งผล
+async function stInstallCaEmulator(serial) {
+  const r = await (await fetch('/api/devices/install-ca-emulator', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ serial }),
+  })).json();
+  if (!r.ok) throw new Error(r.error);
+  alert('✅ ติดตั้ง CA เข้า system store แล้ว\n\n' + r.note
+    + '\n\nแอปที่เปิดค้างอยู่ให้ปิด-เปิดใหม่ (force-stop) เพื่อให้เชื่อ CA · แอปที่ทำ certificate pinning จะยังถอดรหัสไม่ได้ (ปกติ)');
+  renderStatus();
+}
+
+// ปลด mute ตรงๆ (ไม่ต้อง reconnect) — ใช้ตอนตั้ง proxy เองบนมือถือ/emulator แล้วอยากรับ flow
+async function stUnmute() {
+  const r = await (await fetch('/api/proxy/mute', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ muted: false }),
+  })).json();
+  if (!r.ok) throw new Error(r.error || 'ปลด mute ไม่สำเร็จ');
+  renderStatus();
+}
+
 async function stConnectDevice(serial, mode) {
   const r = await (await fetch('/api/devices/connect', {
     method: 'POST',
@@ -2062,7 +2085,7 @@ async function renderStatus() {
     statusCards.appendChild(el('p', { class: 'empty-msg', text: 'เช็คสถานะไม่ได้: ' + e.message }));
     return;
   }
-  const { services: sv, devices, muted, flows, lanIp } = d;
+  const { services: sv, devices, muted, mutedDropped = 0, flows, lanIp } = d;
   statusCards.innerHTML = '';
 
   // --- ความพร้อมรวมของ pipeline บันทึก traffic ---
@@ -2073,7 +2096,7 @@ async function renderStatus() {
   if (!devices.length) blockers.push('ไม่พบ device — เสียบสาย USB + เปิด USB debugging');
   else if (!connectedDev) blockers.push('มือถือยังไม่ได้เชื่อม proxy — กดปุ่มเชื่อมที่การ์ด Device');
   if (usbNoReverse) blockers.push('adb reverse หายไป (สายหลุด/เสียบใหม่) — กดเชื่อม USB ใหม่');
-  if (muted) blockers.push('การบันทึกถูก mute อยู่ — กดเชื่อม device เพื่อปลด');
+  if (muted) blockers.push('การบันทึกถูก mute อยู่ (หลังกด disconnect)' + (mutedDropped ? ` — ทิ้งไป ${mutedDropped} flows` : '') + ' · กดปลด mute ที่การ์ด "การบันทึก traffic"');
   statusBanner.className = 'status-banner ' + (blockers.length ? 'bad' : 'ok');
   statusBanner.innerHTML = blockers.length
     ? '<b>⚠️ ยังบันทึก traffic ไม่ได้:</b><br/>• ' + blockers.join('<br/>• ')
@@ -2124,6 +2147,10 @@ async function renderStatus() {
     } else {
       acts.push(stBtn('⛔ ตัดการเชื่อมต่อ', () => stDisconnectDevice(dev.serial), 'stop'));
     }
+    // Emulator: ติดตั้ง CA เข้า system store อัตโนมัติ (auto-trust HTTPS ทั้งเครื่อง)
+    if (dev.emulator) {
+      acts.push(stBtn('🔐 ติดตั้ง CA (Auto)', () => stInstallCaEmulator(dev.serial)));
+    }
     // แสดงสถานะการเชื่อมจริง (โหมด proxy) ไม่ใช่ transport ของ adb
     const connLabel = dev.connected
       ? (dev.mode === 'wifi' ? '📶 WIFI' : '🔌 USB')
@@ -2140,11 +2167,14 @@ async function renderStatus() {
 
   // --- การบันทึก ---
   const recDetails = [
-    muted ? '🔇 ถูก mute อยู่ — flow ที่เข้ามาจะถูกทิ้ง (เกิดหลังกด disconnect)' : '🔊 รับ flow ปกติ',
+    muted
+      ? '🔇 ถูก mute อยู่ — flow ที่เข้ามาจะถูกทิ้ง (เกิดหลังกด disconnect)'
+        + (mutedDropped ? ` · ทิ้งไปแล้ว ${mutedDropped} flows (มีเครื่องยังยิง proxy อยู่ → กดปลด mute เพื่อรับ)` : '')
+      : '🔊 รับ flow ปกติ',
     `บันทึกไว้ ${flows.count} flows` + (flows.lastAt ? ` · ล่าสุด ${new Date(flows.lastAt).toLocaleTimeString()}` : ''),
   ];
-  const recActs = muted && devices.length
-    ? [stBtn('🔊 ปลด mute (เชื่อมใหม่)', () => stConnectDevice(devices[0].serial, devices[0].mode || 'usb'))]
+  const recActs = muted
+    ? [stBtn('🔊 ปลด mute (รับ flow)', stUnmute)]
     : [];
   statusCards.appendChild(stCard('⏺️', 'การบันทึก traffic', !muted, recDetails, recActs));
 }
