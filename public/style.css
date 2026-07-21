@@ -17,7 +17,9 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Sarabun', sans-serif;
   background: var(--bg);
   color: var(--text);
-  min-height: 100vh;
+  /* ความสูงคงที่เท่าจอ + ไม่ให้ทั้งหน้าไหล — ให้แต่ละ tab จัดการ scroll ของตัวเอง */
+  height: 100vh;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
 }
@@ -57,13 +59,15 @@ nav { display: flex; gap: 8px; }
 }
 
 .tab { display: none; padding: 16px 20px; }
-.tab.active { display: block; }
-/* Proxy tab fills the remaining viewport height (flex column) */
+/* tab ทั่วไป: เต็มพื้นที่ที่เหลือ + scroll ในตัวเอง (ไม่ดันให้ทั้งหน้าไหล) */
+.tab.active { display: block; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+/* Proxy tab fills the remaining viewport height (flex column); panes ข้างในเป็นตัว scroll เอง */
 #tab-proxy.active {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
+  overflow: hidden;
 }
 
 button {
@@ -737,7 +741,7 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 /* Pin toggle — ใช้สี accent แทนเขียวให้ต่างจาก Map Local */
 .maplocal-icon-btn.pin-toggle { margin-left: 0; border-color: var(--accent); color: var(--accent); }
 .maplocal-icon-btn.pin-toggle:hover { background: var(--accent); color: #0f172a; }
-.maplocal-icon-btn.pin-toggle.active { background: var(--accent); color: #0f172a; }
+.maplocal-icon-btn.pin-toggle.active { background: rgba(56, 189, 248, 0.5); color: var(--text); border-color: var(--accent); }
 /* เมนู ⋯ (hover) */
 .kebab-wrap { position: relative; }
 .maplocal-icon-btn.kebab-btn { margin-left: 0; border-color: var(--border); color: var(--muted); font-weight: 700; padding: 3px 12px; }
@@ -751,6 +755,30 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 /* hover ค้างบนปุ่มหรือเมนู (padding-top ของ wrap อุดช่องว่างกันเมนูวูบหาย) */
 .kebab-wrap:hover .kebab-menu { display: flex; }
 .kebab-wrap::after { content: ''; position: absolute; top: 100%; right: 0; width: 60px; height: 6px; }
+/* เส้นคั่นในเมนู */
+.kebab-sep { height: 1px; background: var(--border); margin: 4px 6px; }
+/* เมนูย่อย Copy as — flyout ออกทางซ้ายของเมนูหลัก (kebab อยู่ชิดขวาจอ) */
+.copy-as-wrap { position: relative; }
+.copy-as-trigger { display: flex; justify-content: space-between; align-items: center; }
+.copy-as-menu {
+  display: none; flex-direction: column; gap: 2px;
+  position: absolute; top: -5px; right: 100%; z-index: 10001;
+  min-width: 210px; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 8px; padding: 4px; box-shadow: 0 8px 28px rgba(0,0,0,0.55);
+}
+.copy-as-wrap:hover > .copy-as-menu { display: flex; }
+/* กดเมนู ⋯ แล้วให้ซ่อนทันที (จะกลับมาเปิดได้เมื่อ mouseleave แล้ว hover ใหม่) */
+.kebab-wrap.menu-dismissed .kebab-menu,
+.kebab-wrap.menu-dismissed .copy-as-menu { display: none !important; }
+/* toast แจ้งผลคัดลอก */
+.copy-toast {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+  padding: 10px 18px; border-radius: 8px; font-size: 0.85rem;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.55); z-index: 20000;
+  opacity: 0; transition: opacity 0.15s; pointer-events: none;
+}
+.copy-toast.show { opacity: 1; }
 .img-tab { padding: 4px 0; }
 .img-tab-preview { max-width: 100%; max-height: 280px; border-radius: 8px; border: 1px solid var(--border); display: block; }
 .img-tab-dl { display: inline-block; margin: 8px 0; color: var(--accent); font-size: 0.85rem; }

@@ -563,6 +563,15 @@ let resTab = 'Body';
 document.getElementById('clear-flows').addEventListener('click', async () => {
   await fetch('/api/proxy/flows', { method: 'DELETE' });
 });
+// cmd/ctrl+backspace ตอนอยู่ tab proxy → เคลียร์ traffic (เว้นตอนโฟกัสช่องพิมพ์ ไม่ขวางการลบข้อความ)
+window.addEventListener('keydown', (e) => {
+  if (!((e.metaKey || e.ctrlKey) && (e.key === 'Backspace' || e.key === 'Delete'))) return;
+  if (!document.getElementById('tab-proxy').classList.contains('active')) return;
+  const ae = document.activeElement;
+  if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+  e.preventDefault();
+  document.getElementById('clear-flows').click();
+});
 document.getElementById('flow-filter').addEventListener('input', (e) => {
   flowFilter = e.target.value.trim().toLowerCase();
   renderFlowTable();
@@ -742,7 +751,11 @@ function showFlowContextMenu(ev, f) {
   repeatBtn.addEventListener('click', () => { closeFlowContextMenu(); replayFlow(f); });
   editBtn.addEventListener('click', () => { closeFlowContextMenu(); openRepeatEdit(f); });
   pinBtn.addEventListener('click', () => { closeFlowContextMenu(); togglePin(base); });
-  const menu = el('div', { class: 'flow-ctx-menu' }, [repeatBtn, editBtn, pinBtn]);
+  const menu = el('div', { class: 'flow-ctx-menu' }, [
+    repeatBtn, editBtn, pinBtn,
+    el('div', { class: 'kebab-sep' }),
+    makeCopyAsWrap(f),
+  ]);
   document.body.appendChild(menu);
   // วางใกล้เมาส์ กันล้นขอบจอ
   const mw = menu.offsetWidth || 190, mh = menu.offsetHeight || 84;
@@ -882,6 +895,68 @@ function headersToRaw(headers) {
   return Object.entries(headers || {}).map(([k, v]) => `${k}: ${v}`).join('\n');
 }
 
+// ---- Copy as ... helpers ----
+// escape สำหรับ single-quote ใน shell (curl)
+function shellQuote(s) { return `'${String(s).replace(/'/g, `'\\''`)}'`; }
+
+function buildCurl(f) {
+  const parts = [`curl -X ${f.method} ${shellQuote(f.url)}`];
+  for (const [k, v] of Object.entries(f.reqHeaders || {})) parts.push(`  -H ${shellQuote(`${k}: ${v}`)}`);
+  const hasBody = f.reqBody != null && f.reqBody !== '' && !['GET', 'HEAD'].includes((f.method || '').toUpperCase());
+  if (hasBody) parts.push(`  --data-raw ${shellQuote(typeof f.reqBody === 'object' ? JSON.stringify(f.reqBody) : String(f.reqBody))}`);
+  return parts.join(' \\\n');
+}
+
+function copyReqBody(f) { return prettyBody(f.reqBody) || ''; }
+function copyResBody(f) { return f.error ? f.error : (prettyBody(f.resBody) || ''); }
+
+function buildRawReqRes(f) {
+  const reqBody = copyReqBody(f);
+  const req = `### REQUEST\n${f.method} ${f.url}\n${headersToRaw(f.reqHeaders)}${reqBody ? '\n\n' + reqBody : ''}`;
+  const statusLine = f.error ? 'ERROR' : `HTTP/1.1 ${f.status || ''} ${f.statusText || ''}`.trim();
+  const resHead = f.error ? '' : headersToRaw(f.resHeaders);
+  const resBody = copyResBody(f);
+  const res = `### RESPONSE\n${statusLine}${resHead ? '\n' + resHead : ''}${resBody ? '\n\n' + resBody : ''}`;
+  return `${req}\n\n${res}`;
+}
+
+// toast แจ้งผลคัดลอก (เมนู hover หายไปเลยใช้ toast แทนการเปลี่ยนข้อความปุ่ม)
+let copyToastTimer = null;
+function copyToast(label) {
+  let t = document.getElementById('copy-toast');
+  if (!t) { t = el('div', { class: 'copy-toast', id: 'copy-toast' }); document.body.appendChild(t); }
+  t.textContent = `✅ คัดลอกแล้ว: ${label}`;
+  t.classList.add('show');
+  clearTimeout(copyToastTimer);
+  copyToastTimer = setTimeout(() => t.classList.remove('show'), 1500);
+}
+function copyAs(label, text) { navigator.clipboard.writeText(text || ''); copyToast(label); }
+
+// สร้างเมนูย่อย "📋 Copy as ▸" (flyout) — ใช้ร่วมกันทั้งเมนู ⋯ และคลิกขวาบน URL
+function makeCopyAsWrap(f) {
+  const copyItem = (label, getText) => {
+    const it = el('button', { class: 'flow-ctx-item', type: 'button', text: label });
+    it.addEventListener('click', () => {
+      copyAs(label, getText());
+      it.closest('.kebab-wrap')?.classList.add('menu-dismissed'); // ปิดเมนู hover (⋯)
+      closeFlowContextMenu();                                     // ปิดเมนูคลิกขวา (ถ้าอยู่ในนั้น)
+    });
+    return it;
+  };
+  const menu = el('div', { class: 'copy-as-menu' }, [
+    copyItem('cURL', () => buildCurl(f)),
+    copyItem('Raw Request & Response', () => buildRawReqRes(f)),
+    el('div', { class: 'kebab-sep' }),
+    copyItem('Request Header', () => headersToRaw(f.reqHeaders)),
+    copyItem('Request Body', () => copyReqBody(f)),
+    copyItem('Response Header', () => headersToRaw(f.resHeaders)),
+    copyItem('Response Body', () => copyResBody(f)),
+  ]);
+  const trigger = el('button', { class: 'flow-ctx-item copy-as-trigger', type: 'button', text: '📋 Copy as ▸' });
+  trigger.addEventListener('click', (e) => e.stopPropagation()); // อย่าให้คลิก trigger ปิดเมนูคลิกขวา
+  return el('div', { class: 'copy-as-wrap' }, [trigger, menu]);
+}
+
 // สร้างแผงครึ่งหนึ่ง (Request หรือ Response) พร้อม sub-tabs Header / Body / Raw
 // extra = element เสริมชิดขวาของแถบแท็บ (เช่น ปุ่ม Map Local)
 function buildDetailPane(title, headline, tabs, activeTab, onTab, extra) {
@@ -1013,12 +1088,17 @@ function renderFlowDetail(f) {
   syncPin();
   pinBtn.addEventListener('click', () => { togglePin(base); syncPin(); });
   // เมนู ⋯ (hover) — Repeat / Repeat & Edit เหมือนคลิกขวาที่แถว flow
+  const kebabWrap = el('div', { class: 'kebab-wrap' });
+  const dismissKebab = () => kebabWrap.classList.add('menu-dismissed'); // กดแล้วให้เมนูหายทันที
   const repeatItem = el('button', { class: 'flow-ctx-item', type: 'button', text: '🔁 Repeat' });
-  repeatItem.addEventListener('click', () => replayFlow(f));
+  repeatItem.addEventListener('click', () => { dismissKebab(); replayFlow(f); });
   const editItem = el('button', { class: 'flow-ctx-item', type: 'button', text: '✏️ Repeat & Edit' });
-  editItem.addEventListener('click', () => openRepeatEdit(f));
+  editItem.addEventListener('click', () => { dismissKebab(); openRepeatEdit(f); });
+  const copyWrap = makeCopyAsWrap(f); // เมนูย่อย "Copy as ▸" (flyout ออกด้านซ้าย)
   const kebabBtn = el('button', { class: 'maplocal-icon-btn kebab-btn', type: 'button', title: 'เพิ่มเติม', text: '⋯' });
-  const kebabWrap = el('div', { class: 'kebab-wrap' }, [kebabBtn, el('div', { class: 'kebab-menu' }, [repeatItem, editItem])]);
+  kebabWrap.append(kebabBtn, el('div', { class: 'kebab-menu' }, [repeatItem, editItem, el('div', { class: 'kebab-sep' }), copyWrap]));
+  // ออกจากปุ่ม ⋯ แล้วรีเซ็ต เพื่อให้ hover ครั้งถัดไปเปิดเมนูได้อีก
+  kebabWrap.addEventListener('mouseleave', () => kebabWrap.classList.remove('menu-dismissed'));
   const reqExtra = el('div', { class: 'detail-extra' }, [copyUrlBtn, mapBtn, pinBtn, kebabWrap]);
   const reqPane = buildDetailPane('Request', reqHeadline, reqTabs, reqTab, (name) => { reqTab = name; renderFlowDetail(f); }, reqExtra);
 
