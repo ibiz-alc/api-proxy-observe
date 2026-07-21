@@ -87,6 +87,45 @@ function findMapRule(method, url) {
   return matched[0];
 }
 
+// overrides = [{path, value, enabled}] — แก้เฉพาะบาง key ใน JSON body
+function normalizeOverrides(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.map((o) => ({ path: String((o && o.path) || ''), value: (o && o.value != null) ? String(o.value) : '', enabled: !(o && o.enabled === false) }))
+    .filter((o) => o.path);
+}
+// path รองรับ dot + [index] เช่น a.b[0].c
+function parsePathSegs(path) {
+  const segs = [];
+  for (const part of String(path).split('.')) {
+    const m = part.match(/^([^[]*)((?:\[\d+\])*)$/);
+    if (!m) continue;
+    if (m[1]) segs.push(m[1]);
+    for (const idx of (m[2].match(/\d+/g) || [])) segs.push(Number(idx));
+  }
+  return segs;
+}
+// ทับค่าเฉพาะ key ที่ระบุลงบน JSON body (value ลองพาร์สเป็น JSON ก่อน ไม่ได้ = string) — body ไม่ใช่ JSON คืนเดิม
+function applyOverrides(bodyStr, overrides) {
+  if (!Array.isArray(overrides) || !overrides.length) return bodyStr;
+  let obj;
+  try { obj = JSON.parse(bodyStr); } catch { return bodyStr; }
+  for (const ov of overrides) {
+    if (!ov || ov.enabled === false || !ov.path) continue;
+    let val = ov.value;
+    try { val = JSON.parse(ov.value); } catch { /* เก็บเป็น string */ }
+    const segs = parsePathSegs(ov.path);
+    if (!segs.length) continue;
+    let cur = obj;
+    let ok = true;
+    for (let i = 0; i < segs.length - 1; i++) {
+      if (cur == null || typeof cur !== 'object') { ok = false; break; }
+      cur = cur[segs[i]];
+    }
+    if (ok && cur != null && typeof cur === 'object') cur[segs[segs.length - 1]] = val;
+  }
+  try { return JSON.stringify(obj); } catch { return bodyStr; }
+}
+
 app.get('/api/maplocal', (req, res) => res.json(mapRules));
 
 app.post('/api/maplocal', express.json({ limit: '5mb' }), (req, res) => {
@@ -101,6 +140,8 @@ app.post('/api/maplocal', express.json({ limit: '5mb' }), (req, res) => {
     contentType: b.contentType || 'application/json',
     body: b.body != null ? String(b.body) : '',
     scenario: b.scenario || '', // แท็กจัดกลุ่มเป็นชุด (scenario) — ว่าง = ไม่อยู่ชุดไหน
+    mode: b.mode === 'passthrough' ? 'passthrough' : 'mock', // mock=ตอบ body ที่เก็บ / passthrough=ยิงจริงแล้วแก้เฉพาะ key
+    overrides: normalizeOverrides(b.overrides),               // แก้เฉพาะบาง key: [{path,value,enabled}]
   };
   mapRules.unshift(rule);
   saveMapRules();
@@ -115,6 +156,8 @@ app.put('/api/maplocal/:id', express.json({ limit: '5mb' }), (req, res) => {
     if (b[k] !== undefined) rule[k] = k === 'body' ? String(b[k]) : b[k];
   }
   if (b.status !== undefined) rule.status = Number(b.status) || 200;
+  if (b.mode !== undefined) rule.mode = b.mode === 'passthrough' ? 'passthrough' : 'mock';
+  if (b.overrides !== undefined) rule.overrides = normalizeOverrides(b.overrides);
   saveMapRules();
   res.json({ ok: true, rule });
 });
@@ -237,6 +280,7 @@ function normalizeCase(b) {
     id: b.id || crypto.randomUUID(),
     name: b.name || '',
     autoAdvance: b.autoAdvance !== false, // default true
+    loop: b.loop === true,                // จบ step สุดท้ายแล้ววนกลับ step 1 (default off)
     endpoints: Array.isArray(b.endpoints) ? b.endpoints.map((ep) => ({
       method: ep.method || 'ANY',
       urlPattern: ep.urlPattern || '',
@@ -245,6 +289,8 @@ function normalizeCase(b) {
         status: Number(s.status) || 200,
         contentType: s.contentType || 'application/json',
         body: s.body != null ? String(s.body) : '',
+        enabled: s.enabled !== false,               // ปิด step ได้โดยไม่ต้องลบ (ถูกข้ามใน sequence)
+        overrides: normalizeOverrides(s.overrides), // แก้เฉพาะบาง key ทับ body ของ step นี้
       })) : [],
     })) : [],
   };
@@ -321,8 +367,11 @@ app.post('/api/testcases/next', express.json(), (req, res) => {
   const pat = (req.body || {}).pattern;
   for (const ep of c.endpoints) {
     if (pat && ep.urlPattern !== pat) continue;
+    const enabledLen = ep.steps.filter((s) => s.enabled !== false).length;
+    if (!enabledLen) continue;
     const k = cursorKey(ep);
-    caseCursors[k] = Math.min((caseCursors[k] || 0) + 1, Math.max(0, ep.steps.length - 1));
+    // ปุ่ม Next วนเสมอ (นับเฉพาะ step ที่เปิด): ถึงตัวสุดท้ายแล้วกดต่อ → กลับตัวแรก
+    caseCursors[k] = ((caseCursors[k] || 0) + 1) % enabledLen;
   }
   res.json({ ok: true, cursors: caseWithState(c).cursors });
 });
@@ -345,10 +394,17 @@ app.post('/api/testcase/resolve', express.json({ limit: '2mb' }), (req, res) => 
   const ep = matchEndpoint(c, method, url);
   if (!ep) return res.json({ matched: false });
   const k = cursorKey(ep);
-  const i = Math.min(caseCursors[k] || 0, ep.steps.length - 1);
-  const step = ep.steps[i];
-  if (c.autoAdvance !== false) caseCursors[k] = Math.min((caseCursors[k] || 0) + 1, ep.steps.length - 1);
-  res.json({ matched: true, status: step.status, contentType: step.contentType, body: step.body, step: i, label: step.label, pattern: ep.urlPattern });
+  const enabled = ep.steps.filter((s) => s.enabled !== false); // ข้าม step ที่ถูกปิด
+  if (!enabled.length) return res.json({ matched: false });     // ทุก step ปิด → ไม่ mock (ปล่อยไป server จริง)
+  const i = Math.min(caseCursors[k] || 0, enabled.length - 1);
+  const step = enabled[i];
+  if (c.autoAdvance !== false) {
+    const nx = i + 1;
+    caseCursors[k] = c.loop ? nx % enabled.length : Math.min(nx, enabled.length - 1);
+  }
+  const body = applyOverrides(step.body, step.overrides); // ทับเฉพาะ key ที่ตั้ง override ไว้
+  const fullIdx = ep.steps.indexOf(step); // index จริงใน list เต็ม (ให้ frontend ไฮไลต์/เลื่อนถูกช่อง)
+  res.json({ matched: true, status: step.status, contentType: step.contentType, body, step: fullIdx, label: step.label, pattern: ep.urlPattern, caseId: c.id, caseName: c.name });
 });
 
 // รายการ pattern ของ case active — ให้ addon cache ไว้ตัดสินใจว่าจะเรียก resolve ไหม
@@ -585,6 +641,8 @@ app.post('/api/proxy/ingest', express.json({ limit: '40mb' }), async (req, res) 
     resSize: b.resSize || 0,
     durationMs: b.durationMs ?? null,
     mapped: b.mapped === true,
+    mapLocal: b.mapLocal || null, // ใช้ Map Local rule ไหน — โชว์เป็น tag คลิกไปที่กฎได้
+    testCase: b.testCase || null, // ใช้ test case ไหน/step ไหน (ถ้ามี) — โชว์เป็น tag ในแท็บ Proxy
     blocked: false,
   };
   // เก็บ media bytes (req/res) แยกไว้ — image แกะ EXIF, video ไว้ preview
@@ -667,11 +725,54 @@ app.post('/api/proxy/replay', express.json({ limit: '40mb' }), async (req, res) 
     resHeaders: null, resBody: null, resContentType: null, resSize: 0,
     durationMs: null, mapped: false, blocked: false, replay: true,
   };
+  const finalize = () => {
+    proxyStore.flows.unshift(flow);
+    while (proxyStore.flows.length > 300) proxyStore.flows.pop();
+    broadcast('proxy', flow);
+    res.json({ ok: true, id, flow });
+  };
+
+  // repeat ให้เคารพ Map Local / Test Case เหมือน proxy จริง (priority: Map Local ก่อน)
+  const mlRule = findMapRule(m, url);
+  if (mlRule) {
+    flow.mapped = true;
+    flow.mapLocal = { ruleId: mlRule.id, name: mlRule.name, mode: mlRule.mode || 'mock' };
+    if (mlRule.mode !== 'passthrough') { // mock — ตอบ body ที่ตั้งไว้ ไม่ยิงจริง
+      flow.status = Number(mlRule.status) || 200; flow.statusText = 'OK';
+      flow.resContentType = mlRule.contentType || 'application/json';
+      flow.resHeaders = { 'content-type': flow.resContentType, 'x-api-tester': 'map-local' };
+      flow.resBody = mlRule.body || '';
+      flow.resSize = Buffer.byteLength(flow.resBody);
+      flow.durationMs = Date.now() - started;
+      return finalize();
+    }
+  } else { // ไม่มี Map Local ชน → ลอง Test Case (peek step ปัจจุบัน ไม่ advance เพื่อไม่รบกวน sequence)
+    const tc = activeCase();
+    const ep = tc && matchEndpoint(tc, m, url);
+    if (ep) {
+      const enabledSteps = ep.steps.filter((s) => s.enabled !== false);
+      if (enabledSteps.length) {
+        const cur = Math.min(caseCursors[cursorKey(ep)] || 0, enabledSteps.length - 1);
+        const step = enabledSteps[cur];
+        flow.status = Number(step.status) || 200; flow.statusText = 'OK';
+        flow.resContentType = step.contentType || 'application/json';
+        flow.resHeaders = { 'content-type': flow.resContentType, 'x-api-tester': 'test-case' };
+        flow.resBody = applyOverrides(step.body, step.overrides);
+        flow.resSize = Buffer.byteLength(flow.resBody);
+        flow.durationMs = Date.now() - started;
+        flow.testCase = { caseId: tc.id, caseName: tc.name, step: ep.steps.indexOf(step), label: step.label, pattern: ep.urlPattern };
+        return finalize();
+      }
+    }
+  }
+
   try {
     const r = await fetch(url, { method: m, headers: outHeaders, body: hasBody ? String(body) : undefined });
-    const text = await r.text();
+    let text = await r.text();
     const resHeaders = {};
     r.headers.forEach((v, k) => { resHeaders[k] = v; });
+    // Map Local passthrough → แก้เฉพาะ key ใน response จริง
+    if (mlRule && mlRule.mode === 'passthrough' && (mlRule.overrides || []).length) text = applyOverrides(text, mlRule.overrides);
     flow.status = r.status;
     flow.statusText = r.statusText || '';
     flow.resHeaders = resHeaders;
@@ -683,10 +784,7 @@ app.post('/api/proxy/replay', express.json({ limit: '40mb' }), async (req, res) 
     flow.error = e.message;
     flow.durationMs = Date.now() - started;
   }
-  proxyStore.flows.unshift(flow);
-  while (proxyStore.flows.length > 300) proxyStore.flows.pop();
-  broadcast('proxy', flow);
-  res.json({ ok: true, id, flow });
+  finalize();
 });
 
 // ================= ควบคุมมือถือผ่าน adb (ตั้ง global http_proxy — ไม่ต้องใช้ Postern) =================
@@ -1398,8 +1496,64 @@ function collectResponse(resp, bodyText, startedAt) {
   };
 }
 
+// ผลลัพธ์จาก raw response (proxy path) → รูปแบบเดียวกับ collectResponse
+function rawResult({ status, statusText, headers }, text, startedAt) {
+  const h = {};
+  for (const [k, v] of Object.entries(headers || {})) h[k] = Array.isArray(v) ? v.join(', ') : String(v);
+  return {
+    ok: true, status, statusText: statusText || '', durationMs: Date.now() - startedAt, headers: h,
+    body: text.length > 500000 ? text.slice(0, 500000) + '\n...(ตัดข้อความ ยาวเกินไป)' : text,
+  };
+}
+
+// ยิง request ผ่าน mitmproxy (127.0.0.1:MITM_PORT) เอง เพื่อให้ flow ถูกดักบันทึกเหมือน traffic มือถือ
+// HTTP = absolute-form ผ่าน proxy, HTTPS = CONNECT tunnel + TLS (ปิด verify เพราะ mitmproxy เซ็น cert เอง)
+function sendThroughProxy({ url, method = 'GET', headers = {}, body = null }, proxyHost = '127.0.0.1', proxyPort = MITM_PORT) {
+  const http = require('http');
+  const tls = require('tls');
+  const u = new URL(url);
+  const reqHeaders = { ...headers };
+  if (!Object.keys(reqHeaders).some((k) => k.toLowerCase() === 'host')) reqHeaders['Host'] = u.host;
+  // ขอ response แบบไม่บีบอัด — เราอ่านเป็น utf8 ตรงๆ (ไม่มี gunzip) เลยกัน body เพี้ยน
+  reqHeaders['Accept-Encoding'] = 'identity';
+  const payload = (body != null && body !== '' && !['GET', 'HEAD'].includes(method.toUpperCase()))
+    ? Buffer.from(typeof body === 'string' ? body : JSON.stringify(body)) : null;
+  if (payload) {
+    if (!Object.keys(reqHeaders).some((k) => k.toLowerCase() === 'content-type')) reqHeaders['Content-Type'] = 'application/json';
+    reqHeaders['Content-Length'] = Buffer.byteLength(payload);
+  }
+  const readResp = (resp, resolve) => {
+    const chunks = [];
+    resp.on('data', (c) => chunks.push(c));
+    resp.on('end', () => resolve({ status: resp.statusCode, statusText: resp.statusMessage, headers: resp.headers, text: Buffer.concat(chunks).toString('utf8') }));
+  };
+  return new Promise((resolve, reject) => {
+    if (u.protocol !== 'https:') {
+      const r = http.request({ host: proxyHost, port: proxyPort, method, path: url, headers: reqHeaders }, (resp) => readResp(resp, resolve));
+      r.on('error', reject); r.setTimeout(20000, () => r.destroy(new Error('timeout')));
+      if (payload) r.write(payload); r.end();
+      return;
+    }
+    // HTTPS: ขอ CONNECT tunnel จาก proxy ก่อน
+    const port = u.port || 443;
+    const connectReq = http.request({ host: proxyHost, port: proxyPort, method: 'CONNECT', path: `${u.hostname}:${port}` });
+    connectReq.on('connect', (res2, socket) => {
+      if (res2.statusCode !== 200) { reject(new Error(`proxy CONNECT ล้มเหลว (${res2.statusCode})`)); return; }
+      const tlsSock = tls.connect({ socket, servername: u.hostname, rejectUnauthorized: false }, () => {
+        const r = http.request({ createConnection: () => tlsSock, method, path: u.pathname + u.search, headers: reqHeaders }, (resp) => readResp(resp, resolve));
+        r.on('error', reject); r.setTimeout(20000, () => r.destroy(new Error('timeout')));
+        if (payload) r.write(payload); r.end();
+      });
+      tlsSock.on('error', reject);
+    });
+    connectReq.on('error', reject);
+    connectReq.setTimeout(20000, () => connectReq.destroy(new Error('CONNECT timeout')));
+    connectReq.end();
+  });
+}
+
 app.post('/api/send', express.json({ limit: '10mb' }), async (req, res) => {
-  const { url, method = 'GET', headers = {}, body } = req.body || {};
+  const { url, method = 'GET', headers = {}, body, viaProxy } = req.body || {};
   if (!url) return res.status(400).json({ ok: false, error: 'กรุณาระบุ URL' });
   const startedAt = Date.now();
   try {
@@ -1409,6 +1563,12 @@ app.post('/api/send', express.json({ limit: '10mb' }), async (req, res) => {
       if (!Object.keys(options.headers).some((k) => k.toLowerCase() === 'content-type')) {
         options.headers['Content-Type'] = 'application/json';
       }
+    }
+    // viaProxy: ยิงผ่าน mitmproxy เอง → flow โผล่ในแท็บ Proxy เหมือน traffic จากมือถือ
+    if (viaProxy) {
+      const pr = await sendThroughProxy({ url, method, headers: options.headers, body: options.body });
+      logSenderRequest({ method, url, headers: options.headers, body: body ?? null, resultStatus: pr.status, resultBody: pr.text });
+      return res.json(rawResult(pr, pr.text, startedAt));
     }
     const resp = await fetch(url, options);
     const text = await resp.text();

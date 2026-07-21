@@ -7,6 +7,7 @@ mitmproxy addon สำหรับ ApiTester
 import base64
 import json
 import os
+import re
 import time
 import urllib.request
 from mitmproxy import http
@@ -167,10 +168,79 @@ def _find_rule(method, url):
     return matched[0]
 
 
+# ===== override เฉพาะบาง key ใน JSON body: [{path,value,enabled}] =====
+def _parse_path(path):
+    """a.b[0].c -> ['a','b',0,'c']"""
+    segs = []
+    for part in str(path).split("."):
+        m = re.match(r"^([^\[]*)((?:\[\d+\])*)$", part)
+        if not m:
+            continue
+        if m.group(1):
+            segs.append(m.group(1))
+        for idx in re.findall(r"\d+", m.group(2)):
+            segs.append(int(idx))
+    return segs
+
+
+def _apply_overrides(body_str, overrides):
+    """ทับเฉพาะ key ที่ระบุลงบน JSON body (value ลอง parse JSON ก่อน ไม่ได้ = string). body ไม่ใช่ JSON คืนเดิม"""
+    if not overrides:
+        return body_str
+    try:
+        obj = json.loads(body_str)
+    except Exception:
+        return body_str
+    for ov in overrides:
+        if not ov or ov.get("enabled") is False or not ov.get("path"):
+            continue
+        raw = ov.get("value", "")
+        try:
+            val = json.loads(raw)
+        except Exception:
+            val = raw
+        segs = _parse_path(ov["path"])
+        if not segs:
+            continue
+        cur, ok = obj, True
+        for s in segs[:-1]:
+            try:
+                cur = cur[s]
+            except Exception:
+                ok = False
+                break
+        if ok:
+            try:
+                cur[segs[-1]] = val
+            except Exception:
+                pass
+    try:
+        return json.dumps(obj, ensure_ascii=False)
+    except Exception:
+        return body_str
+
+
 def request(flow: http.HTTPFlow):
     method = flow.request.method
     url = flow.request.pretty_url
-    # 1) Test Case (dynamic/sequenced) มาก่อน — ถ้า pattern ตรงค่อยถาม server (server มี cursor + advance)
+    # 1) Map Local มาก่อน (priority สูงสุด) — ถ้าชนกับ Test Case ให้ Map Local ชนะ
+    #    อยาก override ด้วย test case ที่ชน ต้อง disabled กฎ Map Local ตัวนั้นก่อน (_find_rule กรอง enabled อยู่แล้ว)
+    rule = _find_rule(method, url)
+    if rule:
+        # passthrough: ปล่อย request ไป server จริง แล้วไปแก้เฉพาะ key ใน response() ทีหลัง
+        if rule.get("mode") == "passthrough":
+            return
+        # mock: ตอบ body ที่เก็บไว้ตรงๆ (override เป็นของโหมด passthrough เท่านั้น)
+        flow.metadata["apitester_ml"] = {"ruleId": rule.get("id"), "name": rule.get("name"), "mode": "mock"}
+        body = rule.get("body") or ""
+        ct = rule.get("contentType") or "application/json"
+        flow.response = http.Response.make(
+            int(rule.get("status") or 200),
+            body.encode("utf-8"),
+            {"Content-Type": ct, "X-Api-Tester": "map-local", "Access-Control-Allow-Origin": "*"},
+        )
+        return
+    # 2) Test Case (dynamic/sequenced) — เฉพาะเมื่อไม่มี Map Local ชน
     pats = _get_case_patterns()
     if any(
         (not p.get("method") or p["method"] == "ANY" or p["method"] == method)
@@ -179,22 +249,17 @@ def request(flow: http.HTTPFlow):
     ):
         r = _resolve_case(method, url)
         if r.get("matched"):
+            # เก็บว่าใช้ test case ไหน step ไหน ไว้ใน metadata (ส่งต่อให้ ingest — เลี่ยง header เพราะชื่อเคสอาจเป็นภาษาไทย)
+            flow.metadata["apitester_tc"] = {
+                "caseId": r.get("caseId"), "caseName": r.get("caseName"),
+                "step": r.get("step"), "label": r.get("label"), "pattern": r.get("pattern"),
+            }
             flow.response = http.Response.make(
                 int(r.get("status") or 200),
                 (r.get("body") or "").encode("utf-8"),
                 {"Content-Type": r.get("contentType") or "application/json", "X-Api-Tester": "test-case", "Access-Control-Allow-Origin": "*"},
             )
             return
-    # 2) Map Local (static)
-    rule = _find_rule(method, url)
-    if rule:
-        body = rule.get("body") or ""
-        ct = rule.get("contentType") or "application/json"
-        flow.response = http.Response.make(
-            int(rule.get("status") or 200),
-            body.encode("utf-8"),
-            {"Content-Type": ct, "X-Api-Tester": "map-local", "Access-Control-Allow-Origin": "*"},
-        )
 
 
 def _text(content, headers):
@@ -213,8 +278,19 @@ def _text(content, headers):
 def response(flow: http.HTTPFlow):
     req = flow.request
     res = flow.response
+    # Passthrough override: response จริง (ยังไม่ถูก mock) + rule เป็น passthrough → แก้เฉพาะ key ก่อนส่งกลับ/บันทึก
+    if res is not None and res.headers.get("x-api-tester") is None:
+        prule = _find_rule(req.method, req.pretty_url)
+        if prule and prule.get("mode") == "passthrough":
+            flow.metadata["apitester_ml"] = {"ruleId": prule.get("id"), "name": prule.get("name"), "mode": "passthrough"}
+            res.headers["X-Api-Tester"] = "map-local-passthrough"
+            if prule.get("overrides"):
+                try:
+                    res.set_text(_apply_overrides(res.get_text(), prule["overrides"]))
+                except Exception as e:
+                    print(f"[apitester] passthrough override failed: {e}")
     client = flow.client_conn.peername[0] if flow.client_conn and flow.client_conn.peername else "mitmproxy"
-    mapped = res.headers.get("x-api-tester") == "map-local"
+    mapped = res.headers.get("x-api-tester") in ("map-local", "map-local-passthrough")
     payload = {
         "scheme": req.scheme,
         "device": client,
@@ -234,6 +310,8 @@ def response(flow: http.HTTPFlow):
         "resContentType": res.headers.get("content-type"),
         "resSize": len(res.content or b""),
         "mapped": mapped,
+        "mapLocal": flow.metadata.get("apitester_ml"),  # ใช้ Map Local rule ไหน (ถ้ามี)
+        "testCase": flow.metadata.get("apitester_tc"),  # ใช้ test case ไหน/step ไหน (ถ้ามี)
         "durationMs": int((res.timestamp_end - req.timestamp_start) * 1000)
         if res.timestamp_end and req.timestamp_start else None,
     }

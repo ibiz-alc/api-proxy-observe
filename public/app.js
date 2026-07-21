@@ -267,6 +267,7 @@ events.addEventListener('proxy', (e) => {
   }
   renderProxy();
   if (flow.id === selectedFlowId) renderFlowDetail(flow);
+  if (tcActiveId) refreshTcCursors(); // มี case active → อัปเดต highlight step แบบ realtime
 });
 events.addEventListener('proxy-clear', () => {
   allFlows = [];
@@ -306,6 +307,9 @@ function addFormField(type) {
 document.getElementById('add-text-field').addEventListener('click', () => addFormField('text'));
 document.getElementById('add-file-field').addEventListener('click', () => addFormField('file'));
 
+// เปิดใช้ "ส่งผ่าน proxy" อยู่ไหม (chip ในแท็บ Sender)
+function sendViaProxyOn() { const c = document.getElementById('send-via-proxy'); return !!(c && c.checked); }
+
 function parseHeaderLines(text) {
   const headers = {};
   for (const line of text.split('\n')) {
@@ -336,7 +340,35 @@ function renderSendResult(result) {
   sendResultEl.appendChild(result.body ? bodyBlock(result.body) : el('pre', { class: 'code-block', text: '(ว่าง)' }));
 }
 
+// สลับโหมด ฟอร์ม / cURL
+document.querySelectorAll('input[name="send-mode"]').forEach((radio) => {
+  radio.addEventListener('change', () => {
+    const curl = document.querySelector('input[name="send-mode"]:checked').value === 'curl';
+    document.getElementById('send-curl-mode').style.display = curl ? 'block' : 'none';
+    document.getElementById('send-form-mode').style.display = curl ? 'none' : 'block';
+  });
+});
+
+// ส่งจากโหมด cURL — parse แล้วยิงผ่าน /api/send (body เป็น string ดิบ รองรับทั้ง JSON/urlencoded)
+async function sendFromCurl() {
+  const raw = document.getElementById('curl-input').value.trim();
+  if (!raw) { sendResultEl.innerHTML = '<p class="empty-msg">วาง cURL ก่อนส่ง</p>'; return; }
+  let p;
+  try { p = parseCurl(raw); } catch (e) { sendResultEl.innerHTML = '<p class="empty-msg">แปลง cURL ไม่สำเร็จ: ' + e.message + '</p>'; return; }
+  if (!p.url) { sendResultEl.innerHTML = '<p class="empty-msg">ไม่พบ URL ใน cURL</p>'; return; }
+  sendResultEl.innerHTML = '<p class="empty-msg">⏳ กำลังส่ง...</p>';
+  try {
+    const payload = { url: p.url, method: p.method, headers: p.headers, viaProxy: sendViaProxyOn() };
+    if (p.body) payload.body = p.body;
+    const result = await (await fetch('/api/send', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    })).json();
+    renderSendResult(result);
+  } catch (err) { renderSendResult({ ok: false, durationMs: 0, error: err.message }); }
+}
+
 document.getElementById('send-btn').addEventListener('click', async () => {
+  if (document.querySelector('input[name="send-mode"]:checked').value === 'curl') { await sendFromCurl(); return; }
   const url = document.getElementById('send-url').value.trim();
   const method = document.getElementById('send-method').value;
   const headers = parseHeaderLines(document.getElementById('send-headers').value);
@@ -365,7 +397,7 @@ document.getElementById('send-btn').addEventListener('click', async () => {
       }
       result = await (await fetch('/api/send-form', { method: 'POST', body: fd })).json();
     } else {
-      const payload = { url, method, headers };
+      const payload = { url, method, headers, viaProxy: sendViaProxyOn() };
       if (bodyType === 'json') {
         const raw = bodyJsonEl.value.trim();
         if (raw) {
@@ -388,6 +420,89 @@ document.getElementById('send-btn').addEventListener('click', async () => {
   } catch (err) {
     renderSendResult({ ok: false, durationMs: 0, error: err.message });
   }
+});
+
+// ---- นำเข้าจาก cURL: แยก token (รองรับ ' " \ และ \<newline>) แล้ว map ลงฟอร์ม Sender ----
+function tokenizeCurl(input) {
+  const s = String(input).replace(/\\\r?\n/g, ' '); // line-continuation
+  const tokens = [];
+  let cur = '', inTok = false, i = 0;
+  while (i < s.length) {
+    const c = s[i];
+    if (c === "'") { // single quote — literal จนถึง ' ถัดไป
+      inTok = true; i++;
+      while (i < s.length && s[i] !== "'") cur += s[i++];
+      i++; continue;
+    }
+    if (c === '"') { // double quote — รองรับ \ escape
+      inTok = true; i++;
+      while (i < s.length && s[i] !== '"') {
+        if (s[i] === '\\' && i + 1 < s.length && '"\\$`'.includes(s[i + 1])) { cur += s[i + 1]; i += 2; continue; }
+        cur += s[i++];
+      }
+      i++; continue;
+    }
+    if (c === '\\') { if (i + 1 < s.length) { cur += s[i + 1]; inTok = true; i += 2; } else i++; continue; }
+    if (/\s/.test(c)) { if (inTok) { tokens.push(cur); cur = ''; inTok = false; } i++; continue; }
+    cur += c; inTok = true; i++;
+  }
+  if (inTok) tokens.push(cur);
+  return tokens;
+}
+
+function parseCurl(input) {
+  const toks = tokenizeCurl(input);
+  let i = (toks[0] && toks[0].toLowerCase() === 'curl') ? 1 : 0;
+  const res = { method: '', url: '', headers: {}, body: '' };
+  const data = [];
+  const VALUE_FLAGS_IGNORE = ['-o', '--output', '-w', '--write-out', '--connect-timeout', '-m', '--max-time', '--retry', '-x', '--proxy', '--cacert', '--cert', '--key', '-E', '--max-redirs'];
+  for (; i < toks.length; i++) {
+    const t = toks[i];
+    const val = () => toks[++i] || '';
+    if (t === '-X' || t === '--request') res.method = val().toUpperCase();
+    else if (t === '-H' || t === '--header') { const h = val(); const k = h.indexOf(':'); if (k > 0) res.headers[h.slice(0, k).trim()] = h.slice(k + 1).trim(); }
+    else if (t === '-d' || t === '--data' || t === '--data-raw' || t === '--data-binary' || t === '--data-ascii' || t === '--data-urlencode') data.push(val());
+    else if (t === '-u' || t === '--user') res.headers['Authorization'] = 'Basic ' + btoa(val());
+    else if (t === '-b' || t === '--cookie') res.headers['Cookie'] = val();
+    else if (t === '-A' || t === '--user-agent') res.headers['User-Agent'] = val();
+    else if (t === '-e' || t === '--referer') res.headers['Referer'] = val();
+    else if (t === '--url') res.url = val();
+    else if (VALUE_FLAGS_IGNORE.includes(t)) val(); // กินค่า flag ที่ไม่ใช้ทิ้ง
+    else if (t.startsWith('-') && t !== '-') { /* boolean flag (-s -k -L -i -v --compressed ฯลฯ) ข้าม */ }
+    else if (!res.url) res.url = t; // positional = URL
+  }
+  if (data.length) res.body = data.join('&');
+  if (!res.method) res.method = data.length ? 'POST' : 'GET';
+  return res;
+}
+
+const curlImportBtn = document.getElementById('curl-import-btn');
+if (curlImportBtn) curlImportBtn.addEventListener('click', () => {
+  const raw = document.getElementById('curl-input').value.trim();
+  if (!raw) return;
+  let p;
+  try { p = parseCurl(raw); } catch (e) { alert('แปลง cURL ไม่สำเร็จ: ' + e.message); return; }
+  if (!p.url) { alert('ไม่พบ URL ใน cURL ที่วาง'); return; }
+  // method — เพิ่ม option ถ้ายังไม่มีในลิสต์ (เช่น OPTIONS)
+  const methodSel = document.getElementById('send-method');
+  if (![...methodSel.options].some((o) => o.value === p.method)) methodSel.add(new Option(p.method, p.method));
+  methodSel.value = p.method;
+  document.getElementById('send-url').value = p.url;
+  document.getElementById('send-headers').value = Object.entries(p.headers).map(([k, v]) => `${k}: ${v}`).join('\n');
+  // body → ช่อง JSON (pretty ถ้าเป็น JSON) แล้วเลือก radio JSON; ไม่มี body = none
+  const wantType = p.body ? 'json' : 'none';
+  const radio = document.querySelector(`input[name="body-type"][value="${wantType}"]`);
+  if (radio) { radio.checked = true; radio.dispatchEvent(new Event('change')); }
+  if (p.body) {
+    let pretty = p.body;
+    try { pretty = JSON.stringify(JSON.parse(p.body), null, 2); } catch { /* ไม่ใช่ JSON — ใส่ raw ไป */ }
+    bodyJsonEl.value = pretty;
+  }
+  // สลับไปโหมดฟอร์มให้เห็นค่าที่แปลงมา
+  const formRadio = document.querySelector('input[name="send-mode"][value="form"]');
+  if (formRadio) { formRadio.checked = true; formRadio.dispatchEvent(new Event('change')); }
+  curlImportBtn.textContent = '✅ แปลงแล้ว';
+  setTimeout(() => { curlImportBtn.textContent = 'แปลงลงฟอร์ม ▸'; }, 1500);
 });
 
 // ================= URL Metadata =================
@@ -572,6 +687,15 @@ window.addEventListener('keydown', (e) => {
   e.preventDefault();
   document.getElementById('clear-flows').click();
 });
+// cmd/ctrl+enter ตอนอยู่ tab proxy + เลือก flow ไว้ → repeat (ยิงซ้ำ)
+window.addEventListener('keydown', (e) => {
+  if (!((e.metaKey || e.ctrlKey) && e.key === 'Enter')) return;
+  if (!document.getElementById('tab-proxy').classList.contains('active')) return;
+  const f = allFlows.find((x) => x.id === selectedFlowId);
+  if (!f) return;
+  e.preventDefault();
+  replayFlow(f);
+});
 document.getElementById('flow-filter').addEventListener('input', (e) => {
   flowFilter = e.target.value.trim().toLowerCase();
   renderFlowTable();
@@ -706,7 +830,19 @@ function renderFlowTable() {
     } else {
       row.push(el('span', { class: `status-badge ${statusClass(f.status)}`, text: String(statusText) }));
     }
-    if (f.mapped) row.push(el('span', { class: 'map-badge', title: 'ถูก Map Local override', text: '🎯 MAP' }));
+    if (f.mapped && !f.testCase) { // test case มี tag ของตัวเองแล้ว ไม่ต้องโชว์ MAP ซ้ำ
+      const ml = f.mapLocal;
+      const icon = ml && ml.mode === 'passthrough' ? '🔀' : '🎯';
+      const badge = el('span', { class: 'map-badge' + (ml && ml.ruleId ? ' clickable' : ''), title: ml && ml.ruleId ? 'คลิกไปที่กฎ Map Local นี้' : 'ถูก Map Local', text: `${icon} ${ml && ml.name ? ml.name : 'MAP'}` });
+      if (ml && ml.ruleId) badge.addEventListener('click', (e) => { e.stopPropagation(); gotoMapLocalRule(ml.ruleId); });
+      row.push(badge);
+    }
+    if (f.testCase && f.testCase.caseId) {
+      const tc = f.testCase;
+      const tag = el('span', { class: 'tc-badge', title: 'สร้างจาก Test Case — คลิกเพื่อไปที่ step นี้', text: `🎬 ${tc.caseName || 'case'} · #${(tc.step ?? 0) + 1}${tc.label ? ' ' + tc.label : ''}` });
+      tag.addEventListener('click', (e) => { e.stopPropagation(); gotoTestCaseStep(tc); });
+      row.push(tag);
+    }
     if (f.resIsImage || f.reqIsImage) row.push(el('span', { class: 'image-badge', title: 'response เป็นรูปภาพ', text: '🖼️' }));
     if (f.resIsVideo || f.reqIsVideo) row.push(el('span', { class: 'video-badge', title: 'response เป็นวิดีโอ', text: '🎬' }));
     if (f.resIsPdf || f.reqIsPdf) row.push(el('span', { class: 'pdf-badge', title: 'response เป็น PDF', text: '📄' }));
@@ -734,6 +870,33 @@ function renderFlowTable() {
 function renderProxy() {
   renderDeviceTree();
   renderFlowTable();
+}
+
+// คลิก tag Map Local ในแท็บ Proxy → ไปแท็บ Map Local + เปิดกฎนั้น
+function gotoMapLocalRule(id) {
+  document.querySelector('.tab-btn[data-tab="maplocal"]').click();
+  loadMapRules().then(() => {
+    const r = mapRulesData.find((x) => x.id === id);
+    if (r) { selectedRuleId = id; renderMapList(); renderMapEditor(r); }
+  });
+}
+
+// คลิก tag ในแท็บ Proxy → ไปแท็บ Test Case, เปิดเคสนั้น, เลื่อนไป step ที่ตรง + flash
+function gotoTestCaseStep(tc) {
+  document.querySelector('.tab-btn[data-tab="testcases"]').click();
+  tcSelectedId = tc.caseId;
+  loadCases().then(() => {
+    setTimeout(() => {
+      for (const b of tcEditorEl.querySelectorAll('.tc-step')) {
+        if (b.dataset.pattern === (tc.pattern || '') && String(b.dataset.step) === String(tc.step)) {
+          b.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          b.classList.add('tc-step-flash');
+          setTimeout(() => b.classList.remove('tc-step-flash'), 1600);
+          return;
+        }
+      }
+    }, 80);
+  });
 }
 
 // ================= Repeat / Repeat & Edit (คลิกขวาที่แถว flow) =================
@@ -1429,6 +1592,7 @@ const mapEditorEl = document.getElementById('maplocal-editor');
 let mapRulesData = [];
 let selectedRuleId = null;
 let mapSaveHandler = null; // ฟังก์ชัน save ของ editor ที่เปิดอยู่ (ให้ Cmd+S เรียกได้)
+let tcSaveHandler = null;  // เช่นเดียวกัน สำหรับแท็บ Test Case
 
 async function loadMapRules() {
   mapRulesData = await (await fetch('/api/maplocal')).json();
@@ -1442,16 +1606,59 @@ function renderMapList() {
     return;
   }
   for (const r of mapRulesData) {
+    const on = r.enabled !== false;
+    const tog = el('button', { class: 'map-item-toggle ' + (on ? 'on' : 'off'), type: 'button', text: on ? 'Enabled' : 'Disabled', title: 'คลิกเพื่อสลับเปิด/ปิดกฎนี้' });
+    tog.addEventListener('click', async (e) => {
+      e.stopPropagation(); // อย่าเปิด editor
+      await fetch(`/api/maplocal/${r.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !on }) });
+      await loadMapRules();
+      if (r.id === selectedRuleId) { const fresh = mapRulesData.find((x) => x.id === r.id); if (fresh) renderMapEditor(fresh); }
+    });
     const item = el('div', { class: 'map-item' + (r.id === selectedRuleId ? ' selected' : '') }, [
-      el('span', { class: 'map-dot ' + (r.enabled !== false ? 'on' : 'off'), text: r.enabled !== false ? '●' : '○' }),
+      el('span', { class: 'map-dot ' + (on ? 'on' : 'off'), text: on ? '●' : '○' }),
       el('div', { class: 'map-item-body' }, [
-        el('div', { class: 'map-item-name', text: r.name || r.urlPattern || '(ยังไม่ตั้งชื่อ)' }),
+        el('div', { class: 'map-item-name' }, [
+          el('span', { class: 'ml-mode-icon', title: r.mode === 'passthrough' ? 'โหมด Passthrough (แก้ response จริง)' : 'โหมด Mock (ตอบ body ที่ตั้ง)', text: (r.mode === 'passthrough' ? '🔀 ' : '📦 ') }),
+          el('span', { text: r.name || r.urlPattern || '(ยังไม่ตั้งชื่อ)' }),
+        ]),
         el('div', { class: 'map-item-sub', text: `${r.method || 'ANY'} · ${r.urlPattern || '—'} · ${r.status || 200}` }),
       ]),
+      tog,
     ]);
     item.addEventListener('click', () => { selectedRuleId = r.id; renderMapList(); renderMapEditor(r); });
     mapListEl.appendChild(item);
   }
+}
+
+// widget ตาราง override: แต่ละแถว = [เปิด/ปิด] path → ค่าใหม่ [ลบ] ; คืน { el, collect() }
+// onChange(overrides) เรียกทุกครั้งที่แก้ (ไว้ผูกค่าเข้า model ให้รอด redraw)
+function makeOverrideEditor(initial, onChange) {
+  const rows = el('div', { class: 'ov-rows' });
+  const recs = [];
+  const collect = () => recs.map((r) => ({ path: r.path.value.trim(), value: r.val.value, enabled: r.en.checked })).filter((o) => o.path);
+  const fire = () => { if (onChange) onChange(collect()); };
+  const addRow = (o) => {
+    o = o || { path: '', value: '', enabled: true };
+    const en = el('input', { type: 'checkbox', title: 'เปิด/ปิด override นี้' }); en.checked = o.enabled !== false;
+    const path = el('input', { type: 'text', class: 'ov-path', value: o.path || '', placeholder: 'a.b[0].c' });
+    const val = el('input', { type: 'text', class: 'ov-val', value: o.value != null ? o.value : '', placeholder: 'ค่าใหม่ (JSON เช่น true/12/"x" หรือข้อความ)' });
+    const rm = el('button', { class: 'tc-x', type: 'button', title: 'ลบ override', text: '✕' });
+    const row = el('div', { class: 'ov-row' }, [en, path, val, rm]);
+    const rec = { en, path, val, row };
+    rm.addEventListener('click', () => { row.remove(); const i = recs.indexOf(rec); if (i >= 0) recs.splice(i, 1); fire(); });
+    for (const inp of [en, path, val]) inp.addEventListener('input', fire);
+    recs.push(rec);
+    rows.appendChild(row);
+  };
+  (Array.isArray(initial) ? initial : []).forEach(addRow);
+  const addBtn = el('button', { class: 'tc-add-step', type: 'button', text: '+ เพิ่ม override' });
+  addBtn.addEventListener('click', () => { addRow(); fire(); });
+  const wrapEl = el('div', { class: 'ov-editor' }, [rows, addBtn]);
+  return {
+    el: wrapEl,
+    collect,
+    setEnabled: (on) => { wrapEl.classList.toggle('ov-disabled', !on); wrapEl.querySelectorAll('input,button').forEach((n) => { n.disabled = !on; }); },
+  };
 }
 
 function renderMapEditor(rule) {
@@ -1467,7 +1674,35 @@ function renderMapEditor(rule) {
 
   const enabled = el('input', { type: 'checkbox' });
   enabled.checked = rule.enabled !== false;
-  cfg.appendChild(el('label', { class: 'map-enable' }, [enabled, el('span', { text: ' เปิดใช้งานกฎนี้' })]));
+  const enText = el('span');
+  const syncEn = () => { enText.textContent = ' ' + (enabled.checked ? '✅ เปิดใช้งานกฎนี้' : '⛔ ปิดใช้งานกฎนี้'); };
+  syncEn();
+  enabled.addEventListener('change', async () => {
+    syncEn();
+    // auto-bind: กฎที่บันทึกแล้ว → PUT ทันที + อัปเดต toggle ในลิสต์ (ไม่ rebuild editor กันค่าที่แก้ค้างหาย)
+    if (rule.id) {
+      await fetch(`/api/maplocal/${rule.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: enabled.checked }) }).catch(() => {});
+      const r = mapRulesData.find((x) => x.id === rule.id); if (r) r.enabled = enabled.checked;
+      rule.enabled = enabled.checked;
+      renderMapList();
+    }
+  });
+  cfg.appendChild(el('label', { class: 'toggle-chip map-enable-chip', title: 'เปิด/ปิดกฎนี้' }, [enabled, enText]));
+
+  // โหมด Mock / Passthrough (chip เลือก 1)
+  const modeChip = (val, text, title) => {
+    const inp = el('input', { type: 'radio', name: 'ml-mode', value: val });
+    inp.checked = (rule.mode === 'passthrough' ? 'passthrough' : 'mock') === val;
+    inp.addEventListener('change', () => syncMode());
+    return el('label', { class: 'chip', title }, [inp, el('span', { text: ' ' + text })]);
+  };
+  cfg.appendChild(el('label', { class: 'map-label', text: 'โหมด' }));
+  cfg.appendChild(el('div', { class: 'chip-group mode-chips' }, [
+    modeChip('mock', '📦 Mock', 'ตอบ Response body ที่ตั้งไว้ (+override)'),
+    modeChip('passthrough', '🔀 Passthrough', 'ยิง server จริง แล้วแก้เฉพาะ key ใน response จริงด้วย override'),
+  ]));
+  const getMode = () => (document.querySelector('input[name="ml-mode"]:checked') || {}).value || 'mock';
+  const overrideEd = makeOverrideEditor(rule.overrides);
 
   const name = field(cfg, 'ชื่อกฎ (ไว้จำ)', el('input', { type: 'text', value: rule.name || '', placeholder: 'เช่น mock license-types' }));
 
@@ -1484,6 +1719,7 @@ function renderMapEditor(rule) {
 
   const status = field(cfg, 'HTTP status', el('input', { type: 'text', value: String(rule.status || 200) }));
   const contentType = field(cfg, 'Content-Type', el('input', { type: 'text', value: rule.contentType || 'application/json' }));
+
 
   // ---- Response body (คอลัมน์ขวา) — ไฮไลต์สี + ปุ่ม Format ----
   const bodyEd = makeJsonEditor(rule.body || '');
@@ -1510,9 +1746,26 @@ function renderMapEditor(rule) {
     }
   });
   bodyCol.appendChild(el('div', { class: 'map-body-head' }, [el('span', { class: 'map-label', text: 'Response body' }), fmtBtn]));
+  const passthroughNote = el('div', { class: 'tc-file-banner', text: '🔀 โหมด Passthrough: ใช้ response จริงจาก server — ช่อง body นี้ไม่ถูกใช้ (แก้ค่าด้วย “Override เฉพาะ key” ทางซ้าย)' });
+  passthroughNote.style.display = 'none';
+  bodyCol.appendChild(passthroughNote);
   bodyCol.appendChild(bodyEd.wrap);
   bodyCol.appendChild(jsonHint);
+  // Override เฉพาะ key — วางในคอลัมน์กว้าง (ขวา) จะได้ช่อง path/value กว้างพอ
+  bodyCol.appendChild(el('label', { class: 'map-label', text: '🔧 Override เฉพาะ key (path → ค่าใหม่) — ทับบน body/response จริง' }));
+  bodyCol.appendChild(overrideEd.el);
   validateJson();
+  // โชว์/ซ่อน note ตามโหมด
+  function syncMode() {
+    const pt = getMode() === 'passthrough';
+    passthroughNote.style.display = pt ? 'block' : 'none';
+    bodyEd.wrap.style.opacity = pt ? '0.5' : '1';
+    bodyEd.textarea.readOnly = pt;                     // Passthrough → ห้ามแก้ Response body
+    bodyEd.wrap.style.pointerEvents = pt ? 'none' : ''; // กันคลิก/พิมพ์
+    fmtBtn.disabled = pt;                               // ปิดปุ่ม Format ด้วย
+    overrideEd.setEnabled(pt); // override ใช้ได้เฉพาะ Passthrough (Mock แก้ body ตรงๆ)
+  }
+  syncMode();
 
   const collect = () => ({
     enabled: enabled.checked,
@@ -1522,6 +1775,8 @@ function renderMapEditor(rule) {
     status: status.value.trim(),
     contentType: contentType.value.trim(),
     body: bodyEd.textarea.value,
+    mode: getMode(),
+    overrides: overrideEd.collect(),
   });
 
   const status2 = el('span', { class: 'hint' });
@@ -1594,12 +1849,44 @@ document.getElementById('maplocal-add').addEventListener('click', () => {
   renderMapEditor({ enabled: true, method: 'ANY', status: 200, contentType: 'application/json', body: '' });
 });
 
-// Cmd/Ctrl+S บนแท็บ Map Local → บันทึกกฎที่เปิดอยู่ (บล็อกไว้ถ้า JSON format ผิด)
+// Cmd/Ctrl+S → บันทึกสิ่งที่เปิดอยู่ (Map Local / Test Case)
 window.addEventListener('keydown', (e) => {
   if (!((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's')) return;
-  if (!document.getElementById('tab-maplocal').classList.contains('active')) return;
+  const onMap = document.getElementById('tab-maplocal').classList.contains('active');
+  const onTc = document.getElementById('tab-testcases').classList.contains('active');
+  if (!onMap && !onTc) return;
   e.preventDefault(); // กัน browser เด้ง save page
-  if (mapSaveHandler) mapSaveHandler();
+  if (onMap && mapSaveHandler) mapSaveHandler();
+  else if (onTc && tcSaveHandler) tcSaveHandler();
+});
+
+// ทำสำเนา rule/case ที่เลือก (จากข้อมูลที่บันทึกไว้)
+async function duplicateMapRule(id) {
+  const r = mapRulesData.find((x) => x.id === id);
+  if (!r) return;
+  const data = { ...r }; delete data.id;
+  data.name = (r.name || r.urlPattern || 'rule') + ' (copy)';
+  const resp = await (await fetch('/api/maplocal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).json();
+  if (resp.ok) { selectedRuleId = resp.rule.id; await loadMapRules(); renderMapEditor(resp.rule); }
+}
+async function duplicateTestCase(id) {
+  const c = tcData.find((x) => x.id === id);
+  if (!c) return;
+  const data = JSON.parse(JSON.stringify(c));
+  for (const k of ['id', 'source', 'active', 'cursors', 'dir']) delete data[k];
+  data.name = (c.name || 'case') + ' (copy)';
+  const resp = await (await fetch('/api/testcases', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).json();
+  if (resp.ok) { tcSelectedId = resp.case.id; await loadCases(); }
+}
+// Cmd/Ctrl+D → ทำสำเนารายการที่เลือก (Map Local rule / Test Case)
+window.addEventListener('keydown', (e) => {
+  if (!((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd')) return;
+  const onMap = document.getElementById('tab-maplocal').classList.contains('active');
+  const onTc = document.getElementById('tab-testcases').classList.contains('active');
+  if (!onMap && !onTc) return;
+  e.preventDefault(); // กัน browser bookmark
+  if (onMap && selectedRuleId) duplicateMapRule(selectedRuleId);
+  else if (onTc && tcSelectedId) duplicateTestCase(tcSelectedId);
 });
 
 // ================= Test Cases (dynamic sequenced mock) =================
@@ -1608,7 +1895,7 @@ const tcEditorEl = document.getElementById('tc-editor');
 let tcData = [];
 let tcActiveId = null;
 let tcSelectedId = null;
-const newStep = () => ({ label: '', status: 200, contentType: 'application/json', body: '' });
+const newStep = () => ({ label: '', status: 200, contentType: 'application/json', body: '', enabled: true, overrides: [] });
 const newEndpoint = () => ({ method: 'GET', urlPattern: '', steps: [newStep()] });
 
 async function loadCases() {
@@ -1621,24 +1908,63 @@ async function loadCases() {
   if (sel) renderTcEditor(sel);
 }
 
+// อัปเดต cursor/highlight แบบ realtime (เรียกตอนมี flow เข้า) — ไม่ rebuild editor ถ้ากำลังพิมพ์อยู่ กันโฟกัสหลุด
+async function refreshTcCursors() {
+  try {
+    const d = await (await fetch('/api/testcases')).json();
+    tcData = d.cases || []; tcActiveId = d.activeCaseId || null;
+  } catch { return; }
+  renderTcList();
+  const onTc = document.getElementById('tab-testcases').classList.contains('active');
+  const editing = document.activeElement && tcEditorEl.contains(document.activeElement);
+  const sel = tcData.find((c) => c.id === tcSelectedId);
+  if (sel && onTc && !editing) renderTcEditor(sel);
+}
+
 function renderTcList() {
   tcListEl.innerHTML = '';
   if (!tcData.length) { tcListEl.appendChild(el('p', { class: 'empty-msg', html: 'ยังไม่มีเคส<br/>กด "เพิ่มเคส" เพื่อสร้าง' })); return; }
   for (const c of tcData) {
     const active = c.id === tcActiveId;
+    const tog = el('button', { class: 'map-item-toggle ' + (active ? 'on' : 'off'), type: 'button', text: active ? 'Enabled' : 'Disabled', title: 'คลิกเพื่อเปิด/ปิดใช้เคสนี้ (เปิดได้ทีละเคส)' });
+    tog.addEventListener('click', async (e) => {
+      e.stopPropagation(); // อย่าเปิด editor
+      await fetch(active ? '/api/testcases/deactivate' : `/api/testcases/${c.id}/activate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      await loadCases();
+    });
     const item = el('div', { class: 'map-item' + (c.id === tcSelectedId ? ' selected' : '') }, [
       el('span', { class: 'map-dot ' + (active ? 'on' : 'off'), text: active ? '●' : '○' }),
       el('div', { class: 'map-item-body' }, [
         el('div', { class: 'map-item-name', text: c.name || '(ไม่มีชื่อ)' }),
         el('div', { class: 'map-item-sub', text: `${c.source === 'file' ? '🗂️ file' : '✎ inline'} · ${c.endpoints.length} endpoints${active ? ' · 🟢 active' : ''}` }),
       ]),
+      tog,
     ]);
     item.addEventListener('click', () => { tcSelectedId = c.id; renderTcList(); renderTcEditor(c); });
     tcListEl.appendChild(item);
   }
 }
 
-// ปุ่ม activate/reset/next (ใช้ร่วมทั้ง file view และ editor)
+// cursor เก็บเป็น index ของ "step ที่เปิด" (sublist) → แปลงเป็น index จริงใน list เต็ม เพื่อไฮไลต์ถูกช่อง
+function tcCurFull(ep, curSub) {
+  if (curSub == null) return undefined;
+  const idxs = [];
+  (ep.steps || []).forEach((s, i) => { if (s.enabled !== false) idxs.push(i); });
+  return idxs[Math.min(curSub, idxs.length - 1)];
+}
+// แสดงว่าตอนนี้อยู่ step ไหนของแต่ละ endpoint (นับเฉพาะ step ที่เปิด)
+function tcPositionEl(caseObj, cursors) {
+  const rows = [];
+  for (const ep of caseObj.endpoints || []) {
+    const enabled = (ep.steps || []).filter((s) => s.enabled !== false);
+    if (!enabled.length) continue;
+    const i = Math.min(cursors[`${ep.method} ${ep.urlPattern}`] || 0, enabled.length - 1);
+    const label = enabled[i] && enabled[i].label ? ` — ${enabled[i].label}` : '';
+    rows.push(el('div', { class: 'tc-pos-row', text: `${ep.urlPattern || '(no pattern)'} · step ${i + 1}/${enabled.length}${label}` }));
+  }
+  return el('div', { class: 'tc-pos' }, [el('span', { class: 'tc-pos-title', text: '📍 ตอนนี้อยู่ที่' }), ...rows]);
+}
+
 function tcControls(caseObj) {
   const active = caseObj.id === tcActiveId;
   const actBtn = el('button', { class: active ? 'pd-btn danger' : 'pd-btn primary', text: active ? '⏹ ปิดใช้เคสนี้' : '▶ เปิดใช้เคสนี้' });
@@ -1648,9 +1974,9 @@ function tcControls(caseObj) {
   });
   const ctrls = el('div', { class: 'tc-ctrls' }, [actBtn]);
   if (active) {
-    const resetBtn = el('button', { class: 'pd-btn', text: '↺ Reset' });
+    const resetBtn = el('button', { class: 'pd-btn primary', text: '↺ Reset' });
     resetBtn.addEventListener('click', async () => { await fetch('/api/testcases/reset', { method: 'POST' }); await loadCases(); });
-    const nextBtn = el('button', { class: 'pd-btn', text: '⏭ Next step' });
+    const nextBtn = el('button', { class: 'pd-btn primary', text: '⏭ Next step' });
     nextBtn.addEventListener('click', async () => { await fetch('/api/testcases/next', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); await loadCases(); });
     ctrls.appendChild(resetBtn); ctrls.appendChild(nextBtn);
   }
@@ -1661,23 +1987,27 @@ function renderTcEditor(caseObj) {
   // เคสจากไฟล์ = read-only (แก้ที่ไฟล์แล้ว reload)
   if (caseObj.source === 'file') {
     tcEditorEl.innerHTML = '';
-    tcEditorEl.appendChild(el('div', { class: 'tc-file-banner', html: `🗂️ เคสจากไฟล์ <code>test-cases/${caseObj.dir}/</code> (read-only) — แก้ที่ไฟล์แล้วกด 🔄 Reload ไฟล์` }));
-    tcEditorEl.appendChild(el('div', { class: 'tc-name', text: caseObj.name }));
-    tcEditorEl.appendChild(tcControls(caseObj));
+    const scroll = el('div', { class: 'tc-scroll' });
+    tcEditorEl.appendChild(scroll);
+    scroll.appendChild(el('div', { class: 'tc-file-banner', html: `🗂️ เคสจากไฟล์ <code>test-cases/${caseObj.dir}/</code> (read-only) — แก้ที่ไฟล์แล้วกด 🔄 Reload ไฟล์` }));
+    scroll.appendChild(el('div', { class: 'tc-name', text: caseObj.name }));
+    scroll.appendChild(tcControls(caseObj));
     const cursors = (tcData.find((c) => c.id === caseObj.id) || {}).cursors || {};
     const active = caseObj.id === tcActiveId;
+    if (active) scroll.appendChild(tcPositionEl(caseObj, cursors));
     for (const ep of caseObj.endpoints) {
       const box = el('div', { class: 'tc-ep' });
       box.appendChild(el('div', { class: 'tc-ep-head' }, [methodBadge(ep.method), el('code', { text: ep.urlPattern })]));
-      const cur = cursors[`${ep.method} ${ep.urlPattern}`];
+      const curFull = tcCurFull(ep, cursors[`${ep.method} ${ep.urlPattern}`]);
       ep.steps.forEach((st, si) => {
-        const isCur = active && cur === si;
-        const stBox = el('div', { class: 'tc-step' + (isCur ? ' current' : '') });
-        stBox.appendChild(el('div', { class: 'tc-step-head' }, [el('span', { class: 'tc-step-num', text: `#${si + 1} ${st.label || ''} · ${st.status}${isCur ? ' ◀ ตอนนี้' : ''}` })]));
+        const isCur = active && curFull === si;
+        const off = st.enabled === false;
+        const stBox = el('div', { class: 'tc-step' + (isCur ? ' current' : '') + (off ? ' tc-step-off' : ''), 'data-pattern': ep.urlPattern, 'data-step': String(si) });
+        stBox.appendChild(el('div', { class: 'tc-step-head' }, [el('span', { class: 'tc-step-num', text: `#${si + 1} ${st.label || ''} · ${st.status}${off ? ' · ปิด' : ''}${isCur ? ' ◀ ตอนนี้' : ''}` })]));
         stBox.appendChild(el('pre', { class: 'code-block json tc-ro-body', html: syntaxHighlightJson(st.body || '') }));
         box.appendChild(stBox);
       });
-      tcEditorEl.appendChild(box);
+      scroll.appendChild(box);
     }
     return;
   }
@@ -1687,9 +2017,10 @@ function renderTcEditor(caseObj) {
     id: caseObj.id,
     name: caseObj.name || '',
     autoAdvance: caseObj.autoAdvance !== false,
+    loop: caseObj.loop === true,
     endpoints: (caseObj.endpoints || []).map((e) => ({
       method: e.method || 'GET', urlPattern: e.urlPattern || '',
-      steps: (e.steps || []).map((s) => ({ label: s.label || '', status: s.status || 200, contentType: s.contentType || 'application/json', body: s.body || '' })),
+      steps: (e.steps || []).map((s) => ({ label: s.label || '', status: s.status || 200, contentType: s.contentType || 'application/json', body: s.body || '', enabled: s.enabled !== false, overrides: Array.isArray(s.overrides) ? s.overrides : [] })),
     })),
   };
   if (!model.endpoints.length) model.endpoints.push(newEndpoint());
@@ -1697,14 +2028,23 @@ function renderTcEditor(caseObj) {
   const status2 = el('span', { class: 'hint' });
 
   const draw = () => {
+    // จำตำแหน่ง scroll เดิมไว้ (draw() สร้าง .tc-scroll ใหม่ → ไม่งั้นเด้งขึ้นบนทุกครั้งที่ +endpoint/+step)
+    const prevScroll = (() => { const s = tcEditorEl.querySelector('.tc-scroll'); return s ? s.scrollTop : 0; })();
     tcEditorEl.innerHTML = '';
+    const scroll = el('div', { class: 'tc-scroll' }); // ส่วนที่ scroll (footer อยู่นอกนี้ ปักล่าง)
+    tcEditorEl.appendChild(scroll);
     const nameInput = el('input', { type: 'text', value: model.name, placeholder: 'ชื่อเคส เช่น case 5' });
     nameInput.addEventListener('input', () => { model.name = nameInput.value; });
-    tcEditorEl.appendChild(el('label', { class: 'map-label', text: 'ชื่อเคส' }));
-    tcEditorEl.appendChild(nameInput);
-    const auto = el('input', { type: 'checkbox' }); auto.checked = model.autoAdvance;
-    auto.addEventListener('change', () => { model.autoAdvance = auto.checked; });
-    tcEditorEl.appendChild(el('label', { class: 'map-enable' }, [auto, el('span', { text: ' auto-advance (เลื่อน step อัตโนมัติเมื่อ endpoint ถูกเรียก)' })]));
+    // chip toggle: auto-advance / loop — อยู่แถวเดียวกับชื่อเคส ชิดขวา
+    const mkToggle = (text, checked, onChange, title) => {
+      const inp = el('input', { type: 'checkbox' }); inp.checked = checked;
+      inp.addEventListener('change', () => onChange(inp.checked));
+      return el('label', { class: 'toggle-chip', title: title || '' }, [inp, el('span', { text: ' ' + text })]);
+    };
+    const autoChip = mkToggle('⚡ auto-advance', model.autoAdvance, (v) => { model.autoAdvance = v; }, 'เลื่อน step อัตโนมัติเมื่อ endpoint ถูกเรียก');
+    const loopChip = mkToggle('🔁 loop', model.loop, (v) => { model.loop = v; }, 'จบ step สุดท้ายแล้ววนกลับ step 1');
+    scroll.appendChild(el('label', { class: 'map-label', text: 'ชื่อเคส' }));
+    scroll.appendChild(el('div', { class: 'tc-name-row' }, [nameInput, el('div', { class: 'tc-toggles' }, [autoChip, loopChip])]));
 
     if (!isNew) {
       const active = model.id === tcActiveId;
@@ -1715,16 +2055,17 @@ function renderTcEditor(caseObj) {
       });
       const ctrls = el('div', { class: 'tc-ctrls' }, [actBtn]);
       if (active) {
-        const resetBtn = el('button', { class: 'pd-btn', text: '↺ Reset' });
+        const resetBtn = el('button', { class: 'pd-btn primary', text: '↺ Reset' });
         resetBtn.addEventListener('click', async () => { await fetch('/api/testcases/reset', { method: 'POST' }); await loadCases(); });
-        const nextBtn = el('button', { class: 'pd-btn', text: '⏭ Next step' });
+        const nextBtn = el('button', { class: 'pd-btn primary', text: '⏭ Next step' });
         nextBtn.addEventListener('click', async () => { await fetch('/api/testcases/next', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); await loadCases(); });
         ctrls.appendChild(resetBtn); ctrls.appendChild(nextBtn);
       }
-      tcEditorEl.appendChild(ctrls);
+      scroll.appendChild(ctrls);
+      if (active) scroll.appendChild(tcPositionEl(model, cursors)); // แสดงว่าตอนนี้อยู่ step ไหน
     }
 
-    tcEditorEl.appendChild(el('div', { class: 'map-label', text: 'Endpoints (แต่ละ endpoint ตอบตามลำดับ step)' }));
+    scroll.appendChild(el('div', { class: 'map-label', text: 'Endpoints (แต่ละ endpoint ตอบตามลำดับ step)' }));
     model.endpoints.forEach((ep, ei) => {
       const box = el('div', { class: 'tc-ep' });
       const mSel = el('select', { class: 'tc-ep-method' });
@@ -1732,41 +2073,52 @@ function renderTcEditor(caseObj) {
       mSel.addEventListener('change', () => { ep.method = mSel.value; });
       const pat = el('input', { type: 'text', class: 'tc-ep-pattern', value: ep.urlPattern, placeholder: '/api/detail หรือ /user/*' });
       pat.addEventListener('input', () => { ep.urlPattern = pat.value; });
+      const dupEp = el('button', { class: 'tc-dup', title: 'ทำสำเนา endpoint นี้ (ทุก step)', text: '⧉' });
+      dupEp.addEventListener('click', () => { model.endpoints.splice(ei + 1, 0, JSON.parse(JSON.stringify(ep))); draw(); });
       const rmEp = el('button', { class: 'tc-x', title: 'ลบ endpoint', text: '✕' });
       rmEp.addEventListener('click', () => { model.endpoints.splice(ei, 1); if (!model.endpoints.length) model.endpoints.push(newEndpoint()); draw(); });
-      box.appendChild(el('div', { class: 'tc-ep-head' }, [mSel, pat, rmEp]));
+      box.appendChild(el('div', { class: 'tc-ep-head' }, [mSel, pat, dupEp, rmEp]));
 
-      const curIdx = cursors[`${ep.method} ${ep.urlPattern}`];
+      const curFull = tcCurFull(ep, cursors[`${ep.method} ${ep.urlPattern}`]);
       ep.steps.forEach((st, si) => {
-        const isCur = model.id === tcActiveId && curIdx === si;
-        const stBox = el('div', { class: 'tc-step' + (isCur ? ' current' : '') });
+        const isCur = model.id === tcActiveId && curFull === si;
+        const off = st.enabled === false;
+        const stBox = el('div', { class: 'tc-step' + (isCur ? ' current' : '') + (off ? ' tc-step-off' : ''), 'data-pattern': ep.urlPattern, 'data-step': String(si) });
         const sLabel = el('input', { type: 'text', class: 'tc-step-label', value: st.label, placeholder: `label step ${si + 1}` });
         sLabel.addEventListener('input', () => { st.label = sLabel.value; });
         const sStatus = el('input', { type: 'text', class: 'tc-step-status', value: String(st.status), placeholder: 'status' });
         sStatus.addEventListener('input', () => { st.status = parseInt(sStatus.value, 10) || 200; });
         const sCt = el('input', { type: 'text', class: 'tc-step-ct', value: st.contentType, placeholder: 'content-type' });
         sCt.addEventListener('input', () => { st.contentType = sCt.value; });
+        // toggle เปิด/ปิด step (ปิดแล้วถูกข้ามใน sequence ไม่ต้องลบ)
+        const enToggle = el('button', { class: 'tc-step-toggle ' + (off ? 'off' : 'on'), type: 'button', title: 'เปิด/ปิด step นี้', text: off ? 'ปิด' : 'เปิด' });
+        enToggle.addEventListener('click', () => { st.enabled = off; draw(); });
+        const dupSt = el('button', { class: 'tc-dup', title: 'ทำสำเนา step นี้ (คัดลอก body + override)', text: '⧉' });
+        dupSt.addEventListener('click', () => { ep.steps.splice(si + 1, 0, JSON.parse(JSON.stringify(st))); draw(); });
         const rmSt = el('button', { class: 'tc-x', title: 'ลบ step', text: '✕' });
         rmSt.addEventListener('click', () => { ep.steps.splice(si, 1); if (!ep.steps.length) ep.steps.push(newStep()); draw(); });
         const bodyEd = makeJsonEditor(st.body);
         bodyEd.textarea.addEventListener('input', () => { st.body = bodyEd.textarea.value; });
         bodyEd.wrap.classList.add('tc-step-body');
-        stBox.appendChild(el('div', { class: 'tc-step-head' }, [el('span', { class: 'tc-step-num', text: `#${si + 1}${isCur ? ' ◀ ตอนนี้' : ''}` }), sLabel, sStatus, sCt, rmSt]));
+        stBox.appendChild(el('div', { class: 'tc-step-head' }, [el('span', { class: 'tc-step-num', text: `#${si + 1}${off ? ' · ปิด' : ''}${isCur ? ' ◀ ตอนนี้' : ''}` }), sLabel, sStatus, sCt, enToggle, dupSt, rmSt]));
         stBox.appendChild(bodyEd.wrap);
+        // override เฉพาะ key ของ step นี้ (ทับบน body) — ผูกเข้า st.overrides ให้รอด redraw
+        const ovEd = makeOverrideEditor(st.overrides, (ovs) => { st.overrides = ovs; });
+        stBox.appendChild(el('div', { class: 'map-label', text: '🔧 Override เฉพาะ key' }));
+        stBox.appendChild(ovEd.el);
         box.appendChild(stBox);
       });
       const addStep = el('button', { class: 'tc-add-step', text: '+ step' });
       addStep.addEventListener('click', () => { ep.steps.push(newStep()); draw(); });
       box.appendChild(addStep);
-      tcEditorEl.appendChild(box);
+      scroll.appendChild(box);
     });
 
     const addEp = el('button', { class: 'tc-add-ep', text: '+ เพิ่ม endpoint' });
     addEp.addEventListener('click', () => { model.endpoints.push(newEndpoint()); draw(); });
-    tcEditorEl.appendChild(addEp);
 
     const saveBtn = el('button', { class: 'primary', text: isNew ? 'สร้างเคส' : 'บันทึก' });
-    saveBtn.addEventListener('click', async () => {
+    const doSaveTc = async () => {
       if (!model.name.trim()) { status2.textContent = '⚠️ ใส่ชื่อเคสก่อน'; status2.style.color = 'var(--yellow)'; return; }
       for (const ep of model.endpoints) {
         for (const st of ep.steps) {
@@ -1779,14 +2131,18 @@ function renderTcEditor(caseObj) {
       const resp = await (await fetch(url, { method: isNew ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(model) })).json();
       if (resp.ok) { status2.textContent = '✅ บันทึกแล้ว'; status2.style.color = 'var(--green)'; tcSelectedId = resp.case.id; await loadCases(); }
       else { status2.textContent = '❌ ' + (resp.error || 'บันทึกไม่สำเร็จ'); status2.style.color = 'var(--red)'; }
-    });
+    };
+    saveBtn.addEventListener('click', doSaveTc);
+    tcSaveHandler = doSaveTc; // ให้ Cmd/Ctrl+S เรียก save ของเคสที่เปิดอยู่
     const btnRow = el('div', { class: 'map-btn-row' }, [saveBtn, status2]);
     if (!isNew) {
       const delBtn = el('button', { class: 'danger', text: '🗑️ ลบเคส' });
       delBtn.addEventListener('click', async () => { await fetch(`/api/testcases/${model.id}`, { method: 'DELETE' }); tcSelectedId = null; await loadCases(); tcEditorEl.innerHTML = '<p class="empty-msg">เลือกเคส หรือกด "เพิ่มเคส"</p>'; });
       btnRow.appendChild(delBtn);
     }
-    tcEditorEl.appendChild(btnRow);
+    // footer ปักล่าง — เห็นปุ่มเพิ่ม endpoint/บันทึก/ลบเคส เสมอ ไม่ต้อง scroll ตาม
+    tcEditorEl.appendChild(el('div', { class: 'tc-footer' }, [addEp, btnRow]));
+    scroll.scrollTop = prevScroll; // คงตำแหน่ง scroll เดิม (ไม่เด้งขึ้นบน)
   };
   draw();
 }
@@ -2102,8 +2458,8 @@ async function renderStatus() {
     ? '<b>⚠️ ยังบันทึก traffic ไม่ได้:</b><br/>• ' + blockers.join('<br/>• ')
     : '✅ <b>พร้อมบันทึก traffic จากมือถือ</b> — เปิดแอป/เว็บบนมือถือได้เลย';
 
-  // --- ApiTester server ---
-  statusCards.appendChild(stCard('🧪', 'ApiTester server', true,
+  // --- API Debugger server ---
+  statusCards.appendChild(stCard('🧪', 'API Debugger server', true,
     [`พอร์ต ${sv.apitester.port} — หน้าเว็บ + API + เก็บ flow (ตอบอยู่ตอนนี้)`]));
 
   // --- mitmproxy ---
@@ -2177,6 +2533,16 @@ async function renderStatus() {
     ? [stBtn('🔊 ปลด mute (รับ flow)', stUnmute)]
     : [];
   statusCards.appendChild(stCard('⏺️', 'การบันทึก traffic', !muted, recDetails, recActs));
+
+  // --- คีย์ลัด (ให้คนอื่นเห็น) ---
+  const mod = navigator.platform.toLowerCase().includes('mac') ? '⌘' : 'Ctrl';
+  statusCards.appendChild(stCard('⌨️', 'คีย์ลัด (Keyboard shortcuts)', true, [
+    `Proxy: ${mod} + ⌫  — เคลียร์ traffic ทั้งหมด`,
+    `Proxy: ${mod} + Enter  — repeat (ยิงซ้ำ) flow ที่เลือกไว้`,
+    `Map Local / Test Case: ${mod} + S  — บันทึก`,
+    `Map Local / Test Case: ${mod} + D  — ทำสำเนา (duplicate) รายการที่เลือก`,
+    `Sender: ลาก cURL วางในโหมด cURL แล้วกด "ส่ง" — ยิงผ่าน proxy ได้`,
+  ]));
 }
 
 document.getElementById('status-refresh').addEventListener('click', renderStatus);

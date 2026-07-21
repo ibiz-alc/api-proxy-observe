@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>API Tester</title>
+  <title>API Debugger</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <header>
-    <h1>🧪 API Tester</h1>
+    <h1>🧪 API Debugger</h1>
     <nav>
       <button class="tab-btn active" data-tab="inspector">📥 Inspector</button>
       <button class="tab-btn" data-tab="sender">📤 Sender</button>
@@ -45,27 +45,43 @@
   <main id="tab-sender" class="tab">
     <div class="sender-layout">
       <section class="sender-form">
-        <div class="row">
-          <select id="send-method">
-            <option>GET</option><option>POST</option><option>PUT</option>
-            <option>PATCH</option><option>DELETE</option><option>HEAD</option>
-          </select>
-          <input type="text" id="send-url" placeholder="https://example.com/api/endpoint" />
+        <div class="row send-mode">
+          <div class="chip-group">
+            <label class="chip"><input type="radio" name="send-mode" value="form" checked /> ฟอร์ม</label>
+            <label class="chip"><input type="radio" name="send-mode" value="curl" /> cURL</label>
+          </div>
+          <label class="toggle-chip" id="send-via-proxy-chip" title="ยิงผ่าน mitmproxy บนเครื่องนี้ → request จะโผล่เป็น flow ในแท็บ Proxy (ต้องเปิด mitmproxy)"><input type="checkbox" id="send-via-proxy" checked /> 🔎 ผ่าน proxy</label>
           <button id="send-btn" class="primary">ส่ง ▶</button>
         </div>
-        <label>Headers (บรรทัดละ 1 รายการ รูปแบบ <code>Key: Value</code>)</label>
-        <textarea id="send-headers" rows="3" placeholder="Authorization: Bearer xxx&#10;X-Custom-Header: value"></textarea>
-        <label>Body</label>
-        <div class="row body-type">
-          <label><input type="radio" name="body-type" value="none" checked /> ไม่มี</label>
-          <label><input type="radio" name="body-type" value="json" /> JSON</label>
-          <label><input type="radio" name="body-type" value="form" /> Form data / ไฟล์แนบ</label>
+        <!-- โหมด cURL: วาง cURL แล้วส่งได้เลย -->
+        <div id="send-curl-mode" style="display:none">
+          <label>cURL command</label>
+          <textarea id="curl-input" rows="8" placeholder="วาง cURL ที่นี่ (จาก DevTools หรือปุ่ม Copy as cURL ในแท็บ Proxy) แล้วกด ส่ง ▶&#10;หรือกด 'แปลงลงฟอร์ม' เพื่อแก้ต่อในโหมดฟอร์ม"></textarea>
+          <button id="curl-import-btn" type="button" class="primary">แปลงลงฟอร์ม ▸</button>
         </div>
-        <textarea id="send-body-json" rows="8" placeholder='{"name": "test", "value": 123}' style="display:none"></textarea>
-        <div id="send-body-form" style="display:none">
-          <div id="form-fields"></div>
-          <button id="add-text-field" type="button">+ เพิ่มข้อความ</button>
-          <button id="add-file-field" type="button">+ เพิ่มไฟล์</button>
+        <!-- โหมดฟอร์ม -->
+        <div id="send-form-mode">
+          <div class="row">
+            <select id="send-method">
+              <option>GET</option><option>POST</option><option>PUT</option>
+              <option>PATCH</option><option>DELETE</option><option>HEAD</option>
+            </select>
+            <input type="text" id="send-url" placeholder="https://example.com/api/endpoint" />
+          </div>
+          <label>Headers (บรรทัดละ 1 รายการ รูปแบบ <code>Key: Value</code>)</label>
+          <textarea id="send-headers" rows="6" placeholder="Authorization: Bearer xxx&#10;X-Custom-Header: value"></textarea>
+          <label>Body</label>
+          <div class="row body-type">
+            <label><input type="radio" name="body-type" value="none" checked /> ไม่มี</label>
+            <label><input type="radio" name="body-type" value="json" /> JSON</label>
+            <label><input type="radio" name="body-type" value="form" /> Form data / ไฟล์แนบ</label>
+          </div>
+          <textarea id="send-body-json" rows="8" placeholder='{"name": "test", "value": 123}' style="display:none"></textarea>
+          <div id="send-body-form" style="display:none">
+            <div id="form-fields"></div>
+            <button id="add-text-field" type="button">+ เพิ่มข้อความ</button>
+            <button id="add-file-field" type="button">+ เพิ่มไฟล์</button>
+          </div>
         </div>
       </section>
       <section id="send-result">

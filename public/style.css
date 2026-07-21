@@ -314,6 +314,48 @@ pre.code-block.json { color: #cbd5e1; }
 }
 
 .sender-form .row { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }
+.sender-form .send-mode #send-btn { margin-left: auto; }
+/* Chip toggle (segmented) เลือกโหมด ฟอร์ม/cURL — เลือกได้ทีละ 1 */
+.chip-group { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.chip-group .chip {
+  display: flex; align-items: center; margin: 0; padding: 7px 18px;
+  cursor: pointer; color: var(--muted); background: transparent;
+  font-size: 0.9rem; user-select: none; transition: background 0.12s, color 0.12s;
+}
+.chip-group .chip + .chip { border-left: 1px solid var(--border); }
+.chip-group .chip input { display: none; }
+.chip-group .chip:hover { background: var(--panel-2); color: var(--text); }
+.chip-group .chip:has(input:checked) { background: var(--accent); color: #0f172a; font-weight: 600; }
+/* mode chips (Map Local) — เต็มความกว้าง แบ่ง 1:1 */
+.chip-group.mode-chips { display: flex; width: 100%; }
+.chip-group.mode-chips .chip { flex: 1 1 0; justify-content: center; }
+/* toggle chip เดี่ยว (เปิด/ปิดอิสระ) — auto-advance / loop / ผ่าน proxy */
+.toggle-chip {
+  display: inline-flex; align-items: center; margin: 0; padding: 6px 14px;
+  border: 1px solid var(--border); border-radius: 999px; cursor: pointer;
+  color: var(--muted); background: transparent; font-size: 0.85rem; white-space: nowrap; user-select: none;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.toggle-chip input { display: none; }
+.toggle-chip:hover { background: var(--panel-2); color: var(--text); }
+.toggle-chip:has(input:checked) { background: var(--accent); color: #0f172a; border-color: var(--accent); font-weight: 600; }
+.sender-form .send-mode #send-via-proxy-chip { margin-left: auto; } /* ดันไปขวาก่อนปุ่มส่ง */
+.map-enable-chip { align-self: flex-start; margin-bottom: 10px; } /* ไม่ให้ยืดเต็มคอลัมน์ */
+/* ตาราง Override เฉพาะ key (path → value) */
+.ov-editor { margin-bottom: 10px; }
+.ov-rows { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
+.ov-row { display: flex; align-items: center; gap: 6px; }
+.ov-row input.ov-path, .ov-row input.ov-val { padding: 4px 8px; font-size: 0.82rem; }
+#maplocal-editor .ov-row input.ov-path, #tc-editor .ov-row input.ov-path { flex: 2 1 0; width: auto; min-width: 0; }
+#maplocal-editor .ov-row input.ov-val, #tc-editor .ov-row input.ov-val { flex: 3 1 0; width: auto; min-width: 0; }
+.ov-row input[type="checkbox"] { flex: 0 0 auto; }
+.ov-row .tc-x { flex: 0 0 auto; }
+/* แถวชื่อเคส + toggle chips (ชิดขวา) */
+.tc-name-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.tc-name-row > input[type="text"] { flex: 1 1 auto; }
+.tc-toggles { display: flex; gap: 8px; margin-left: auto; flex-shrink: 0; }
+/* เว้นระยะปุ่ม "แปลงลงฟอร์ม" ออกจาก textarea ด้านบน + ชิดขวา */
+#curl-import-btn { margin-top: 10px; display: block; margin-left: auto; }
 .sender-form label { display: block; color: var(--muted); font-size: 0.85rem; margin: 10px 0 4px; }
 .body-type { gap: 18px !important; }
 .body-type label { margin: 0; color: var(--text); display: flex; align-items: center; gap: 6px; }
@@ -571,6 +613,20 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
   padding: 1px 5px;
 }
 .flow-item.mapped { border-left: 3px solid var(--green); }
+/* tag บอกว่าใช้ Test Case ไหน/step ไหน — คลิกไปที่ step ได้ */
+.tc-badge {
+  background: rgba(250, 204, 21, 0.15); color: var(--yellow); border: 1px solid var(--yellow);
+  border-radius: 5px; font-size: 0.66rem; font-weight: 700; padding: 1px 6px; cursor: pointer; white-space: nowrap;
+}
+.tc-badge:hover { background: var(--yellow); color: #0f172a; }
+.map-badge.clickable { cursor: pointer; }
+.map-badge.clickable:hover { background: var(--green); color: #0f172a; }
+.ml-mode-icon { flex-shrink: 0; }
+/* flash เมื่อคลิก tag แล้วเด้งมาที่ step */
+.tc-step-flash { animation: tcflash 1.6s ease; }
+@keyframes tcflash { 0% { background: rgba(250, 204, 21, 0.35); } 100% { background: transparent; } }
+/* override ที่ถูก disable (โหมด Mock) */
+.ov-disabled { opacity: 0.45; }
 .image-badge {
   background: rgba(96, 165, 250, 0.15);
   color: var(--accent);
@@ -793,6 +849,9 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
   gap: 14px;
   height: calc(100vh - 160px);
 }
+/* Test Cases: ให้เต็มจอพอดี (แทน calc ที่ล้นจอ) — layout ยืดเต็มพื้นที่ที่เหลือ, editor scroll ในตัว */
+#tab-testcases.active { display: flex; flex-direction: column; overflow: hidden; }
+#tab-testcases .maplocal-layout { height: auto; flex: 1 1 auto; min-height: 0; }
 #maplocal-list {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -815,6 +874,20 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .map-item-body { flex: 1; overflow: hidden; }
 .map-item-name { font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .map-item-sub { color: var(--muted); font-size: 0.76rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* toggle Enabled/Disabled บน list item — แถบใหญ่เต็มความสูงแถว โชว์ตลอด (กดง่าย ไม่ต้องเล็ง) */
+.map-item { padding: 0; }                              /* ย้าย padding ไปที่ลูก เพื่อให้ toggle เต็มความสูงจริง */
+.map-item .map-dot { margin: 12px 0 0 12px; }
+.map-item-body { padding: 10px 0; min-width: 0; }
+.map-item-toggle {
+  flex-shrink: 0; align-self: stretch; display: flex; align-items: center; justify-content: center;
+  min-width: 84px; padding: 0 14px; border: none; border-left: 1px solid var(--border);
+  font-size: 0.78rem; font-weight: 700; cursor: pointer; background: transparent; white-space: nowrap;
+  transition: background 0.12s, color 0.12s;
+}
+.map-item-toggle.on { color: var(--green); }
+.map-item-toggle.off { color: var(--muted); }
+.map-item-toggle.on:hover { background: rgba(74, 222, 128, 0.16); }
+.map-item-toggle.off:hover { background: var(--accent); color: #0f172a; }
 
 #maplocal-editor {
   background: var(--panel);
@@ -841,7 +914,8 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
   gap: 14px;
 }
 .map-cfg { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
-.map-body-col { display: flex; flex-direction: column; min-height: 0; }
+.map-body-col { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
+.map-body-col .ov-editor { flex-shrink: 0; } /* Override อยู่คอลัมน์กว้าง — คงความสูง ไม่โดนบีบ */
 .map-body-head { display: flex; align-items: center; justify-content: space-between; margin: 5px 0 4px; }
 .map-body-head .map-label { margin: 0; }
 .map-fmt-btn {
@@ -873,9 +947,20 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .je-input::placeholder { color: var(--muted); }
 
 /* ---------- Test Cases ---------- */
-#tc-editor { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; overflow-y: auto; }
+#tc-editor { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+.tc-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 #tc-editor input[type="text"], #tc-editor select { padding: 4px 10px; }
-.tc-ctrls { display: flex; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
+.tc-ctrls { display: flex; gap: 8px; margin: 8px 0; flex-wrap: wrap; align-items: center; }
+/* ปุ่มควบคุมเคส (เปิด/ปิด/Reset/Next) — สไตล์เดียวกันทั้งชุด (pill) */
+.tc-ctrls .pd-btn { padding: 6px 14px; border-radius: 8px; font-size: 0.85rem; font-weight: 600; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); }
+.tc-ctrls .pd-btn.primary { background: transparent; border-color: var(--accent); color: var(--accent); }
+.tc-ctrls .pd-btn.primary:hover { background: var(--accent); color: #0f172a; }
+.tc-ctrls .pd-btn.danger { background: transparent; border-color: var(--red); color: var(--red); }
+.tc-ctrls .pd-btn.danger:hover { background: var(--red); color: #0f172a; }
+/* แสดงตำแหน่ง step ปัจจุบัน */
+.tc-pos { background: var(--panel-2); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 8px; padding: 8px 12px; margin: 8px 0; font-size: 0.84rem; }
+.tc-pos-title { color: var(--accent); font-weight: 600; display: block; margin-bottom: 3px; }
+.tc-pos-row { color: var(--text); }
 .tc-ep { border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin: 8px 0; background: var(--bg); }
 .tc-ep-head { display: flex; gap: 6px; align-items: center; }
 .tc-ep-method { flex: 0 0 90px; }
@@ -890,9 +975,27 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .tc-step-ct { flex: 0 0 150px; }
 .tc-step-body { height: 130px; flex: none; margin-top: 4px; }
 .tc-x { background: transparent; border: 1px solid var(--border); color: var(--red); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+.tc-dup { background: transparent; border: 1px solid var(--border); color: var(--accent); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+.tc-dup:hover { background: var(--accent); color: #0f172a; }
+/* toggle เปิด/ปิด step + สภาพ step ที่ปิด */
+.tc-step-toggle { background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 2px 10px; font-size: 0.72rem; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.tc-step-toggle.on { border-color: var(--green); color: var(--green); }
+.tc-step-toggle.off { border-color: var(--muted); color: var(--muted); }
+.tc-step-toggle.on:hover { background: var(--green); color: #0f172a; }
+.tc-step-toggle.off:hover { background: var(--panel-2); color: var(--text); }
+.tc-step.tc-step-off { opacity: 0.5; }
+.tc-step.tc-step-off.current { opacity: 1; } /* ถ้าเป็นตัวปัจจุบัน (ไม่ควรเกิด) ก็ยังเห็นชัด */
 .tc-add-step, .tc-add-ep { background: var(--panel-2); border: 1px dashed var(--border); color: var(--text); border-radius: 6px; padding: 4px 12px; font-size: 0.82rem; cursor: pointer; }
 .tc-add-step { margin-top: 6px; }
-.tc-add-ep { display: block; margin: 10px 0; }
+.tc-add-ep { display: block; margin: 0; }
+/* footer ปักล่าง editor — flex child (ไม่ scroll, ไม่ทะลุ); .tc-scroll ข้างบน scroll เอง */
+.tc-footer {
+  flex-shrink: 0;
+  margin: 10px -14px -14px; padding: 12px 14px;
+  background: var(--panel); border-top: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.tc-footer .map-btn-row { margin-top: 0; }
 .tc-file-banner { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 0.84rem; color: var(--muted); margin-bottom: 10px; }
 .tc-file-banner code { color: var(--accent); }
 .tc-name { font-size: 1rem; font-weight: 600; margin: 6px 0; }
