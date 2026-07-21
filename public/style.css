@@ -1109,6 +1109,8 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .tc-popup-title { font-weight: 700; white-space: nowrap; }
 .tc-popup-toggle { cursor: pointer; color: var(--muted); padding: 2px 8px; font-size: 1.35rem; line-height: 1; font-weight: 700; }
 .tc-popup-toggle:hover { color: var(--accent); }
+.tc-popup-head-btns { align-items: center; }
+.tc-popup-toggle.gear { font-size: 0.77rem; display: inline-flex; align-items: center; align-self: center; line-height: 1; }
 .tc-popup-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .tc-popup.collapsed .tc-popup-list { display: none; }
 .tc-popup-resizer { position: absolute; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 2; }
@@ -1261,20 +1263,25 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
   border: 1px solid var(--accent);
   color: #082f49;
   font-weight: 600;
+  font-size: 13px;              /* ตั้งชัดเจน เพื่อให้ <button> กับ <a> สูง/ขนาดตัวอักษรเท่ากัน */
+  line-height: 1.4;
   padding: 6px 12px;
   border-radius: 6px;
   cursor: pointer;
 }
 .st-action:disabled { opacity: 0.6; cursor: wait; }
 .st-action.stop { background: transparent; border-color: var(--red); color: var(--red); }
+/* variant โปร่ง (outline) — ใช้กับปุ่ม QR / ลิงก์ ให้สูง+ตัวอักษรเท่าปุ่มทึบ */
+.st-action.ghost { background: rgba(56, 189, 248, 0.08); color: var(--accent); }
+.st-action.ghost:hover { background: rgba(56, 189, 248, 0.18); }
 .st-steps { margin: 6px 0 0; padding-left: 20px; }
 .st-steps li { font-size: 13px; color: var(--muted); margin-bottom: 5px; line-height: 1.5; }
 .st-body code { background: var(--panel-2); padding: 1px 6px; border-radius: 4px; color: var(--accent); }
 .st-note { font-size: 12px; color: var(--yellow); margin-top: 6px; line-height: 1.5; }
 .st-star { color: var(--yellow); font-weight: 700; }
 .qr-icon {
-  font-size: 12px; padding: 2px 8px; border-radius: 6px; cursor: help;
-  border: 1px solid var(--accent); color: var(--accent);
+  font-size: 13px; line-height: 1.4; padding: 6px 12px; border-radius: 6px; cursor: help;
+  border: 1px solid var(--accent); color: var(--accent); font-weight: 600;
   background: rgba(56, 189, 248, 0.08); white-space: nowrap;
 }
 .qr-icon:hover { background: rgba(56, 189, 248, 0.18); }
@@ -1346,3 +1353,32 @@ a.st-action { text-decoration: none; display: inline-block; }
   padding: 9px 16px; border-radius: 6px; cursor: pointer;
 }
 .repeat-cancel:hover { background: var(--panel-2); }
+
+/* ============ Settings tab ============ */
+.settings-body { padding: 4px 2px; }
+.settings-group { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; max-width: 720px; }
+.settings-group h3 { margin: 0 0 4px; font-size: 0.98rem; }
+.settings-hint { margin: 0 0 14px; color: var(--muted); font-size: 0.82rem; }
+.settings-row { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+.settings-row input[type="range"] { flex: 1; accent-color: var(--accent); max-width: 380px; }
+.settings-val { min-width: 48px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+/* พื้นหลังปลอมให้เห็นความโปร่งของกล่องทับอยู่ */
+.settings-preview { position: relative; height: 210px; border: 1px dashed var(--border); border-radius: 10px; overflow: hidden; background: var(--bg); }
+.settings-preview-bg { position: absolute; inset: 0; padding: 10px 12px; font-family: monospace; font-size: 0.76rem; color: var(--muted); line-height: 1.9; white-space: pre; }
+.settings-preview-bg .pv-row { border-bottom: 1px solid var(--border); padding: 2px 0; }
+/* กล่อง demo = ใช้สไตล์ .tc-popup จริง แต่ static ในกรอบ preview */
+.tc-popup.demo { position: absolute; top: 14px; right: 16px; width: 250px; max-height: none; z-index: 1; transition: opacity 0.12s; }
+.tc-popup.demo .tc-popup-list { padding: 6px 0; }
+.tc-popup.demo .pv-step { padding: 6px 12px; font-size: 0.78rem; color: var(--text); }
+.tc-popup.demo .pv-step.current { background: var(--accent); color: #0f172a; font-weight: 700; }
+
+/* ============ CA Certificate card — status + download links ============ */
+.st-ca-status { font-size: 13px; padding: 7px 10px; border-radius: 8px; margin: 2px 0 4px; border: 1px solid var(--border); }
+.st-ca-status.checking { color: var(--muted); }
+.st-ca-status.ok { border-color: rgba(74, 222, 128, 0.4); background: rgba(74, 222, 128, 0.08); }
+.st-ca-status.warn { border-color: rgba(250, 204, 21, 0.4); background: rgba(250, 204, 21, 0.08); }
+.st-ca-status-head { font-weight: 700; color: var(--text); }
+.st-ca-meta { margin-top: 3px; font-size: 11.5px; color: var(--muted); font-family: monospace; word-break: break-all; }
+.st-ca-links { font-size: 12.5px; color: var(--muted); margin: 2px 0 6px; word-break: break-all; }
+.st-ca-link { color: var(--accent); text-decoration: none; }
+.st-ca-link:hover { text-decoration: underline; }

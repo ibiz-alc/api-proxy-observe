@@ -1040,8 +1040,12 @@ function resolveMitmdump() {
   return (_mitmdumpPath = null);
 }
 
+function mitmCaPath() {
+  return path.join(require('os').homedir(), '.mitmproxy', 'mitmproxy-ca-cert.cer');
+}
+
 async function ensureMitmCa() {
-  const caPath = path.join(require('os').homedir(), '.mitmproxy', 'mitmproxy-ca-cert.cer');
+  const caPath = mitmCaPath();
   if (fs.existsSync(caPath)) return caPath;
   const cmd = resolveMitmdump();
   if (!cmd) throw new Error('ไม่พบ mitmdump — ติดตั้งก่อน: brew install mitmproxy');
@@ -1062,6 +1066,29 @@ async function ensureMitmCa() {
   if (!fs.existsSync(caPath)) throw new Error('สร้าง CA ไม่สำเร็จ — เช็คว่าติดตั้ง mitmproxy แล้ว (brew install mitmproxy)');
   return caPath;
 }
+
+// สถานะ CA — เช็คว่ามีไฟล์แล้วหรือยัง + รายละเอียด cert (ไม่ gen ใหม่ ถ้ายังไม่มีก็บอกว่ายังไม่มี)
+app.get('/api/devices/ca/status', (req, res) => {
+  const caPath = mitmCaPath();
+  if (!fs.existsSync(caPath)) return res.json({ exists: false, path: caPath });
+  try {
+    const buf = fs.readFileSync(caPath);
+    const stat = fs.statSync(caPath);
+    const info = { exists: true, path: caPath, size: stat.size, modified: stat.mtimeMs };
+    try {
+      const { X509Certificate } = require('crypto');
+      const cert = new X509Certificate(buf);
+      info.sha256 = cert.fingerprint256; // 'AB:CD:...'
+      info.subject = cert.subject;
+      info.validFrom = cert.validFrom;
+      info.validTo = cert.validTo;
+      info.expired = new Date(cert.validTo).getTime() < Date.now();
+    } catch { /* parse ไม่ได้ก็ข้าม detail ไป — แค่มีไฟล์ก็พอ */ }
+    res.json(info);
+  } catch (e) {
+    res.status(500).json({ exists: false, error: e.message });
+  }
+});
 
 // ดาวน์โหลด mitmproxy CA แบบ Manual — ไม่พึ่ง adb/USB (ใช้กับ iOS, Android ไม่ต่อสาย, Docker)
 // gen ให้อัตโนมัติถ้ายังไม่มี · ?format=pem|crt เลือกชื่อไฟล์ให้เหมาะกับ OS

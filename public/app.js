@@ -927,6 +927,9 @@ function renderProxy() {
 // ===== Panel ในหน้า Proxy: เอา list/tree ของ Test Case มาไว้ (dock ซ้าย/ขวา, ย่อ/ขยาย, ปรับกว้าง) =====
 let _tcPopupEl = null;
 const _tcPopup = { side: 'right', width: 320, mode: 'full', height: null, top: null }; // mode: full | compact | mini
+// ความโปร่งใสกล่อง Test Case popup — เก็บใน localStorage ให้อยู่ข้าม refresh (ตั้งในแท็บ Settings)
+const TC_OPACITY_KEY = 'tcPopupOpacity';
+let tcPopupOpacity = (() => { const v = parseFloat(localStorage.getItem(TC_OPACITY_KEY)); return (v >= 0.2 && v <= 1) ? v : 1; })();
 function tcPopupDraggable(handle, box) {
   if (handle._dragBound) return; // กัน bind ซ้ำ (mini ใช้ element เดิม → traffic ทุกครั้งจะ bind เพิ่ม)
   handle._dragBound = true;
@@ -1027,7 +1030,10 @@ function renderTcProxyPopup() {
   pop.style.display = 'flex';
   pop.style.left = ''; pop.style.right = ''; pop.style.bottom = '';
   pop.className = 'tc-popup dock-' + _tcPopup.side + ' mode-' + mode;
+  pop.style.opacity = tcPopupOpacity; // ความโปร่งใสตั้งจากแท็บ Settings
   pop.style.top = _tcPopup.top != null ? _tcPopup.top + 'px' : '';
+  // เก็บตำแหน่ง scroll ของ list เดิมไว้ก่อน rebuild — กันมุมมองเด้งกลับไปบนสุดตอนกด ◎/มี flow เข้า
+  const prevListScroll = (() => { const l = pop.querySelector('.tc-popup-list'); return l ? l.scrollTop : 0; })();
   pop.innerHTML = '';
 
   // === mini: หุบไปมุมติดจอ — "Test Cases" หมุน 90° + ปุ่ม » ขยาย ===
@@ -1044,11 +1050,13 @@ function renderTcProxyPopup() {
   pop.style.height = _tcPopup.height ? _tcPopup.height + 'px' : ''; // ตั้งเอง = สูงคงที่ (ทั้ง full/compact), ไม่ตั้ง = auto
   pop.style.maxHeight = 'calc(100vh - ' + ((_tcPopup.top != null ? _tcPopup.top : 52) + 12) + 'px)';
   // header + ปุ่ม: ย่อ/ขยาย (▾/▸) และ _ หุบไปมุม
+  const setBtn = el('span', { class: 'tc-popup-toggle gear', title: 'ตั้งค่า (ความโปร่งใส ฯลฯ)', text: '⚙️' });
+  setBtn.addEventListener('click', (e) => { e.stopPropagation(); document.querySelector('.tab-btn[data-tab="settings"]').click(); });
   const cmpBtn = el('span', { class: 'tc-popup-toggle', title: mode === 'compact' ? 'ขยายเต็ม' : 'ย่อ (โชว์ step ปัจจุบัน)', text: mode === 'compact' ? '▸' : '▾' });
   cmpBtn.addEventListener('click', (e) => { e.stopPropagation(); _tcPopup.mode = mode === 'compact' ? 'full' : 'compact'; renderTcProxyPopup(); });
-  const miniBtn = el('span', { class: 'tc-popup-toggle', title: 'หุบไปมุมจอ', text: '_' });
+  const miniBtn = el('span', { class: 'tc-popup-toggle', title: 'หุบไปมุมจอ', text: _tcPopup.side === 'left' ? '«' : '»' });
   miniBtn.addEventListener('click', (e) => { e.stopPropagation(); _tcPopup.mode = 'mini'; renderTcProxyPopup(); });
-  const head = el('div', { class: 'tc-popup-head' }, [el('span', { class: 'tc-popup-title', text: '🎬 Test Cases' }), el('div', { class: 'tc-popup-head-btns' }, [cmpBtn, miniBtn])]);
+  const head = el('div', { class: 'tc-popup-head' }, [el('span', { class: 'tc-popup-title', text: '🎬 Test Cases' }), el('div', { class: 'tc-popup-head-btns' }, [setBtn, cmpBtn, miniBtn])]);
   pop.appendChild(head);
   tcPopupDraggable(head, pop);
 
@@ -1060,6 +1068,7 @@ function renderTcProxyPopup() {
     tcPopupResizer(resizer, pop);   // ปรับกว้างได้แม้ตอนย่อ
     tcPopupVResizer(vresizer, pop); // ปรับสูงได้แม้ตอนย่อ
     buildTcCompactInto(cbody, c);
+    cbody.scrollTop = prevListScroll; // คงตำแหน่ง scroll เดิม
     return;
   }
   // full
@@ -1070,6 +1079,7 @@ function renderTcProxyPopup() {
   tcPopupResizer(resizer, pop);
   tcPopupVResizer(vresizer, pop);
   buildTcListInto(listBox);
+  listBox.scrollTop = prevListScroll; // คงตำแหน่ง scroll เดิม (ไม่เด้งขึ้นบนสุดตอน rebuild)
 }
 
 // คลิก tag Map Local ในแท็บ Proxy → ไปแท็บ Map Local + เปิดกฎนั้น
@@ -2151,6 +2161,7 @@ function renderTcList() {
   }
 }
 function buildTcListInto(host) {
+  const prevScroll = host.scrollTop || 0; // คง scroll เดิมเมื่อ rebuild ทับ element เดิม (เช่น flow เข้ามา)
   host.innerHTML = '';
   if (!tcData.length) { host.appendChild(el('p', { class: 'empty-msg', html: 'ยังไม่มีเคส<br/>กด "เพิ่มเคส" เพื่อสร้าง' })); return; }
   for (const c of tcData) {
@@ -2207,7 +2218,7 @@ function buildTcListInto(host) {
               e.stopPropagation();
               let sub = 0; for (let j = 0; j < si; j++) if (ep.steps[j].enabled !== false) sub++; // แปลงเป็น index ของ enabled-sublist
               await fetch('/api/testcases/goto', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pattern: ep.urlPattern, index: sub }) });
-              await loadCases();
+              await tcAfterChange(); // อัปเดต popup+panel+highlight แบบเบา (ไม่ rebuild editor → ไม่ทำมุมมองเพี้ยน) เหมือนปุ่ม ◀▶
             });
             stNode.appendChild(setBtn);
           }
@@ -2218,6 +2229,7 @@ function buildTcListInto(host) {
       host.appendChild(tree);
     }
   }
+  host.scrollTop = prevScroll; // คืนตำแหน่ง scroll เดิม
 }
 
 // เลื่อน editor ไปที่ endpoint/step ที่เลือกจาก tree ด้านซ้าย + flash ให้เห็น
@@ -2688,12 +2700,48 @@ function renderCaCard(lanIp, mitmUp) {
     ]),
   ]);
   const body = card.querySelector('.st-body');
+  // แถบสถานะจริงของไฟล์ CA — เช็คจาก /api/devices/ca/status (ไม่ gen ใหม่) แล้วอัปเดตทีหลัง
+  const statusLine = el('div', { class: 'st-ca-status checking', text: '⏳ กำลังเช็คสถานะ CA…' });
+  body.appendChild(statusLine);
+  // ลิงก์ดาวน์โหลดแบบข้อความ (โชว์ URL ให้เห็น/คัดลอกได้) + LAN URL ให้มือถือเปิดตรง
+  const linkLine = el('div', { class: 'st-ca-links' }, [
+    el('span', { class: 'st-ca-link-label', text: 'ลิงก์โหลด: ' }),
+    el('a', { class: 'st-ca-link', href: dlPath, download: 'mitmproxy-ca.crt', text: dlPath }),
+  ]);
+  if (lanUrl) {
+    linkLine.appendChild(el('span', { class: 'st-ca-link-sep', text: ' · LAN: ' }));
+    linkLine.appendChild(el('a', { class: 'st-ca-link', href: lanUrl, target: '_blank', rel: 'noopener', text: lanUrl }));
+  }
+  body.appendChild(linkLine);
   // วิธีติดตั้งย่อ ต่อ OS
   const ol = el('ol', { class: 'st-steps' });
   ol.appendChild(el('li', { text: 'โหลดไฟล์ CA (ปุ่มด้านล่าง) หรือให้มือถือสแกน QR โหลดผ่าน Wi-Fi' }));
   ol.appendChild(el('li', { html: '<b>iOS:</b> ติดตั้ง profile → Settings → General → About → Certificate Trust Settings → เปิดสวิตช์' }));
   ol.appendChild(el('li', { html: '<b>Android:</b> Settings → Security → Encryption & credentials → Install a certificate → CA certificate' }));
   body.appendChild(ol);
+
+  // เติมสถานะ CA จริงจาก server (มีไฟล์ไหม + fingerprint + วันหมดอายุ)
+  fetch('/api/devices/ca/status').then((r) => r.json()).then((s) => {
+    statusLine.classList.remove('checking');
+    if (!s.exists) {
+      statusLine.classList.add('warn');
+      statusLine.textContent = '⚠️ ยังไม่มีไฟล์ CA — จะถูกสร้างอัตโนมัติเมื่อกดดาวน์โหลดครั้งแรก';
+      return;
+    }
+    statusLine.classList.add(s.expired ? 'warn' : 'ok');
+    statusLine.innerHTML = '';
+    statusLine.appendChild(el('div', { class: 'st-ca-status-head',
+      text: s.expired ? '⛔ CA หมดอายุแล้ว' : '✅ มีไฟล์ CA พร้อมใช้งาน' }));
+    const meta = [];
+    if (s.sha256) meta.push('SHA-256: ' + s.sha256);
+    if (s.validTo) meta.push('หมดอายุ: ' + new Date(s.validTo).toLocaleString());
+    if (typeof s.size === 'number') meta.push('ขนาด: ' + s.size + ' bytes');
+    if (meta.length) statusLine.appendChild(el('div', { class: 'st-ca-meta', text: meta.join('  ·  ') }));
+  }).catch(() => {
+    statusLine.classList.remove('checking');
+    statusLine.classList.add('warn');
+    statusLine.textContent = '⚠️ เช็คสถานะ CA ไม่ได้';
+  });
 
   const acts = [];
   const dlBtn = el('a', { class: 'st-action', href: dlPath, download: 'mitmproxy-ca.crt', text: '📥 ดาวน์โหลด CA' });
@@ -2750,7 +2798,6 @@ function renderIosCard(lanIp, mitmUp) {
   const card = el('div', { class: 'st-card ' + (mitmUp ? 'ok' : 'bad') }, [
     el('div', { class: 'st-head' }, [
       el('span', { class: 'st-title', text: '🍎 iOS (วิธีเชื่อมต่อ)' }),
-      qrIcon,
       el('span', { class: 'st-badge ' + (mitmUp ? 'up' : 'down'),
         text: mitmUp ? '✅ พร้อมให้เชื่อม' : '❌ เปิด mitmproxy ก่อน' }),
     ]),
@@ -2776,7 +2823,9 @@ function renderIosCard(lanIp, mitmUp) {
   card.querySelector('.st-body').appendChild(
     el('div', { class: 'st-line', html: '🤖 <b>iOS Simulator</b> (บน Mac เครื่องนี้): กดปุ่มติดตั้ง CA อัตโนมัติได้เลย — auto-trust ให้ ไม่ต้องทำขั้นตอน manual ด้านล่าง (เปิด Simulator ให้บูตก่อน)' }));
   const simBtn = stBtn('🤖 ติดตั้ง CA อัตโนมัติ (Simulator)', stSimInstallCa);
-  card.appendChild(el('div', { class: 'st-actions' }, [simBtn]));
+  // ปุ่ม QR mitm.it + ลิงก์ URL — ย้ายมาอยู่ group เดียวกับปุ่มล่าง (สูง/ขนาดเท่ากัน)
+  const mitmLink = el('a', { class: 'st-action ghost', href: 'http://mitm.it', target: '_blank', rel: 'noopener', text: '🔗 http://mitm.it' });
+  card.appendChild(el('div', { class: 'st-actions' }, [simBtn, qrIcon, mitmLink]));
 
   // checklist (เครื่องจริง — ต้องทำเอง)
   card.querySelector('.st-body').appendChild(
@@ -2917,3 +2966,24 @@ setInterval(() => {
   if (document.getElementById('tab-status').classList.contains('active')) renderStatus();
 }, 5000);
 renderStatus();
+
+// ================= Settings tab =================
+function setupSettings() {
+  const range = document.getElementById('tc-opacity-range');
+  const valLbl = document.getElementById('tc-opacity-value');
+  const demo = document.getElementById('tc-opacity-demo');
+  if (!range) return;
+  const apply = (v) => {
+    tcPopupOpacity = v;
+    valLbl.textContent = Math.round(v * 100) + '%';
+    if (demo) demo.style.opacity = v;
+    if (typeof renderTcProxyPopup === 'function') renderTcProxyPopup(); // อัปเดตกล่องจริงทันทีถ้าเปิดอยู่
+  };
+  range.value = tcPopupOpacity;
+  apply(tcPopupOpacity); // ตั้งค่าเริ่มจาก localStorage
+  range.addEventListener('input', () => apply(parseFloat(range.value)));
+  range.addEventListener('change', () => { // บันทึกลงเครื่องเมื่อปล่อยเมาส์
+    try { localStorage.setItem(TC_OPACITY_KEY, String(tcPopupOpacity)); } catch { /* ignore */ }
+  });
+}
+setupSettings();

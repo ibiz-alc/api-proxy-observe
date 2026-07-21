@@ -19,6 +19,7 @@
       <button class="tab-btn" data-tab="maplocal">🎯 Map Local</button>
       <button class="tab-btn" data-tab="testcases">🎬 Test Cases</button>
       <button class="tab-btn" data-tab="status">🩺 Status</button>
+      <button class="tab-btn" data-tab="settings">⚙️ Settings</button>
     </nav>
   </header>
 
@@ -222,6 +223,43 @@
     </div>
     <div id="status-banner" class="status-banner"></div>
     <div id="status-cards" class="status-cards"><p class="empty-msg">กำลังเช็คสถานะ…</p></div>
+  </main>
+
+  <!-- ============ Settings (ตั้งค่าหน้าตา) ============ -->
+  <main id="tab-settings" class="tab">
+    <div class="hook-info">
+      <span>⚙️ <b>Settings</b> — ตั้งค่าการแสดงผล (บันทึกลงเครื่อง คงอยู่ข้ามการรีเฟรช)</span>
+    </div>
+    <div class="settings-body">
+      <section class="settings-group">
+        <h3>ความโปร่งใสกล่อง Test Case (หน้า Proxy)</h3>
+        <p class="settings-hint">ปรับให้กล่อง Test Case ในแท็บ Proxy โปร่งขึ้น เพื่อมองเห็นทราฟฟิกด้านหลังได้</p>
+        <div class="settings-row">
+          <input type="range" id="tc-opacity-range" min="0.2" max="1" step="0.05" value="1" />
+          <span id="tc-opacity-value" class="settings-val">100%</span>
+        </div>
+        <div class="settings-preview" id="tc-opacity-preview">
+          <div class="settings-preview-bg">
+            <div class="pv-row">GET  api.thaivivat.co.th/v1/user/profile</div>
+            <div class="pv-row">POST api.thaivivat.co.th/v1/auth/login</div>
+            <div class="pv-row">GET  api.thaivivat.co.th/v1/wallet/balance</div>
+            <div class="pv-row">GET  cdn.thaivivat.co.th/assets/logo.png</div>
+            <div class="pv-row">POST api.thaivivat.co.th/v1/transfer</div>
+          </div>
+          <div class="tc-popup demo" id="tc-opacity-demo">
+            <div class="tc-popup-head">
+              <span class="tc-popup-title">🎬 Test Cases</span>
+              <div class="tc-popup-head-btns"><span class="tc-popup-toggle">▾</span><span class="tc-popup-toggle">_</span></div>
+            </div>
+            <div class="tc-popup-list">
+              <div class="pv-step current">▶ step 1 · /v1/auth/login</div>
+              <div class="pv-step">step 2 · /v1/user/profile</div>
+              <div class="pv-step">step 3 · /v1/wallet/balance</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
   </main>
 
   <script src="/vendor/exifr.js"></script>
