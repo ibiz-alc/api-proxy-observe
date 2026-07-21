@@ -1090,7 +1090,7 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .tc-popup-vresizer:hover { background: var(--accent); }
 .tc-popup-head-btns { display: flex; align-items: center; gap: 10px; }
 /* compact = โชว์เคส active + step ปัจจุบัน (สูงตาม content) */
-.tc-popup.mode-compact .tc-popup-list { overflow: visible; }
+.tc-popup.mode-compact .tc-popup-list { overflow-y: auto; }
 .tc-cmp-case { display: flex; align-items: center; gap: 8px; padding: 8px 12px 4px; }
 .tc-cmp-name { flex: 1 1 auto; min-width: 0; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tc-cmp-en { flex-shrink: 0; font-size: 0.7rem; font-weight: 700; color: var(--muted); }

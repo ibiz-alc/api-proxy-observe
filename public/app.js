@@ -1041,7 +1041,7 @@ function renderTcProxyPopup() {
   }
 
   pop.style.width = _tcPopup.width + 'px';
-  pop.style.height = (mode === 'full' && _tcPopup.height) ? _tcPopup.height + 'px' : ''; // compact = auto ตาม content
+  pop.style.height = _tcPopup.height ? _tcPopup.height + 'px' : ''; // ตั้งเอง = สูงคงที่ (ทั้ง full/compact), ไม่ตั้ง = auto
   pop.style.maxHeight = 'calc(100vh - ' + ((_tcPopup.top != null ? _tcPopup.top : 52) + 12) + 'px)';
   // header + ปุ่ม: ย่อ/ขยาย (▾/▸) และ _ หุบไปมุม
   const cmpBtn = el('span', { class: 'tc-popup-toggle', title: mode === 'compact' ? 'ขยายเต็ม' : 'ย่อ (โชว์ step ปัจจุบัน)', text: mode === 'compact' ? '▸' : '▾' });
@@ -1053,8 +1053,12 @@ function renderTcProxyPopup() {
   tcPopupDraggable(head, pop);
 
   if (mode === 'compact') {
+    const resizer = el('div', { class: 'tc-popup-resizer' });
+    const vresizer = el('div', { class: 'tc-popup-vresizer' });
     const cbody = el('div', { class: 'tc-popup-list tc-popup-compact' });
-    pop.appendChild(cbody);
+    pop.append(resizer, cbody, vresizer);
+    tcPopupResizer(resizer, pop);   // ปรับกว้างได้แม้ตอนย่อ
+    tcPopupVResizer(vresizer, pop); // ปรับสูงได้แม้ตอนย่อ
     buildTcCompactInto(cbody, c);
     return;
   }
