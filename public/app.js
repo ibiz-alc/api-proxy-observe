@@ -1895,7 +1895,7 @@ const tcEditorEl = document.getElementById('tc-editor');
 let tcData = [];
 let tcActiveId = null;
 let tcSelectedId = null;
-const newStep = () => ({ label: '', status: 200, contentType: 'application/json', body: '', enabled: true, overrides: [] });
+const newStep = () => ({ label: '', status: 200, contentType: 'application/json', body: '', enabled: true, mode: 'mock', overrides: [] });
 const newEndpoint = () => ({ method: 'GET', urlPattern: '', steps: [newStep()] });
 
 async function loadCases() {
@@ -2020,7 +2020,7 @@ function renderTcEditor(caseObj) {
     loop: caseObj.loop === true,
     endpoints: (caseObj.endpoints || []).map((e) => ({
       method: e.method || 'GET', urlPattern: e.urlPattern || '',
-      steps: (e.steps || []).map((s) => ({ label: s.label || '', status: s.status || 200, contentType: s.contentType || 'application/json', body: s.body || '', enabled: s.enabled !== false, overrides: Array.isArray(s.overrides) ? s.overrides : [] })),
+      steps: (e.steps || []).map((s) => ({ label: s.label || '', status: s.status || 200, contentType: s.contentType || 'application/json', body: s.body || '', enabled: s.enabled !== false, mode: s.mode === 'passthrough' ? 'passthrough' : 'mock', overrides: Array.isArray(s.overrides) ? s.overrides : [] })),
     })),
   };
   if (!model.endpoints.length) model.endpoints.push(newEndpoint());
@@ -2090,6 +2090,17 @@ function renderTcEditor(caseObj) {
         sStatus.addEventListener('input', () => { st.status = parseInt(sStatus.value, 10) || 200; });
         const sCt = el('input', { type: 'text', class: 'tc-step-ct', value: st.contentType, placeholder: 'content-type' });
         sCt.addEventListener('input', () => { st.contentType = sCt.value; });
+        // โหมด Mock/Passthrough ต่อ step (เหมือน Map Local) — chip เล็กหลัง content-type สูงเท่าปุ่มเปิด
+        const pt = st.mode === 'passthrough';
+        const mkStepMode = (val, txt, title) => {
+          const inp = el('input', { type: 'radio', name: `tcm-${ei}-${si}`, value: val }); inp.checked = (pt ? 'passthrough' : 'mock') === val;
+          inp.addEventListener('change', () => { st.mode = val; draw(); });
+          return el('label', { class: 'chip', title }, [inp, el('span', { text: txt })]);
+        };
+        const modeGroup = el('div', { class: 'chip-group tc-step-mode' }, [
+          mkStepMode('mock', '📦', 'Mock — ตอบ body ที่ตั้ง'),
+          mkStepMode('passthrough', '🔀', 'Passthrough — ยิงจริงแล้ว override เฉพาะ key'),
+        ]);
         // toggle เปิด/ปิด step (ปิดแล้วถูกข้ามใน sequence ไม่ต้องลบ)
         const enToggle = el('button', { class: 'tc-step-toggle ' + (off ? 'off' : 'on'), type: 'button', title: 'เปิด/ปิด step นี้', text: off ? 'ปิด' : 'เปิด' });
         enToggle.addEventListener('click', () => { st.enabled = off; draw(); });
@@ -2100,12 +2111,18 @@ function renderTcEditor(caseObj) {
         const bodyEd = makeJsonEditor(st.body);
         bodyEd.textarea.addEventListener('input', () => { st.body = bodyEd.textarea.value; });
         bodyEd.wrap.classList.add('tc-step-body');
-        stBox.appendChild(el('div', { class: 'tc-step-head' }, [el('span', { class: 'tc-step-num', text: `#${si + 1}${off ? ' · ปิด' : ''}${isCur ? ' ◀ ตอนนี้' : ''}` }), sLabel, sStatus, sCt, enToggle, dupSt, rmSt]));
+        stBox.appendChild(el('div', { class: 'tc-step-head' }, [el('span', { class: 'tc-step-num', text: `#${si + 1}${off ? ' · ปิด' : ''}${isCur ? ' ◀ ตอนนี้' : ''}` }), sLabel, sStatus, sCt, modeGroup, enToggle, dupSt, rmSt]));
+        if (pt) stBox.appendChild(el('div', { class: 'tc-file-banner', text: '🔀 Passthrough: ใช้ response จริงจาก server — body ด้านล่างไม่ถูกใช้ (แก้ด้วย Override)' }));
         stBox.appendChild(bodyEd.wrap);
-        // override เฉพาะ key ของ step นี้ (ทับบน body) — ผูกเข้า st.overrides ให้รอด redraw
+        // override เฉพาะ key ของ step นี้ — เปิดใช้เฉพาะ Passthrough (เหมือน Map Local; Mock แก้ body ตรงๆ)
         const ovEd = makeOverrideEditor(st.overrides, (ovs) => { st.overrides = ovs; });
         stBox.appendChild(el('div', { class: 'map-label', text: '🔧 Override เฉพาะ key' }));
         stBox.appendChild(ovEd.el);
+        // mirror Map Local: passthrough → body read-only + override เปิด; mock → body แก้ได้ + override ปิด
+        bodyEd.textarea.readOnly = pt;
+        bodyEd.wrap.style.opacity = pt ? '0.5' : '1';
+        bodyEd.wrap.style.pointerEvents = pt ? 'none' : '';
+        ovEd.setEnabled(pt);
         box.appendChild(stBox);
       });
       const addStep = el('button', { class: 'tc-add-step', text: '+ step' });

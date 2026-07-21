@@ -290,7 +290,8 @@ function normalizeCase(b) {
         contentType: s.contentType || 'application/json',
         body: s.body != null ? String(s.body) : '',
         enabled: s.enabled !== false,               // ปิด step ได้โดยไม่ต้องลบ (ถูกข้ามใน sequence)
-        overrides: normalizeOverrides(s.overrides), // แก้เฉพาะบาง key ทับ body ของ step นี้
+        mode: s.mode === 'passthrough' ? 'passthrough' : 'mock', // mock=ตอบ body / passthrough=ยิงจริงแล้ว override
+        overrides: normalizeOverrides(s.overrides), // แก้เฉพาะบาง key (mock ทับ body / passthrough ทับ response จริง)
       })) : [],
     })) : [],
   };
@@ -402,9 +403,13 @@ app.post('/api/testcase/resolve', express.json({ limit: '2mb' }), (req, res) => 
     const nx = i + 1;
     caseCursors[k] = c.loop ? nx % enabled.length : Math.min(nx, enabled.length - 1);
   }
-  const body = applyOverrides(step.body, step.overrides); // ทับเฉพาะ key ที่ตั้ง override ไว้
   const fullIdx = ep.steps.indexOf(step); // index จริงใน list เต็ม (ให้ frontend ไฮไลต์/เลื่อนถูกช่อง)
-  res.json({ matched: true, status: step.status, contentType: step.contentType, body, step: fullIdx, label: step.label, pattern: ep.urlPattern, caseId: c.id, caseName: c.name });
+  const base = { matched: true, step: fullIdx, label: step.label, pattern: ep.urlPattern, caseId: c.id, caseName: c.name };
+  if (step.mode === 'passthrough') { // ปล่อยไป server จริง แล้ว override ใน addon response()
+    return res.json({ ...base, mode: 'passthrough', overrides: step.overrides || [] });
+  }
+  const body = applyOverrides(step.body, step.overrides); // mock: ทับเฉพาะ key ที่ตั้ง override ไว้
+  res.json({ ...base, mode: 'mock', status: step.status, contentType: step.contentType, body });
 });
 
 // รายการ pattern ของ case active — ให้ addon cache ไว้ตัดสินใจว่าจะเรียก resolve ไหม
@@ -733,6 +738,7 @@ app.post('/api/proxy/replay', express.json({ limit: '40mb' }), async (req, res) 
   };
 
   // repeat ให้เคารพ Map Local / Test Case เหมือน proxy จริง (priority: Map Local ก่อน)
+  let tcPassthroughOverrides = null;
   const mlRule = findMapRule(m, url);
   if (mlRule) {
     flow.mapped = true;
@@ -754,14 +760,18 @@ app.post('/api/proxy/replay', express.json({ limit: '40mb' }), async (req, res) 
       if (enabledSteps.length) {
         const cur = Math.min(caseCursors[cursorKey(ep)] || 0, enabledSteps.length - 1);
         const step = enabledSteps[cur];
-        flow.status = Number(step.status) || 200; flow.statusText = 'OK';
-        flow.resContentType = step.contentType || 'application/json';
-        flow.resHeaders = { 'content-type': flow.resContentType, 'x-api-tester': 'test-case' };
-        flow.resBody = applyOverrides(step.body, step.overrides);
-        flow.resSize = Buffer.byteLength(flow.resBody);
-        flow.durationMs = Date.now() - started;
         flow.testCase = { caseId: tc.id, caseName: tc.name, step: ep.steps.indexOf(step), label: step.label, pattern: ep.urlPattern };
-        return finalize();
+        if (step.mode === 'passthrough') { // ยิงจริง แล้ว override ด้านล่าง
+          tcPassthroughOverrides = step.overrides || [];
+        } else { // mock — ตอบ body ที่ตั้งไว้ ไม่ยิงจริง
+          flow.status = Number(step.status) || 200; flow.statusText = 'OK';
+          flow.resContentType = step.contentType || 'application/json';
+          flow.resHeaders = { 'content-type': flow.resContentType, 'x-api-tester': 'test-case' };
+          flow.resBody = applyOverrides(step.body, step.overrides);
+          flow.resSize = Buffer.byteLength(flow.resBody);
+          flow.durationMs = Date.now() - started;
+          return finalize();
+        }
       }
     }
   }
@@ -771,8 +781,9 @@ app.post('/api/proxy/replay', express.json({ limit: '40mb' }), async (req, res) 
     let text = await r.text();
     const resHeaders = {};
     r.headers.forEach((v, k) => { resHeaders[k] = v; });
-    // Map Local passthrough → แก้เฉพาะ key ใน response จริง
+    // Map Local / Test Case passthrough → แก้เฉพาะ key ใน response จริง
     if (mlRule && mlRule.mode === 'passthrough' && (mlRule.overrides || []).length) text = applyOverrides(text, mlRule.overrides);
+    if (tcPassthroughOverrides && tcPassthroughOverrides.length) text = applyOverrides(text, tcPassthroughOverrides);
     flow.status = r.status;
     flow.statusText = r.statusText || '';
     flow.resHeaders = resHeaders;

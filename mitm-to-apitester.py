@@ -254,6 +254,10 @@ def request(flow: http.HTTPFlow):
                 "caseId": r.get("caseId"), "caseName": r.get("caseName"),
                 "step": r.get("step"), "label": r.get("label"), "pattern": r.get("pattern"),
             }
+            if r.get("mode") == "passthrough":
+                # ปล่อยไป server จริง แล้วไป override เฉพาะ key ใน response()
+                flow.metadata["apitester_tc_ov"] = r.get("overrides") or []
+                return
             flow.response = http.Response.make(
                 int(r.get("status") or 200),
                 (r.get("body") or "").encode("utf-8"),
@@ -289,6 +293,14 @@ def response(flow: http.HTTPFlow):
                     res.set_text(_apply_overrides(res.get_text(), prule["overrides"]))
                 except Exception as e:
                     print(f"[apitester] passthrough override failed: {e}")
+    # Test Case passthrough → override เฉพาะ key ใน response จริง
+    tc_ov = flow.metadata.get("apitester_tc_ov")
+    if tc_ov is not None and res is not None:
+        try:
+            res.set_text(_apply_overrides(res.get_text(), tc_ov))
+            res.headers["X-Api-Tester"] = "test-case-passthrough"
+        except Exception as e:
+            print(f"[apitester] test-case passthrough override failed: {e}")
     client = flow.client_conn.peername[0] if flow.client_conn and flow.client_conn.peername else "mitmproxy"
     mapped = res.headers.get("x-api-tester") in ("map-local", "map-local-passthrough")
     payload = {

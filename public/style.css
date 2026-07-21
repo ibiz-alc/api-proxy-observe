@@ -983,6 +983,9 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .tc-step-toggle.off { border-color: var(--muted); color: var(--muted); }
 .tc-step-toggle.on:hover { background: var(--green); color: #0f172a; }
 .tc-step-toggle.off:hover { background: var(--panel-2); color: var(--text); }
+/* mode chips เล็กในหัว step (สูงเท่าปุ่มเปิด/ปิด) */
+.tc-step-mode { flex-shrink: 0; }
+.tc-step-mode .chip { padding: 3px 8px; font-size: 0.72rem; }
 .tc-step.tc-step-off { opacity: 0.5; }
 .tc-step.tc-step-off.current { opacity: 1; } /* ถ้าเป็นตัวปัจจุบัน (ไม่ควรเกิด) ก็ยังเห็นชัด */
 .tc-add-step, .tc-add-ep { background: var(--panel-2); border: 1px dashed var(--border); color: var(--text); border-radius: 6px; padding: 4px 12px; font-size: 0.82rem; cursor: pointer; }
