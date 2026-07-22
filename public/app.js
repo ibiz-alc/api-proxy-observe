@@ -92,7 +92,54 @@ function jtPrimSpan(v) {
   if (t === 'number') return el('span', { class: 'json-num', text: String(v) });
   return el('span', { text: String(v) });
 }
-function jtNode(key, value, isIndex, last) {
+// ===== per-node copy: build path string + copyable JSON, hover icon + right-click menu =====
+function jtCopyText(value) { return value !== null && typeof value === 'object' ? JSON.stringify(value, null, 2) : JSON.stringify(value); }
+function jtPathStr(segs) { // root=$, key=.name (bracket if special), array index=[0] → data.items[0].name
+  if (!segs.length) return '$';
+  let s = '';
+  for (const seg of segs) {
+    if (typeof seg === 'number') s += `[${seg}]`;
+    else if (/^[A-Za-z_$][\w$]*$/.test(seg)) s += s ? `.${seg}` : seg;
+    else s += `[${JSON.stringify(seg)}]`;
+  }
+  return s;
+}
+function jtCopyIcon(value) { // 📋 ปลายบรรทัด: คลิก copy JSON ของ node นั้น (โชว์เมื่อ hover บรรทัด)
+  const ic = el('span', { class: 'jt-copy', title: 'คัดลอก JSON', text: '📋' });
+  ic.addEventListener('click', (e) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(jtCopyText(value));
+    ic.textContent = '✅';
+    setTimeout(() => { ic.textContent = '📋'; }, 1000);
+  });
+  return ic;
+}
+let _jtMenu = null;
+function closeJtMenu() { if (_jtMenu) { _jtMenu.remove(); _jtMenu = null; } }
+function showJtMenu(ev, value, path) { // คลิกขวาที่ node → Copy JSON / Copy path (pattern เดียวกับ showFlowContextMenu)
+  closeJtMenu();
+  const jsonBtn = el('button', { class: 'flow-ctx-item', type: 'button', text: '📋 Copy JSON' });
+  const pathBtn = el('button', { class: 'flow-ctx-item', type: 'button', text: '🔗 Copy path' });
+  jsonBtn.addEventListener('click', () => { closeJtMenu(); navigator.clipboard.writeText(jtCopyText(value)); });
+  pathBtn.addEventListener('click', () => { closeJtMenu(); navigator.clipboard.writeText(jtPathStr(path)); });
+  const menu = el('div', { class: 'flow-ctx-menu' }, [jsonBtn, pathBtn]);
+  document.body.appendChild(menu);
+  const mw = menu.offsetWidth || 160, mh = menu.offsetHeight || 64;
+  let x = ev.clientX, y = ev.clientY;
+  if (x + mw > window.innerWidth) x = window.innerWidth - mw - 8;
+  if (y + mh > window.innerHeight) y = window.innerHeight - mh - 8;
+  menu.style.left = Math.max(4, x) + 'px';
+  menu.style.top = Math.max(4, y) + 'px';
+  _jtMenu = menu;
+}
+document.addEventListener('click', closeJtMenu);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeJtMenu(); });
+function jtBindLine(lineEl, value, path) { // ผูก copy icon + right-click + เก็บ path ไว้โชว์บน pathbar เวลา hover
+  lineEl.dataset.jtpath = jtPathStr(path);
+  lineEl.appendChild(jtCopyIcon(value));
+  lineEl.addEventListener('contextmenu', (ev) => { ev.preventDefault(); ev.stopPropagation(); showJtMenu(ev, value, path); });
+}
+function jtNode(key, value, isIndex, last, path = []) {
   const node = el('div', { class: 'jt-node' });
   const hasKey = key !== null && key !== undefined;
   const keyEl = () => (hasKey ? el('span', { class: isIndex ? 'jt-index' : 'json-key', text: isIndex ? String(key) : `"${key}"` }) : el('span'));
@@ -100,7 +147,9 @@ function jtNode(key, value, isIndex, last) {
   const comma = last ? '' : ',';
   const isObj = value !== null && typeof value === 'object';
   if (!isObj) { // leaf
-    node.appendChild(el('div', { class: 'jt-line' }, [keyEl(), colon(), jtPrimSpan(value), el('span', { class: 'jt-punct', text: comma })]));
+    const line = el('div', { class: 'jt-line' }, [keyEl(), colon(), jtPrimSpan(value), el('span', { class: 'jt-punct', text: comma })]);
+    jtBindLine(line, value, path);
+    node.appendChild(line);
     return node;
   }
   const isArr = Array.isArray(value);
@@ -108,15 +157,18 @@ function jtNode(key, value, isIndex, last) {
   const open = isArr ? '[' : '{';
   const close = isArr ? ']' : '}';
   if (!entries.length) {
-    node.appendChild(el('div', { class: 'jt-line' }, [keyEl(), colon(), el('span', { class: 'jt-punct', text: open + close + comma })]));
+    const line = el('div', { class: 'jt-line' }, [keyEl(), colon(), el('span', { class: 'jt-punct', text: open + close + comma })]);
+    jtBindLine(line, value, path);
+    node.appendChild(line);
     return node;
   }
   const toggle = el('span', { class: 'jt-toggle', text: '▾' });
   const summary = el('span', { class: 'jt-summary', text: ` ${entries.length} ${isArr ? 'items' : 'keys'}` });
   const ellipsis = el('span', { class: 'jt-ellipsis', text: `… ${close}${comma}` });
   const head = el('div', { class: 'jt-line jt-head' }, [toggle, keyEl(), colon(), el('span', { class: 'jt-punct', text: open }), summary, ellipsis]);
+  jtBindLine(head, value, path);
   const children = el('div', { class: 'jt-children' });
-  entries.forEach(([k, v], i) => children.appendChild(jtNode(k, v, isArr, i === entries.length - 1)));
+  entries.forEach(([k, v], i) => children.appendChild(jtNode(k, v, isArr, i === entries.length - 1, [...path, k])));
   const closeLine = el('div', { class: 'jt-line jt-close' }, [el('span', { class: 'jt-punct', text: close + comma })]);
   node.append(head, children, closeLine);
   let collapsed = false;
@@ -131,7 +183,18 @@ function jtNode(key, value, isIndex, last) {
   head.addEventListener('click', (e) => { e.stopPropagation(); collapsed = !collapsed; apply(); });
   return node;
 }
-function jsonTree(value) { return el('div', { class: 'jt' }, [jtNode(null, value, false, true)]); }
+function jsonTree(value) {
+  const root = el('div', { class: 'jt' }, [jtNode(null, value, false, true, [])]);
+  // hover บรรทัดไหน → โชว์ path ของบรรทัดนั้นบน .jt-pathbar ของ pane เดียวกัน (เช่น หลังปุ่ม Raw)
+  const bar = () => root.closest('.detail-pane') && root.closest('.detail-pane').querySelector('.jt-pathbar');
+  root.addEventListener('mouseover', (e) => {
+    const line = e.target.closest && e.target.closest('.jt-line');
+    if (!line || !root.contains(line)) return;
+    const b = bar(); if (b) b.textContent = line.dataset.jtpath || '';
+  });
+  root.addEventListener('mouseleave', () => { const b = bar(); if (b) b.textContent = ''; });
+  return root;
+}
 
 // กล่องแก้ JSON ที่มีไฮไลต์สี (textarea โปร่งใสวางทับ <pre> ที่ไฮไลต์ไว้ + sync scroll)
 function makeJsonEditor(value) {
@@ -1446,6 +1509,7 @@ function buildDetailPane(title, headline, tabs, activeTab, onTab, extra) {
     btn.addEventListener('click', () => onTab(name));
     tabBar.appendChild(btn);
   }
+  tabBar.appendChild(el('span', { class: 'jt-pathbar', title: 'JSON path ของบรรทัดที่ชี้อยู่' })); // live path เวลา hover JSON tree
   if (extra) tabBar.appendChild(extra);
   pane.appendChild(tabBar);
   const body = el('div', { class: 'detail-pane-body' });

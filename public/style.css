@@ -288,6 +288,10 @@ pre.code-block.json { color: #cbd5e1; }
 .jt-colon, .jt-punct { color: var(--muted); }
 .jt-summary { color: var(--muted); font-size: 0.82em; opacity: 0.75; }
 .jt-ellipsis { color: var(--muted); }
+/* ปุ่ม copy ต่อท้ายบรรทัด node: ซ่อนไว้ โผล่เมื่อ hover บรรทัดนั้น */
+.jt-copy { cursor: pointer; margin-left: 8px; font-size: 0.82em; opacity: 0; user-select: none; transition: opacity 0.12s; }
+.jt-line:hover > .jt-copy { opacity: 0.55; }
+.jt-copy:hover { opacity: 1; }
 .jt-scroll { overflow: auto; }
 
 .file-chip {
@@ -801,6 +805,13 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
   font-size: 0.8rem;
 }
 .subtab-btn.active { background: var(--accent); color: #0f172a; border-color: var(--accent); font-weight: 600; }
+/* live JSON path: ชิดขวาของแถบ subtabs, โชว์ path ของบรรทัดที่ hover อยู่ */
+.jt-pathbar {
+  margin-left: auto; align-self: center; min-width: 0;
+  font-family: var(--mono, ui-monospace, monospace); font-size: 0.57rem; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right;
+  user-select: all; padding-left: 10px;
+}
 .maplocal-icon-btn {
   margin-left: auto;
   background: transparent;
