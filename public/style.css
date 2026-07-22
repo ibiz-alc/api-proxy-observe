@@ -1279,6 +1279,14 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .st-body code { background: var(--panel-2); padding: 1px 6px; border-radius: 4px; color: var(--accent); }
 .st-note { font-size: 12px; color: var(--yellow); margin-top: 6px; line-height: 1.5; }
 .st-star { color: var(--yellow); font-weight: 700; }
+/* iOS Simulator (Proxyman-style) box */
+.st-action.primary { background: var(--accent); border-color: var(--accent); color: #04121f; font-weight: 600; }
+.st-action.danger { background: transparent; border-color: var(--red); color: var(--red); }
+.st-simbox { margin: 10px 0 4px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(56, 189, 248, 0.05); }
+.st-simbox .st-actions { margin-top: 8px; }
+.sim-ok { color: var(--green); font-weight: 600; }
+.sim-warn { color: var(--yellow); font-weight: 600; }
+.st-note.sim-warn { color: var(--yellow); }
 .qr-icon {
   font-size: 13px; line-height: 1.4; padding: 6px 12px; border-radius: 6px; cursor: help;
   border: 1px solid var(--accent); color: var(--accent); font-weight: 600;

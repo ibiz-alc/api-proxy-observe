@@ -18,6 +18,12 @@ const POSTERN_PKG = 'com.thaivivat.proxy.postern';
 // safety net: อย่าให้ error ลอยๆ (เช่น spawn ล้ม) ทำให้เว็บล่มทั้ง process — log ไว้แล้วรันต่อ
 process.on('uncaughtException', (e) => console.error('uncaughtException (ไม่ล้ม server):', e.message));
 process.on('unhandledRejection', (e) => console.error('unhandledRejection (ไม่ล้ม server):', e && e.message ? e.message : e));
+// safety guard: ปิด server ตอนไหนก็ได้ ต้องไม่ทิ้ง macOS proxy ค้าง (ไม่งั้น Mac เน็ตดับเพราะ proxy ชี้พอร์ตที่ตายแล้ว)
+// revertMacProxySync ประกาศทีหลัง (hoist ไม่ได้เพราะเป็น const state) → เรียกผ่าน wrapper ที่เช็ค typeof
+process.on('exit', () => { try { if (typeof revertMacProxySync === 'function') revertMacProxySync(); } catch { /**/ } });
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, () => { try { if (typeof revertMacProxySync === 'function') revertMacProxySync(); } catch { /**/ } process.exit(0); });
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1297,11 +1303,15 @@ async function listBootedIosSims() {
 
 // list booted sims — ให้ UI เช็คว่ามี sim เปิดอยู่ไหมก่อนโชว์ปุ่ม
 app.get('/api/devices/ios-sims', async (req, res) => {
+  // สถานะ proxy (macOS-wide) ผูกกับ Mac ไม่ใช่ราย sim → รายงานแยกให้ UI โชว์ปุ่ม Connect/Disconnect ถูกสถานะ
+  const proxy = { active: iosProxy.active, service: iosProxy.service, mitmAlive: await mitmAlive(), macCaTrusted: macCaTrusted() };
+  // คำสั่ง trust CA บน Mac (ออปชัน) — ให้ UI คัดลอกไปรันเองในเทอร์มินัล ถ้าไม่อยากให้แอป Mac อื่นขึ้น cert error
+  const trustCmd = `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ${mitmCaPath()}`;
   try {
-    res.json({ ok: true, sims: await listBootedIosSims() });
+    res.json({ ok: true, sims: await listBootedIosSims(), proxy, trustCmd });
   } catch (e) {
     // xcrun ไม่มี/Xcode ไม่ได้ลง = ไม่มี sim ให้ทำ — ไม่ใช่ error ร้ายแรง
-    res.json({ ok: true, sims: [], unavailable: true, error: e.message });
+    res.json({ ok: true, sims: [], unavailable: true, error: e.message, proxy, trustCmd });
   }
 });
 
@@ -1314,6 +1324,12 @@ app.post('/api/devices/ios-sim/install-ca', express.json(), async (req, res) => 
     return res.status(500).json({ ok: false, error: 'เรียก xcrun/simctl ไม่ได้ — ติดตั้ง Xcode ก่อน (xcode-select --install): ' + e.message });
   }
   if (!sims.length) return res.status(400).json({ ok: false, error: 'ไม่พบ iOS Simulator ที่เปิดอยู่ — เปิด Simulator (บูตเครื่องสักตัว) ก่อนแล้วลองใหม่' });
+  // ระบุ udid → ติดตั้งเฉพาะ sim นั้น (ปุ่มใต้ device card), ไม่ระบุ → ทุกตัว
+  const wantUdid = req.body && req.body.udid;
+  if (wantUdid) {
+    sims = sims.filter((s) => s.udid === wantUdid);
+    if (!sims.length) return res.status(404).json({ ok: false, error: 'ไม่พบ Simulator udid นี้ (อาจปิดไปแล้ว)' });
+  }
   let caPath;
   try {
     caPath = await ensureMitmCa(); // .cer เป็น PEM — add-root-cert รับได้
@@ -1331,6 +1347,211 @@ app.post('/api/devices/ios-sim/install-ca', express.json(), async (req, res) => 
   }
   if (!done.length) return res.status(500).json({ ok: false, error: 'ติดตั้งไม่สำเร็จ: ' + failed.join(', ') });
   res.json({ ok: true, installed: done, failed });
+});
+
+// ===== iOS Simulator — ต่อ traffic เข้า mitmproxy (ผ่าน macOS system proxy) — วิธีเดียวกับ Proxyman =====
+// sim ไม่มี network stack ของตัวเอง → ใช้ network ของ Mac → "connect" = ตั้ง proxy ระดับ macOS
+// ทั้งเครื่อง (networksetup — ไม่ต้อง sudo) ชี้ 127.0.0.1:MITM_PORT. Proxyman ก็ทำแบบนี้ (ผ่าน privileged helper)
+// ผลข้างเคียง: traffic อื่นของ Mac ก็ผ่าน mitmproxy ด้วย (แยกเฉพาะ sim ไม่ได้) → แก้ด้วยการ trust CA บน Mac
+// (ดู /ca/trust-mac ด้านล่าง) แอป Mac อื่นจะไม่พัง. กัน "Mac เน็ตดับตอน mitmdump ตาย" ด้วย watchdog + revert ตอน exit
+let iosProxy = { active: false, service: null }; // service = ชื่อ network service ที่ตั้ง proxy ไว้ (revert ตัวเดิม)
+let iosWatchdog = null;
+let iosDeadStreak = 0;
+
+// หา network service หลัก (ตัวที่ถือ default route) → ต้องได้ "ชื่อ" ที่ networksetup รู้จัก ไม่ใช่ชื่อ iface
+async function primaryNetworkService() {
+  let iface = '';
+  try { iface = ((await execFileP('/sbin/route', ['-n', 'get', 'default'], { timeout: 5000 })).stdout
+    .match(/interface:\s*(\S+)/) || [])[1] || ''; } catch { /* ไม่มี default route */ }
+  if (iface) {
+    try {
+      const order = (await execFileP('networksetup', ['-listnetworkserviceorder'], { timeout: 5000 })).stdout;
+      // บล็อกละ 2 บรรทัด: "(N) <ServiceName>" ตามด้วย "(Hardware Port: ..., Device: enX)"
+      const re = /\(\d+\)\s*(.+?)\n\s*\(Hardware Port:[^,]*, Device:\s*(\S+?)\)/g;
+      let m;
+      while ((m = re.exec(order))) { if (m[2] === iface) return m[1].trim(); }
+    } catch { /* ตกไป fallback */ }
+  }
+  return 'Wi-Fi'; // fallback เครื่อง Mac ส่วนใหญ่
+}
+
+// รายชื่อ network service ทั้งหมดที่ enable อยู่ (ตัดตัวที่ disable ซึ่งขึ้นต้น '*')
+async function listAllNetworkServices() {
+  try {
+    const { stdout } = await execFileP('networksetup', ['-listallnetworkservices'], { timeout: 8000 });
+    return stdout.split('\n').slice(1).map((s) => s.trim()).filter((s) => s && !s.startsWith('*'));
+  } catch { return []; }
+}
+
+// ตั้ง macOS web + secure web proxy บน service ที่ระบุ (rollback ทั้งหมดถ้าตั้งไม่ครบ กันค้างครึ่งๆ)
+async function setMacProxy(service) {
+  try {
+    await execFileP('networksetup', ['-setwebproxy', service, '127.0.0.1', String(MITM_PORT)], { timeout: 8000 });
+    await execFileP('networksetup', ['-setsecurewebproxy', service, '127.0.0.1', String(MITM_PORT)], { timeout: 8000 });
+    await execFileP('networksetup', ['-setwebproxystate', service, 'on'], { timeout: 8000 });
+    await execFileP('networksetup', ['-setsecurewebproxystate', service, 'on'], { timeout: 8000 });
+  } catch (e) {
+    await revertAllMacProxy(); // ตั้งไม่ครบ → ปิดคืนให้หมด อย่าทิ้ง proxy เปิดค้างชี้พอร์ตที่อาจใช้ไม่ได้
+    throw e;
+  }
+}
+
+// ปิด proxy เฉพาะ service ที่ชี้ mitmproxy "ของเรา" (127.0.0.1:MITM_PORT) บนทุก service — best-effort
+// สแกนทุก service (เผื่อถูกตั้งคนละ service กับ primary เช่นสลับ Wi-Fi↔Ethernet) แต่ไม่ไปปิด proxy อื่นที่ผู้ใช้ตั้งเอง
+async function revertAllMacProxy() {
+  const services = await listAllNetworkServices();
+  for (const svc of (services.length ? services : ['Wi-Fi'])) {
+    try {
+      const { stdout } = await execFileP('networksetup', ['-getsecurewebproxy', svc], { timeout: 8000 });
+      const server = (stdout.match(/Server:\s*(\S+)/) || [])[1];
+      const port = (stdout.match(/Port:\s*(\d+)/) || [])[1];
+      if (server !== '127.0.0.1' || port !== String(MITM_PORT)) continue; // ไม่ใช่ของเรา → ไม่แตะ
+    } catch { continue; }
+    await execFileP('networksetup', ['-setwebproxystate', svc, 'off'], { timeout: 8000 }).catch(() => {});
+    await execFileP('networksetup', ['-setsecurewebproxystate', svc, 'off'], { timeout: 8000 }).catch(() => {});
+  }
+}
+
+// อ่านสถานะ proxy จริงจาก macOS (กัน state หายตอน server restart แล้วปุ่ม Disconnect ไม่โผล่)
+// สแกน "ทุก" service (ไม่ใช่แค่ primary) — crash ที่ทิ้ง proxy ค้างคนละ service จะยังตรวจเจอ
+async function macProxyState() {
+  const services = await listAllNetworkServices();
+  const list = services.length ? services : [iosProxy.service || await primaryNetworkService()];
+  let found = null;
+  for (const svc of list) {
+    try {
+      const { stdout } = await execFileP('networksetup', ['-getsecurewebproxy', svc], { timeout: 8000 });
+      const enabled = /Enabled:\s*Yes/i.test(stdout);
+      const server = (stdout.match(/Server:\s*(\S+)/) || [])[1];
+      const port = (stdout.match(/Port:\s*(\d+)/) || [])[1];
+      if (enabled && server === '127.0.0.1' && port === String(MITM_PORT)) { found = svc; break; }
+    } catch { /* service นี้อ่านไม่ได้ ข้าม */ }
+  }
+  const active = !!found;
+  const service = found || iosProxy.service || list[0];
+  // re-sync in-memory state ถ้าเพี้ยน (เช่น server เพิ่ง restart) + คุม watchdog ให้ตรง
+  if (active && !iosProxy.active) { iosProxy = { active: true, service }; startIosWatchdog(); }
+  if (!active && iosProxy.active) { iosProxy = { active: false, service: null }; stopIosWatchdog(); }
+  return { active, service };
+}
+
+// mitmdump ยัง listen บน :MITM_PORT ไหม (TCP connect สั้นๆ) — ใช้ทั้ง pre-check และ watchdog
+function mitmAlive(timeout = 1500) {
+  return new Promise((resolve) => {
+    const net = require('net');
+    const sock = new net.Socket();
+    let done = false;
+    const finish = (v) => { if (done) return; done = true; try { sock.destroy(); } catch { /**/ } resolve(v); };
+    sock.setTimeout(timeout);
+    sock.once('connect', () => finish(true));
+    sock.once('timeout', () => finish(false));
+    sock.once('error', () => finish(false));
+    sock.connect(MITM_PORT, '127.0.0.1');
+  });
+}
+
+// ปิด proxy บน Mac แบบ synchronous — เรียกได้จาก signal/exit handler (async ไม่ทันตอน process กำลังตาย)
+// ปิด "ทุก" service เผื่อถูกตั้งไว้คนละ service กับที่จำไว้
+function revertMacProxySync() {
+  if (!iosProxy.active) return;
+  const cp = require('child_process');
+  let services = [];
+  try {
+    const out = cp.execFileSync('networksetup', ['-listallnetworkservices'], { encoding: 'utf8', timeout: 8000 });
+    services = out.split('\n').slice(1).map((s) => s.trim()).filter((s) => s && !s.startsWith('*'));
+  } catch { /* ตกไป fallback */ }
+  if (!services.length) services = [iosProxy.service || 'Wi-Fi'];
+  for (const svc of services) {
+    try { // ปิดเฉพาะ service ที่ชี้ mitmproxy ของเรา — ไม่แตะ proxy อื่นที่ผู้ใช้ตั้งเอง
+      const out = cp.execFileSync('networksetup', ['-getsecurewebproxy', svc], { encoding: 'utf8', timeout: 8000 });
+      const server = (out.match(/Server:\s*(\S+)/) || [])[1];
+      const port = (out.match(/Port:\s*(\d+)/) || [])[1];
+      if (server !== '127.0.0.1' || port !== String(MITM_PORT)) continue;
+    } catch { continue; }
+    try { cp.execFileSync('networksetup', ['-setwebproxystate', svc, 'off'], { timeout: 8000 }); } catch { /**/ }
+    try { cp.execFileSync('networksetup', ['-setsecurewebproxystate', svc, 'off'], { timeout: 8000 }); } catch { /**/ }
+  }
+  iosProxy = { active: false, service: null };
+}
+
+function stopIosWatchdog() { if (iosWatchdog) { clearInterval(iosWatchdog); iosWatchdog = null; } iosDeadStreak = 0; }
+
+// watchdog: ถ้า mitmdump ตายระหว่างต่ออยู่ → revert proxy อัตโนมัติ กัน Mac เน็ตดับ (ทุก request วิ่งเข้า proxy ที่ตายแล้ว)
+function startIosWatchdog() {
+  stopIosWatchdog();
+  iosWatchdog = setInterval(async () => {
+    if (!iosProxy.active) { stopIosWatchdog(); return; }
+    const alive = await mitmAlive();
+    if (alive) { iosDeadStreak = 0; return; }
+    if (++iosDeadStreak >= 2) { // 2 ครั้งติด (~10s) กัน false positive ตอน mitmdump รีสตาร์ทสั้นๆ
+      console.error(`[ios-proxy] mitmdump ตายบน :${MITM_PORT} — auto-revert macOS proxy ทุก service กัน Mac เน็ตดับ`);
+      stopIosWatchdog();
+      try { await revertAllMacProxy(); } catch { /**/ }
+      iosProxy = { active: false, service: null };
+      muteUntil = Infinity; // เหมือน disconnect: หยุดรับ flow ค้าง
+    }
+  }, 5000);
+  if (iosWatchdog.unref) iosWatchdog.unref(); // อย่าให้ watchdog กัน process exit
+}
+
+// ===== Trust CA บน Mac (แบบ Proxyman step 1) =====
+// system proxy จับ traffic ของ "ทั้งเครื่อง" → แอป Mac อื่น (Safari/Figma/…) จะเจอ mitm cert ด้วย
+// ถ้าไม่ trust CA บน Mac → แอปพวกนั้น TLS พังตอน proxy เปิด. Trust ครั้งเดียว (System keychain) → เนียนเหมือน Proxyman
+// เช็ค "trusted จริง" ไม่ใช่แค่มี cert อยู่ใน keychain — ต้องมี trust setting ใน admin domain
+// (dump-trust-settings -d จะโชว์เฉพาะ cert ที่ถูกตั้ง trust ไว้จริง; ถ้าไม่มี setting = ไม่ trusted)
+function macCaTrusted() {
+  try {
+    const cp = require('child_process');
+    const out = cp.execFileSync('security', ['dump-trust-settings', '-d'], { encoding: 'utf8', timeout: 5000 });
+    return /mitmproxy/i.test(out);
+  } catch { return false; } // exit ไม่ 0 เมื่อไม่มี trust setting ใน admin domain = ไม่ trusted
+}
+
+app.get('/api/devices/ca/mac-status', (req, res) => {
+  // คืนคำสั่ง manual ให้ client โชว์ได้ (trust root CA บน Mac ต้อง auth เสมอ — รันเองในเทอร์มินัลได้ผลชัวร์กว่า)
+  res.json({ ok: true, trusted: macCaTrusted(), caPath: mitmCaPath(),
+    trustCmd: `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ${mitmCaPath()}` });
+});
+
+// เชื่อม iOS Simulator: pre-check mitmdump ก่อน (ไม่รัน = ไม่ยอมตั้ง proxy ทิ้งค้าง) แล้วตั้ง macOS proxy
+app.post('/api/devices/ios-sim/connect', express.json(), async (req, res) => {
+  if (!(await mitmAlive())) {
+    return res.status(409).json({ ok: false, mitmDown: true,
+      error: `mitmdump ไม่ได้รันบน :${MITM_PORT} — เปิด mitm ก่อน (ปุ่ม Start/Restart) แล้วค่อยต่อ ` +
+        'ไม่งั้นตั้ง proxy ทั้งเครื่องไปที่พอร์ตตาย = Mac เน็ตดับ' });
+  }
+  try {
+    const service = req.body && req.body.service ? String(req.body.service) : await primaryNetworkService();
+    await setMacProxy(service);
+    // re-check mitmdump อีกครั้งหลังตั้ง proxy — กันกรณี mitm ตายในช่วงสั้นๆ ระหว่าง pre-check กับตั้งเสร็จ
+    // (ถ้าตายตอนนี้ = proxy ชี้พอร์ตตาย → ปิดคืนทันที ไม่รอ watchdog ~10s)
+    if (!(await mitmAlive())) {
+      await revertAllMacProxy();
+      iosProxy = { active: false, service: null };
+      return res.status(409).json({ ok: false, mitmDown: true,
+        error: `mitmdump ดับระหว่างต่อ — ปิด macOS proxy คืนแล้ว เปิด mitm ก่อนแล้วลองใหม่` });
+    }
+    iosProxy = { active: true, service };
+    unmute();
+    startIosWatchdog();
+    // macCaTrusted=false → UI เตือนว่าแอป Mac อื่นอาจ TLS พังจนกว่าจะ trust CA (แต่ไม่บล็อก การต่อ sim)
+    res.json({ ok: true, connected: true, service, proxy: `127.0.0.1:${MITM_PORT}`, macCaTrusted: macCaTrusted() });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: 'ตั้ง macOS proxy ไม่สำเร็จ: ' + e.message });
+  }
+});
+
+// ตัด iOS Simulator: ปิด macOS proxy "ทุก service" (best-effort) + mute/clear flows (เหมือน Android disconnect)
+app.post('/api/devices/ios-sim/disconnect', express.json(), async (req, res) => {
+  const service = iosProxy.service;
+  stopIosWatchdog();
+  await revertAllMacProxy(); // best-effort (กลืน error รายตัว) → disconnect ล้าง state ได้เสมอ ไม่ทิ้ง proxy ค้าง
+  iosProxy = { active: false, service: null };
+  muteUntil = Infinity;
+  mutedDropCount = 0;
+  proxyStore.flows.length = 0;
+  proxyImages.clear();
+  res.json({ ok: true, connected: false, service });
 });
 
 // ===== Android Emulator — ติดตั้ง CA ลง SYSTEM trust store อัตโนมัติ (auto-trust) =====
@@ -1471,6 +1692,10 @@ app.get('/api/status', async (req, res) => {
     }
     let lastFlowAt = null;
     for (const f of proxyStore.flows) if (!lastFlowAt || f.time > lastFlowAt) lastFlowAt = f.time;
+    // iOS Simulator: โผล่เป็น device ในลิสต์เหมือน Android (proxy เป็น macOS-wide → แชร์ทุก sim)
+    let iosSims = [];
+    try { iosSims = await listBootedIosSims(); } catch { /* ไม่มี Xcode/simctl = ข้าม */ }
+    const iosState = iosSims.length ? await macProxyState() : { active: false, service: null };
     res.json({
       ok: true,
       services: {
@@ -1479,6 +1704,8 @@ app.get('/api/status', async (req, res) => {
         mcp: { up: mcpUp, port: MCP_PORT, url: `http://127.0.0.1:${MCP_PORT}/mcp` },
       },
       devices,
+      iosSims,
+      iosProxy: { active: iosState.active, service: iosState.service, macCaTrusted: macCaTrusted() },
       muted: isMuted(),
       mutedDropped: mutedDropCount,
       flows: { count: proxyStore.flows.length, lastAt: lastFlowAt },

@@ -3004,14 +3004,12 @@ function renderIosCard(lanIp, mitmUp) {
       el('div', { class: 'st-line', html: `Proxy ที่ต้องกรอกบน iPhone: <code>${proxyStr}</code>` }));
     card.appendChild(el('div', { class: 'st-actions' }, [copyBtn]));
   }
-  // --- iOS Simulator: ติดตั้ง CA อัตโนมัติ (เฉพาะ sim บน Mac เครื่องนี้) ---
-  // ต่างจากเครื่องจริง: simctl add-root-cert วางเข้า trusted root ให้เลย ไม่ต้องทำ 5 ขั้นด้านล่าง
+  // หมายเหตุ: iOS Simulator ที่บูตอยู่จะโผล่เป็น "device card" ด้านบน (มีปุ่ม Connect/Disconnect/ติดตั้ง CA ในตัว)
   card.querySelector('.st-body').appendChild(
-    el('div', { class: 'st-line', html: '🤖 <b>iOS Simulator</b> (บน Mac เครื่องนี้): กดปุ่มติดตั้ง CA อัตโนมัติได้เลย — auto-trust ให้ ไม่ต้องทำขั้นตอน manual ด้านล่าง (เปิด Simulator ให้บูตก่อน)' }));
-  const simBtn = stBtn('🤖 ติดตั้ง CA อัตโนมัติ (Simulator)', stSimInstallCa);
-  // ปุ่ม QR mitm.it + ลิงก์ URL — ย้ายมาอยู่ group เดียวกับปุ่มล่าง (สูง/ขนาดเท่ากัน)
+    el('div', { class: 'st-line', html: '🤖 <b>iOS Simulator</b> (บน Mac นี้): จะโผล่เป็นการ์ด device ด้านบนพร้อมปุ่ม Connect/Disconnect — บันทึกได้เลยแบบไม่ต้องรหัส' }));
+  // QR mitm.it + ลิงก์ (ใช้กับเครื่องจริง)
   const mitmLink = el('a', { class: 'st-action ghost', href: 'http://mitm.it', target: '_blank', rel: 'noopener', text: '🔗 http://mitm.it' });
-  card.appendChild(el('div', { class: 'st-actions' }, [simBtn, qrIcon, mitmLink]));
+  card.appendChild(el('div', { class: 'st-actions' }, [qrIcon, mitmLink]));
 
   // checklist (เครื่องจริง — ต้องทำเอง)
   card.querySelector('.st-body').appendChild(
@@ -3026,12 +3024,23 @@ function renderIosCard(lanIp, mitmUp) {
   return card;
 }
 
-// ติดตั้ง CA ลง iOS Simulator ที่บูตอยู่ทุกตัว (auto-trust) — ปุ่มเดียวจบ
-async function stSimInstallCa() {
-  const r = await (await fetch('/api/devices/ios-sim/install-ca', { method: 'POST' })).json();
+// ติดตั้ง CA ลง iOS Simulator (auto-trust) — ระบุ udid = เฉพาะตัวนั้น (ปุ่มใต้ device card), ไม่ระบุ = ทุกตัว
+async function stSimInstallCa(udid) {
+  const opt = { method: 'POST' };
+  if (udid) { opt.headers = { 'Content-Type': 'application/json' }; opt.body = JSON.stringify({ udid }); }
+  const r = await (await fetch('/api/devices/ios-sim/install-ca', opt)).json();
   if (!r.ok) throw new Error(r.error || 'ติดตั้งไม่สำเร็จ');
   const warn = (r.failed && r.failed.length) ? `\n\n⚠️ ล้มเหลวบางตัว: ${r.failed.join(', ')}` : '';
   alert(`✅ ติดตั้ง CA (auto-trust) ลง Simulator แล้ว: ${r.installed.join(', ')}${warn}\n\nเปิด Safari/แอปใน Simulator ได้เลย — HTTPS จะถูกถอดรหัสทันที`);
+}
+
+async function stSimConnect() {
+  const r = await (await fetch('/api/devices/ios-sim/connect', { method: 'POST' })).json();
+  if (!r.ok) throw new Error(r.error || 'connect ไม่สำเร็จ');
+}
+async function stSimDisconnect() {
+  const r = await (await fetch('/api/devices/ios-sim/disconnect', { method: 'POST' })).json();
+  if (!r.ok) throw new Error(r.error || 'disconnect ไม่สำเร็จ');
 }
 
 async function renderStatus() {
@@ -3042,7 +3051,7 @@ async function renderStatus() {
     statusCards.appendChild(el('p', { class: 'empty-msg', text: 'เช็คสถานะไม่ได้: ' + e.message }));
     return;
   }
-  const { services: sv, devices, muted, mutedDropped = 0, flows, lanIp } = d;
+  const { services: sv, devices, iosSims = [], iosProxy = {}, muted, mutedDropped = 0, flows, lanIp } = d;
   statusCards.innerHTML = '';
 
   // --- ความพร้อมรวมของ pipeline บันทึก traffic ---
@@ -3113,6 +3122,31 @@ async function renderStatus() {
       ? (dev.mode === 'wifi' ? '📶 WIFI' : '🔌 USB')
       : dev.posternRunning ? '📲 POSTERN' : '⚪ ยังไม่เชื่อม';
     statusCards.appendChild(stCard('📱', `${dev.model} (${connLabel})`, okDev, details, acts));
+  }
+
+  // --- iOS Simulator: โผล่เป็น device การ์ดเหมือน Android (connect/disconnect อยู่ใต้ device นั้น) ---
+  // proxy เป็น macOS-wide (แชร์ทุก sim) → ทุกการ์ด sim สะท้อนสถานะเดียวกัน
+  for (const sim of iosSims) {
+    const active = !!iosProxy.active;
+    const details = [];
+    if (active) {
+      details.push('เชื่อมแล้ว → traffic ของ Simulator กำลังบันทึก');
+      details.push(`macOS proxy: ${iosProxy.service || '?'} → 127.0.0.1:8888 (แชร์ทุก sim บนเครื่องนี้)`);
+    } else {
+      details.push('ยังไม่ได้เชื่อม — กด Connect (ตั้ง macOS proxy อัตโนมัติ ไม่ต้องรหัส)');
+    }
+    if (!iosProxy.macCaTrusted && active) details.push('ⓘ แอป Mac อื่นอาจขึ้น cert error ชั่วคราวระหว่างต่อ (หายเมื่อ Disconnect)');
+    const acts = [];
+    if (!active) {
+      const cb = stBtn('▶︎ Connect', stSimConnect);
+      if (!sv.mitmproxy.up) cb.disabled = true; // ต้องเปิด mitmproxy ก่อน
+      acts.push(cb);
+    } else {
+      acts.push(stBtn('⛔ ตัดการเชื่อมต่อ', stSimDisconnect, 'stop'));
+    }
+    acts.push(stBtn('🔐 ติดตั้ง CA (Simulator)', () => stSimInstallCa(sim.udid)));
+    const connLabel = active ? '🟢 SIM ต่ออยู่' : '⚪ SIM ยังไม่เชื่อม';
+    statusCards.appendChild(stCard('🍎', `${sim.name} (${connLabel})`, active, details, acts));
   }
 
   // --- วิธีเชื่อมต่อ: แยกการ์ด Android / iOS ---
