@@ -284,6 +284,8 @@ pre.code-block.json { color: #cbd5e1; }
 /* เส้น guide บอกระดับ/ว่า data อยู่ใน object ไหน (ยิ่ง hover ยิ่งเด่นเป็นเส้นทางไล่ระดับ) */
 .jt-children { padding-left: 16px; margin-left: 3px; border-left: 1px solid var(--border); }
 .jt-node:hover > .jt-children { border-left-color: var(--accent); }
+/* hover แถบเส้น guide ซ้าย → เน้นเส้นหนาขึ้น + เคอร์เซอร์คลิกได้ (คลิกเพื่อพับบล็อก) */
+.jt-children.jt-guide-hot { cursor: pointer; border-left-color: var(--accent); box-shadow: inset 2px 0 0 0 var(--accent); }
 .jt-index { color: var(--muted); }
 .jt-colon, .jt-punct { color: var(--muted); }
 .jt-summary { color: var(--muted); font-size: 0.82em; opacity: 0.75; }
@@ -1281,6 +1283,9 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
   cursor: pointer;
 }
 .st-action:disabled { opacity: 0.6; cursor: wait; }
+/* toggle Auto-reconnect ในแถว actions — ย่อให้สูง/ตัวอักษรพอๆ กับปุ่ม .st-action */
+.st-auto-chip { padding: 6px 12px; font-size: 13px; line-height: 1.4; }
+.st-auto-chip:has(input:checked) { background: var(--green); border-color: var(--green); color: #04121f; }
 .st-action.stop { background: transparent; border-color: var(--red); color: var(--red); }
 /* variant โปร่ง (outline) — ใช้กับปุ่ม QR / ลิงก์ ให้สูง+ตัวอักษรเท่าปุ่มทึบ */
 .st-action.ghost { background: rgba(56, 189, 248, 0.08); color: var(--accent); }

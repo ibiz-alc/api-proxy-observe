@@ -168,6 +168,7 @@ function jtNode(key, value, isIndex, last, path = []) {
   const head = el('div', { class: 'jt-line jt-head' }, [toggle, keyEl(), colon(), el('span', { class: 'jt-punct', text: open }), summary, ellipsis]);
   jtBindLine(head, value, path);
   const children = el('div', { class: 'jt-children' });
+  children.dataset.jtpath = jtPathStr(path); // เส้น guide แนวตั้งเป็นตัวแทนของบล็อกนี้ → hover โชว์ path เดียวกับ head
   entries.forEach(([k, v], i) => children.appendChild(jtNode(k, v, isArr, i === entries.length - 1, [...path, k])));
   const closeLine = el('div', { class: 'jt-line jt-close' }, [el('span', { class: 'jt-punct', text: close + comma })]);
   node.append(head, children, closeLine);
@@ -181,6 +182,11 @@ function jtNode(key, value, isIndex, last, path = []) {
   };
   apply();
   head.addEventListener('click', (e) => { e.stopPropagation(); collapsed = !collapsed; apply(); });
+  // คลิกที่เส้น guide แนวตั้ง (แถบซ้ายของ children) → พับ/กางบล็อกนี้ โดยไม่ต้อง scroll กลับไปที่ head
+  // e.target === children หมายถึงคลิกโดนแถบ padding ซ้ายเท่านั้น ไม่ใช่บรรทัดลูก
+  children.addEventListener('click', (e) => { if (e.target !== children) return; e.stopPropagation(); collapsed = !collapsed; apply(); });
+  children.addEventListener('mouseover', (e) => { if (e.target === children) children.classList.add('jt-guide-hot'); });
+  children.addEventListener('mouseout', (e) => { if (e.target === children) children.classList.remove('jt-guide-hot'); });
   return node;
 }
 function jsonTree(value) {
@@ -188,9 +194,12 @@ function jsonTree(value) {
   // hover บรรทัดไหน → โชว์ path ของบรรทัดนั้นบน .jt-pathbar ของ pane เดียวกัน (เช่น หลังปุ่ม Raw)
   const bar = () => root.closest('.detail-pane') && root.closest('.detail-pane').querySelector('.jt-pathbar');
   root.addEventListener('mouseover', (e) => {
+    const b = bar(); if (!b) return;
     const line = e.target.closest && e.target.closest('.jt-line');
-    if (!line || !root.contains(line)) return;
-    const b = bar(); if (b) b.textContent = line.dataset.jtpath || '';
+    if (line && root.contains(line)) { b.textContent = line.dataset.jtpath || ''; return; }
+    // hover เส้น guide แนวตั้ง (padding ซ้ายของ .jt-children) → โชว์ path ของบล็อกนั้น
+    const guide = e.target.classList && e.target.classList.contains('jt-children') ? e.target : null;
+    if (guide && root.contains(guide)) b.textContent = guide.dataset.jtpath || '';
   });
   root.addEventListener('mouseleave', () => { const b = bar(); if (b) b.textContent = ''; });
   return root;
@@ -3107,6 +3116,63 @@ async function stSimDisconnect() {
   if (!r.ok) throw new Error(r.error || 'disconnect ไม่สำเร็จ');
 }
 
+// ===== Auto-reconnect USB device (ฝั่ง browser: ทำงานเฉพาะตอนเปิดหน้าเว็บ) =====
+// เก็บ preference ต่อ serial ใน localStorage → เปิดหน้าใหม่ยังจำได้
+const AUTO_KEY = 'apitester.autoConnect';
+function getAutoMap() { try { return JSON.parse(localStorage.getItem(AUTO_KEY) || '{}') || {}; } catch { return {}; } }
+function isAutoOn(serial) { return !!getAutoMap()[serial]; }
+// จำ "โหมด" ที่ผู้ใช้ต่อไว้ตอนเปิด auto ด้วย — ตอน watcher ทำงาน device จะ proxy หลุดไปแล้ว
+// (/api/status คืน mode=null เมื่อ connected=false) เลยอ่านโหมดจาก device ตอนนั้นไม่ได้
+// ค่าเก่าที่เก็บเป็น true (ก่อนมีฟิลด์นี้) → ถือเป็น 'usb' ตามพฤติกรรมเดิม
+function autoMode(serial) { return getAutoMap()[serial] === 'wifi' ? 'wifi' : 'usb'; }
+function setAuto(serial, on, mode) {
+  const m = getAutoMap();
+  if (on) m[serial] = mode === 'wifi' ? 'wifi' : 'usb'; else delete m[serial];
+  localStorage.setItem(AUTO_KEY, JSON.stringify(m));
+  if (!on) { delete autoBusy[serial]; delete autoNextTry[serial]; }
+}
+const autoBusy = {};     // serial → กำลังยิง connect อยู่ (กันยิงซ้อน)
+const autoNextTry = {};  // serial → เวลาที่ให้ลองใหม่ได้ (backoff หลัง fail)
+// device ถือว่า "สุขภาพดี" = เชื่อม proxy อยู่ และ (ถ้า USB) adb reverse ยังอยู่ — ตรงกับ okDev ใน renderStatus
+function devHealthy(dev) { return !!(dev.connected || dev.posternRunning) && !(dev.mode === 'usb' && dev.reverse === false); }
+// วนทุกไม่กี่วินาที: device ไหนเปิด auto ไว้ + ยังเสียบอยู่ + หลุด (reverse หาย/proxy โดนล้าง/เพิ่งเสียบใหม่) → สั่ง connect USB ให้เอง
+async function autoReconnectTick() {
+  const m = getAutoMap();
+  const serials = Object.keys(m).filter((s) => m[s]);
+  if (!serials.length) return;
+  let devices;
+  try { devices = (await (await fetch('/api/status')).json()).devices || []; } catch { return; }
+  const now = Date.now();
+  let didAct = false;
+  for (const serial of serials) {
+    const dev = devices.find((x) => x.serial === serial);
+    if (!dev) continue;                 // ถอดสายอยู่จริง (ไม่เห็น device) — รอจนเสียบกลับค่อยลอง
+    if (devHealthy(dev)) continue;      // ปกติดี ไม่ต้องทำอะไร
+    if (autoBusy[serial]) continue;     // ยิงอยู่ ยังไม่จบ
+    if (autoNextTry[serial] && now < autoNextTry[serial]) continue; // อยู่ในช่วง backoff
+    autoBusy[serial] = true;
+    try { await stConnectDevice(serial, autoMode(serial)); delete autoNextTry[serial]; didAct = true; }
+    catch { autoNextTry[serial] = Date.now() + 15000; } // fail → เว้น 15s ค่อยลองใหม่ (ไม่ถล่ม adb)
+    finally { autoBusy[serial] = false; }
+  }
+  // ถ้าเพิ่งเชื่อมกลับสำเร็จและกำลังเปิดแท็บ status อยู่ → รีเฟรชการ์ดให้เห็นผลทันที
+  if (didAct && document.getElementById('tab-status').classList.contains('active')) renderStatus();
+}
+setInterval(autoReconnectTick, 4000);
+
+// ปุ่ม toggle auto-reconnect ต่อ device (ใช้ .toggle-chip เดิม) — วางในแถว actions ของการ์ด device
+function stAutoToggle(serial, dev = {}) {
+  const cb = el('input', { type: 'checkbox' });
+  cb.checked = isAutoOn(serial);
+  cb.addEventListener('change', () => {
+    // ต่ออยู่ → จำโหมดปัจจุบัน / ยังไม่ได้ต่อ → เดาจาก transport (adb-over-wifi serial = ip:port)
+    setAuto(serial, cb.checked, dev.mode || dev.transport);
+    if (cb.checked) autoReconnectTick(); // เปิดปุ๊บ ถ้าตอนนี้หลุดอยู่ให้ลองต่อเลย ไม่ต้องรอรอบหน้า
+  });
+  return el('label', { class: 'toggle-chip st-auto-chip', title: 'เปิดไว้ → ถ้าหลุด (สายหลุด/reverse หาย/proxy โดนล้าง) จะเชื่อมกลับด้วยโหมดเดิมให้อัตโนมัติ ขณะเปิดหน้านี้' },
+    [cb, el('span', { text: '🔁 Auto-reconnect' })]);
+}
+
 async function renderStatus() {
   let d;
   try { d = await (await fetch('/api/status')).json(); }
@@ -3175,8 +3241,11 @@ async function renderStatus() {
       acts.push(stBtn('🔌 เชื่อม USB', () => stConnectDevice(dev.serial, 'usb')));
       acts.push(stBtn('📶 เชื่อม Wi-Fi', () => stConnectDevice(dev.serial, 'wifi')));
     } else {
-      acts.push(stBtn('⛔ ตัดการเชื่อมต่อ', () => stDisconnectDevice(dev.serial), 'stop'));
+      // กดตัดเอง = ตั้งใจปลด → ปิด auto ด้วย ไม่งั้น watcher จะเชื่อมกลับทันทีจนปลดไม่ได้
+      acts.push(stBtn('⛔ ตัดการเชื่อมต่อ', () => { setAuto(dev.serial, false); return stDisconnectDevice(dev.serial); }, 'stop'));
     }
+    // toggle auto-reconnect (เฉพาะ device จริงที่มี serial ต่อผ่าน adb) — โชว์ได้ทุกสถานะเพื่อ pre-arm ไว้ก่อน
+    if (dev.serial) acts.push(stAutoToggle(dev.serial, dev));
     // Emulator: ติดตั้ง CA เข้า system store อัตโนมัติ (auto-trust HTTPS ทั้งเครื่อง)
     if (dev.emulator) {
       acts.push(stBtn('🔐 ติดตั้ง CA (Auto)', () => stInstallCaEmulator(dev.serial)));
