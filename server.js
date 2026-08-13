@@ -1591,39 +1591,75 @@ app.post('/api/devices/install-ca-emulator', express.json(), async (req, res) =>
 
     await adb([...S, 'push', caPath, `/data/local/tmp/${hash}.0`]);
     // สคริปต์ติดตั้ง (รันเป็น root) — ดูคอมเมนต์บล็อกด้านบน
+    // ⚠ ต้อง push เป็น "ไฟล์" แล้วสั่ง sh <file> เท่านั้น — ห้ามส่งสคริปต์หลายบรรทัดเป็น argv ให้ adb shell
+    //   adb ไม่ quote arg ให้ → shell ปลายทางตัดตาม \n: บรรทัดแรกเท่านั้นที่รันตามที่ตั้งใจ ที่เหลือหลุดไปรัน
+    //   นอกบริบท (ตัวแปรที่ตั้งบรรทัดแรกหาย) แต่ `echo INSTALL_OK` บรรทัดท้ายยังรัน → ได้ OK ปลอม
+    //   (และ `su 0 sh -c ...` บน Android ใหม่กลืน stdout ด้วย — adbd หลัง `adb root` เป็น root อยู่แล้ว ไม่ต้องใช้ su)
     const script = [
+      'set -e',
       `HASH=${hash}`,
       'CERTS=/apex/com.android.conscrypt/cacerts',
       'SYS=/system/etc/security/cacerts',
       'TMP=/data/local/tmp/cacerts-work',
-      'rm -rf $TMP; mkdir -p $TMP',
-      'cp $CERTS/* $TMP/ 2>/dev/null || true',
-      'cp /data/local/tmp/$HASH.0 $TMP/',
-      'chown root:root $TMP/* 2>/dev/null; chmod 644 $TMP/*',
-      'mount -t tmpfs tmpfs $SYS 2>/dev/null || true',
-      'cp $TMP/* $SYS/',
-      'chown root:root $SYS/* 2>/dev/null; chmod 644 $SYS/*',
-      'chcon u:object_r:system_security_cacerts_file:s0 $SYS/* 2>/dev/null || true',
-      'mount --bind $SYS $CERTS',
-      'for pid in $(pgrep zygote) $(pgrep zygote64); do nsenter --mount=/proc/$pid/ns/mnt -- mount --bind $SYS $CERTS 2>/dev/null || true; done',
+      'rm -rf "$TMP"; mkdir -p "$TMP"',
+      'cp "$CERTS"/* "$TMP"/',
+      'cp "/data/local/tmp/$HASH.0" "$TMP"/',
+      'chown root:root "$TMP"/*; chmod 644 "$TMP"/*',
+      // apex เป็น read-only → tmpfs ทับ system store แล้วเติม CA เดิมทั้งชุด + ตัวเรา
+      'mount -t tmpfs tmpfs "$SYS"',
+      'cp "$TMP"/* "$SYS"/',
+      'chown root:root "$SYS"/*; chmod 644 "$SYS"/*',
+      'chcon u:object_r:system_security_cacerts_file:s0 "$SYS"/* || true',
+      '[ -f "$SYS/$HASH.0" ] || { echo "ERR: ใส่ CA ลง $SYS ไม่สำเร็จ"; exit 1; }',
+      'mount --bind "$SYS" "$CERTS"',
+      'for pid in $(pgrep zygote) $(pgrep zygote64); do nsenter --mount=/proc/$pid/ns/mnt -- mount --bind "$SYS" "$CERTS" 2>/dev/null || true; done',
+      '[ -f "$CERTS/$HASH.0" ] || { echo "ERR: bind ทับ $CERTS ไม่สำเร็จ"; exit 1; }',
       'echo INSTALL_OK',
     ].join('\n');
-    const out = await adb([...S, 'shell', 'su', '0', 'sh', '-c', script], 30000);
+    const localScript = path.join(require('os').tmpdir(), `apitester-install-ca-${hash}.sh`);
+    fs.writeFileSync(localScript, script + '\n');
+    let out = '';
+    try {
+      await adb([...S, 'push', localScript, '/data/local/tmp/apitester-install-ca.sh']);
+      out = await adb([...S, 'shell', 'sh', '/data/local/tmp/apitester-install-ca.sh'], 60000);
+    } catch (e) {
+      // exit code ไม่ใช่ 0 → เอา output จริงของสคริปต์มาบอก ไม่ให้ fail เงียบ
+      throw new Error('สคริปต์ติดตั้ง CA ล้มเหลว\n' + [e.stdout, e.stderr, e.message].filter(Boolean).join('\n').trim());
+    } finally {
+      try { fs.unlinkSync(localScript); } catch { /* ignore */ }
+    }
+    if (!out.includes('INSTALL_OK')) throw new Error('สคริปต์ติดตั้ง CA ไม่จบสมบูรณ์\n' + out);
     // ยืนยันว่าไฟล์อยู่ใน apex store จริง
     const check = await adb([...S, 'shell', 'ls', `/apex/com.android.conscrypt/cacerts/${hash}.0`]).catch(() => '');
     if (!check.includes(`${hash}.0`)) throw new Error('ติดตั้งไม่สำเร็จ (ไม่พบไฟล์ใน apex store)\n' + out);
 
     // restart framework ให้ zygote + USAP pool + แอปทั้งหมดเกิดใหม่ภายใต้ mount ใหม่ (tmpfs อยู่ใน init ns → รอด)
-    await adb([...S, 'shell', 'su', '0', 'stop'], 15000).catch(() => {});
-    await adb([...S, 'shell', 'su', '0', 'start'], 15000).catch(() => {});
-    // รอ boot_completed กลับมา
+    // `stop` ไม่ล้าง sys.boot_completed ให้ → ถ้าไม่เซ็ตเป็น 0 เอง ลูปรอจะผ่านทันทีทั้งที่ framework ยังไม่ขึ้น
+    // (แล้วคำสั่ง settings/reverse ที่ตามมาจะไปเจอ framework ที่ยังไม่พร้อม → พลาดเงียบๆ)
+    await adb([...S, 'shell', 'setprop', 'sys.boot_completed', '0'], 15000).catch(() => {});
+    await adb([...S, 'shell', 'stop'], 15000).catch(() => {});
+    await adb([...S, 'shell', 'start'], 15000).catch(() => {});
+    // รอ boot_completed กลับมา + settings service ตอบจริง (ต้องใช้ต่อทันทีตอนกู้ reverse)
     let booted = false;
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 60; i++) {
       await new Promise((r) => setTimeout(r, 1000));
       const b = (await adb([...S, 'shell', 'getprop', 'sys.boot_completed']).catch(() => '')).trim();
-      if (b === '1') { booted = true; break; }
+      if (b !== '1') continue;
+      const svc = (await adb([...S, 'shell', 'service', 'check', 'settings']).catch(() => '')).trim();
+      // ต้อง match ":  found" เท่านั้น — `service check` ตอบ "Service settings: not found" ซึ่งมีคำว่า found อยู่ด้วย
+      if (/:\s*found/.test(svc)) { booted = true; break; }
     }
-    res.json({ ok: true, hash, booted,
+    // `adb root` + restart framework ทำให้ reverse tunnel หลุด → โหมด USB (proxy=127.0.0.1) จะเงียบทันที
+    // ต่อ tunnel กลับให้เอง ไม่งั้นผู้ใช้เห็น "ต่อ proxy อยู่" แต่ไม่มี flow เข้าเลย
+    let reverse = false;
+    try {
+      const proxyNow = (await adb([...S, 'shell', 'settings', 'get', 'global', 'http_proxy'])).trim();
+      if (proxyNow.startsWith('127.0.0.1')) {
+        await adb([...S, 'reverse', `tcp:${MITM_PORT}`, `tcp:${MITM_PORT}`]);
+        reverse = true;
+      }
+    } catch { /* best-effort */ }
+    res.json({ ok: true, hash, booted, reverse,
       note: 'ติดตั้ง CA เข้า system store แล้ว (restart framework เรียบร้อย) — HTTPS ถอดรหัสได้เลย ยกเว้นแอปที่ทำ certificate pinning' });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
