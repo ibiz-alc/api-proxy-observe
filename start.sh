@@ -38,6 +38,48 @@ wait_port() {
   return 1
 }
 
+# คืนค่า hash ของ mitmproxy CA (ชื่อไฟล์ในtrust store ของ Android = <subject_hash_old>.0) — ว่างถ้าหาไม่ได้
+mitm_ca_hash() {
+  local ca="$HOME/.mitmproxy/mitmproxy-ca-cert.cer"
+  [ -f "$ca" ] || return 0
+  command -v openssl >/dev/null 2>&1 || return 0
+  openssl x509 -inform PEM -subject_hash_old -noout -in "$ca" 2>/dev/null | head -1
+}
+
+# ตั้ง adb reverse ให้ "ทุก" เครื่องที่ต่ออยู่ + เตือนถ้า emulator ยังไม่มี CA ใน system store
+# - bare `adb reverse` พังทันทีถ้าต่อมากกว่า 1 เครื่อง (more than one device) → ต้อง -s รายตัว
+# - CA ไม่อยู่ใน system store = HTTPS ล้มตั้งแต่ handshake → ApiTester ได้ 0 flow ทั้งที่ proxy ต่อครบทุกอย่าง
+#   (ฝั่งแอปจะขึ้น CertPathValidatorException: Trust anchor for certification path not found)
+#   อาการนี้แยกจาก "ยังไม่ได้ต่อ proxy" ไม่ออกถ้าดูแค่จำนวน flow — เลยต้องเตือนตั้งแต่ตอน start
+setup_devices() {
+  command -v adb >/dev/null 2>&1 || { echo "   (ไม่มี adb — ข้ามขั้นตอน device)"; return 0; }
+  local serials
+  serials=$(adb devices 2>/dev/null | awk 'NR>1 && $2=="device" {print $1}')
+  if [ -z "$serials" ]; then
+    echo "   (ไม่มี device/emulator ต่ออยู่)"
+    return 0
+  fi
+  local ca_hash s
+  ca_hash=$(mitm_ca_hash)
+  for s in $serials; do
+    if adb -s "$s" reverse tcp:8888 tcp:8888 >/dev/null 2>&1; then
+      echo "   ✅ $s: adb reverse tcp:8888 -> Mac (มือถือใช้ Host 127.0.0.1)"
+    else
+      echo "   ⚠️ $s: ตั้ง adb reverse ไม่สำเร็จ (ใช้โหมด Wi-Fi ชี้ IP ของ Mac แทนได้)"
+    fi
+    # เช็ค CA เฉพาะ emulator — เครื่องจริงไม่มี root เลยลง system store ไม่ได้อยู่แล้ว
+    case "$s" in emulator-*) ;; *) continue ;; esac
+    [ -n "$ca_hash" ] || continue
+    if adb -s "$s" shell "ls /apex/com.android.conscrypt/cacerts/$ca_hash.0" >/dev/null 2>&1; then
+      echo "      🔐 CA อยู่ใน system store แล้ว — HTTPS ถอดรหัสได้"
+    else
+      echo "      ⚠️ ยังไม่มี mitmproxy CA ใน system store → HTTPS จะล้มที่ handshake และจะไม่เห็น flow เลย"
+      echo "         แก้: เปิด http://localhost:3000 → แท็บ Status → ปุ่ม '🔐 ติดตั้ง CA (Auto)' ที่การ์ดเครื่องนี้"
+      echo "         (ต้องกดใหม่ทุกครั้งที่ reboot emulator — trust store เป็น tmpfs ไม่รอด reboot)"
+    fi
+  done
+}
+
 # ติดตั้ง brew package ถ้ายังไม่มีคำสั่งนั้น — ensure_pkg <ชื่อคำสั่ง> <ชื่อ formula> <จำเป็นไหม yes/no>
 ensure_pkg() {
   local cmd="$1" formula="$2" required="$3"
@@ -197,7 +239,7 @@ if [ "$NGROK" = yes ]; then
   curl -s http://localhost:4040/api/tunnels 2>/dev/null | node -e "try{const d=JSON.parse(require('fs').readFileSync(0));d.tunnels.forEach(t=>console.log('   '+t.name+': '+t.public_url))}catch(e){console.log('   (ngrok ยังไม่พร้อม ดู /tmp/ngrok.log)')}"
 else
   echo "==> (โหมด USB + Wi-Fi — ไม่เปิด ngrok)"
-  adb reverse tcp:8888 tcp:8888 2>/dev/null && echo "   USB: adb reverse tcp:8888 -> Mac ✅ (มือถือใช้ Host 127.0.0.1)" || echo "   (ไม่มี device USB เสียบอยู่)"
+  setup_devices
   LANIP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null)
   [ -n "$LANIP" ] && echo "   Wi-Fi: มือถือ (วง LAN เดียวกัน) ใช้ Host $LANIP  Port 8888"
 fi
