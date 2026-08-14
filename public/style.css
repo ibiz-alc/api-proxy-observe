@@ -1495,16 +1495,39 @@ button.mp-meta-btn:hover { color: var(--text); }
 .mirror-header-row { display: flex; align-items: center; gap: 8px; }
 .mirror-title { font-size: 1rem; font-weight: 600; flex: 1; }
 
-.mirror-select {
-  flex: 1;
-  min-width: 0;
+/* dock สไตล์ Android Studio: เปิด panel แล้วดันเนื้อหาหลัก ไม่ทับจอ */
+body.mirror-open { padding-right: 396px; transition: padding-right 0.15s ease; }
+
+/* รายการอุปกรณ์แบบ Device Manager */
+.mirror-device-list {
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 180px; overflow-y: auto;
+}
+.mirror-device-row {
+  display: flex; align-items: center; gap: 8px;
   background: var(--panel-2);
-  color: var(--text);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 6px 8px;
-  font-family: inherit;
-  font-size: 0.9rem;
+  padding: 8px 10px;
+}
+.mirror-device-row.active { border-color: var(--accent); }
+.mirror-device-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--green); flex: 0 0 auto;
+}
+.mirror-device-info { flex: 1; min-width: 0; }
+.mirror-device-name {
+  font-size: 0.88rem; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mirror-device-sub {
+  font-size: 0.74rem; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mirror-device-row .mirror-btn { padding: 5px 10px; font-size: 0.8rem; flex: 0 0 auto; }
+.mirror-device-empty {
+  color: var(--muted); font-size: 0.85rem; text-align: center;
+  padding: 10px; border: 1px dashed var(--border); border-radius: 8px;
 }
 
 .mirror-icon-btn {

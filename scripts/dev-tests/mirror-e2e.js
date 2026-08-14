@@ -46,18 +46,21 @@ const step = (name, ok, detail = '') => {
   page.on('pageerror', (e) => pageErrors.push(String(e)));
   await page.goto(URL, { waitUntil: 'networkidle2' });
 
-  // 1) เปิด panel + เลือก emulator + เชื่อมต่อ
+  // 1) เปิด panel + กด ▶ ดูจอ ที่แถวของ emulator ใน device list (UI แบบ Device Manager)
   await page.click('#mirrorToggleBtn');
   await page.waitForSelector('#mirrorDrawer', { visible: true });
-  // รอจน option ของ emulator โผล่ (endpoint /api/devices enrich ผ่าน adb ใช้เวลาหลายวิ)
+  // รอจนแถวของ emulator โผล่ (endpoint /api/devices enrich ผ่าน adb ใช้เวลาหลายวิ)
   await page.waitForFunction(
-    (serial) => [...document.querySelectorAll('.mirror-select option')].some((o) => o.value === serial),
+    (serial) => [...document.querySelectorAll('.mirror-device-row')].some((r) => r.textContent.includes(serial)),
     { timeout: 20000 }, SERIAL,
   );
-  await page.select('.mirror-select', SERIAL).catch(() => {});
-  const selVal = await page.$eval('.mirror-select', (s) => s.value);
-  step('เลือก device emulator-5554', selVal === SERIAL, `select=${selVal}`);
-  await page.click('.mirror-btn.primary');
+  const rowFound = await page.$$eval('.mirror-device-row', (rows, serial) => {
+    const row = rows.find((r) => r.textContent.includes(serial));
+    if (!row) return false;
+    row.querySelector('.mirror-btn').click();
+    return true;
+  }, SERIAL);
+  step('เจอแถว device emulator-5554 ใน list แล้วกดดูจอ', rowFound);
   const status = async () => page.$eval('.mirror-status-text', (n) => n.textContent);
   const waitStatus = async (want, ms) => {
     const t0 = Date.now();

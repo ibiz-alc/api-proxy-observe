@@ -64,26 +64,26 @@ class MirrorPanel {
 
   // ---------- สร้าง DOM ทั้งพาเนล ----------
   _buildDom() {
-    // header: เลือก device + refresh + connect/disconnect + status + ซ่อน
-    this.deviceSelect = el('select', { class: 'mirror-select', title: 'เลือกอุปกรณ์' });
+    // header สไตล์ Device Manager ของ Android Studio: รายการอุปกรณ์ online เป็นแถว
+    // แต่ละแถวมีปุ่มเปิด/หยุด mirror ของตัวเอง (ไม่มี dropdown + ปุ่ม connect รวม)
     this.refreshBtn = el('button', { class: 'mirror-icon-btn', title: 'รีเฟรชรายชื่ออุปกรณ์', text: '⟲' });
-    this.connectBtn = el('button', { class: 'mirror-btn primary', text: 'เชื่อมต่อ' });
     this.hideBtn = el('button', { class: 'mirror-icon-btn', title: 'ซ่อนพาเนล (ยังต่ออยู่)', text: '—' });
     this.statusDot = el('span', { class: 'mirror-dot' });
     this.statusText = el('span', { class: 'mirror-status-text', text: 'ยังไม่เชื่อมต่อ' });
+    this.deviceList = el('div', { class: 'mirror-device-list' });
+    this.devices = [];
 
     this.refreshBtn.addEventListener('click', () => this.refreshDevices());
-    this.connectBtn.addEventListener('click', () => this._onConnectBtn());
     this.hideBtn.addEventListener('click', () => this.hide());
 
     const header = el('div', { class: 'mirror-header' }, [
       el('div', { class: 'mirror-header-row' }, [
         el('span', { class: 'mirror-title', text: '📱 Mirror' }),
+        this.refreshBtn,
         this.hideBtn,
       ]),
-      el('div', { class: 'mirror-header-row' }, [this.deviceSelect, this.refreshBtn]),
+      this.deviceList,
       el('div', { class: 'mirror-header-row' }, [
-        this.connectBtn,
         el('span', { class: 'mirror-statusline' }, [this.statusDot, this.statusText]),
       ]),
     ]);
@@ -132,27 +132,51 @@ class MirrorPanel {
     document.body.appendChild(this.drawer);
   }
 
-  // ---------- โหลดรายชื่ออุปกรณ์ ----------
+  // ---------- โหลดรายชื่ออุปกรณ์ (Device Manager style) ----------
   async refreshDevices() {
     try {
       const r = await fetch('/api/devices');
       const j = await r.json();
-      const devices = (j && j.devices) || [];
-      const prev = this.deviceSelect.value;
-      this.deviceSelect.innerHTML = '';
-      if (!devices.length) {
-        this.deviceSelect.appendChild(el('option', { value: '', text: 'ไม่พบอุปกรณ์' }));
-        return;
-      }
-      for (const d of devices) {
-        const label = `${d.model || d.serial}${d.emulator ? ' (emu)' : ''} — ${d.serial}`;
-        this.deviceSelect.appendChild(el('option', { value: d.serial, text: label }));
-      }
-      // คงค่าที่เลือกไว้เดิมถ้ายังมีอยู่
-      if (prev && devices.some((d) => d.serial === prev)) this.deviceSelect.value = prev;
+      this.devices = (j && j.devices) || [];
     } catch (e) {
-      this.deviceSelect.innerHTML = '';
-      this.deviceSelect.appendChild(el('option', { value: '', text: 'โหลดอุปกรณ์ไม่ได้' }));
+      this.devices = null; // โหลดไม่ได้
+    }
+    this._renderDevices();
+  }
+
+  _renderDevices() {
+    this.deviceList.innerHTML = '';
+    if (this.devices === null) {
+      this.deviceList.appendChild(el('div', { class: 'mirror-device-empty', text: 'โหลดรายชื่ออุปกรณ์ไม่ได้' }));
+      return;
+    }
+    if (!this.devices.length) {
+      this.deviceList.appendChild(el('div', { class: 'mirror-device-empty', text: 'ไม่พบอุปกรณ์ที่ online' }));
+      return;
+    }
+    for (const d of this.devices) {
+      const isActive = Boolean(this.ws) && this.serial === d.serial;
+      const dot = el('span', { class: 'mirror-device-dot' });
+      const name = el('div', { class: 'mirror-device-name', text: `${d.model || d.serial}${d.emulator ? ' (emulator)' : ''}` });
+      const sub = el('div', {
+        class: 'mirror-device-sub',
+        text: `${d.serial} · ${d.transport || d.mode || ''}${d.connected ? ' · proxy ✓' : ''}`,
+      });
+      const btn = el('button', {
+        class: 'mirror-btn ' + (isActive ? 'danger' : 'primary'),
+        text: isActive ? '⏹ หยุด' : '▶ ดูจอ',
+        title: isActive ? 'หยุด mirror เครื่องนี้' : 'เปิด mirror เครื่องนี้ (ตั้ง proxy ให้ด้วย)',
+      });
+      btn.addEventListener('click', () => {
+        if (isActive) this.disconnect();
+        else this.connect(d.serial);
+      });
+      const row = el('div', { class: 'mirror-device-row' + (isActive ? ' active' : '') }, [
+        dot,
+        el('div', { class: 'mirror-device-info' }, [name, sub]),
+        btn,
+      ]);
+      this.deviceList.appendChild(row);
     }
   }
 
@@ -164,14 +188,9 @@ class MirrorPanel {
   }
 
   _setConnected(isConn) {
-    this.connectBtn.textContent = isConn ? 'ตัดการเชื่อมต่อ' : 'เชื่อมต่อ';
-    this.connectBtn.classList.toggle('danger', isConn);
-    this.connectBtn.classList.toggle('primary', !isConn);
-  }
-
-  _onConnectBtn() {
-    if (this.ws) this.disconnect();
-    else this.connect(this.deviceSelect.value);
+    // สถานะ active เปลี่ยน → วาดรายการอุปกรณ์ใหม่ (ปุ่มต่อแถวจะสลับ ▶/⏹ เอง)
+    void isConn;
+    this._renderDevices();
   }
 
   // ---------- WebSocket lifecycle ----------
@@ -186,8 +205,31 @@ class MirrorPanel {
     if (this.ws) this.disconnect();
     this.serial = serial;
     this.userDisconnected = false;
+    this._proxyEnsured = false; // ตั้ง proxy ให้เครื่องหนึ่งครั้งต่อการกดเชื่อมต่อ (ไม่ยิงซ้ำทุก auto-reconnect)
     this._clearReconnect();
     this._openWs();
+  }
+
+  // ตั้ง proxy ให้เครื่องอัตโนมัติ (endpoint เดียวกับปุ่ม connect ในแท็บ Status) — best effort
+  // หมายเหตุ: เรียกครั้งเดียวต่อการกดเชื่อมต่อ เพราะบน emulator ที่ CA ยังไม่มี endpoint นี้
+  // จะติดตั้ง CA (restart framework ~90s) — ห้ามยิงรัวทุกรอบ auto-reconnect
+  async _ensureDeviceProxy() {
+    if (this._proxyEnsured) return;
+    this._proxyEnsured = true;
+    try {
+      const r = await fetch('/api/devices/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serial: this.serial }),
+      });
+      const j = await r.json().catch(() => null);
+      if (!j || j.ok === false) {
+        this._setStatus('connected', 'เชื่อมต่อแล้ว (ตั้ง proxy ไม่สำเร็จ)');
+      }
+    } catch (e) {
+      this._setStatus('connected', 'เชื่อมต่อแล้ว (ตั้ง proxy ไม่สำเร็จ)');
+    }
+    this.refreshDevices(); // อัปเดต badge "proxy ✓" ในรายการ
   }
 
   _openWs() {
@@ -280,6 +322,7 @@ class MirrorPanel {
         this._setStatus('connected', 'เชื่อมต่อแล้ว');
         this._setConnected(true);
         this.videoPlaceholder.style.display = 'none';
+        this._ensureDeviceProxy(); // ตั้ง proxy ให้เครื่องอัตโนมัติ (ครั้งเดียวต่อการกดเชื่อมต่อ)
         break;
       case 'meta':
         // หมุน/รีไซส์ → ปรับ aspect ของ canvas
@@ -479,19 +522,22 @@ class MirrorPanel {
   }
 
   // ---------- แสดง/ซ่อนพาเนล ----------
+  // เปิด = dock ด้านขวา ดันเนื้อหาหลัก (body.mirror-open มี padding-right ใน CSS) ไม่ทับจอ
   show() {
     this.drawer.style.display = 'flex';
     document.body.classList.add('mirror-open');
     this.visible = true;
-    // โหลดรายชื่ออุปกรณ์ครั้งแรกเมื่อยังว่าง
-    if (!this.deviceSelect.options.length) this.refreshDevices();
+    this.refreshDevices();
+    // รีเฟรชรายการอุปกรณ์เป็นระยะระหว่างเปิด (เครื่องเสียบ/ถอด/proxy เปลี่ยน)
+    if (!this._deviceTimer) this._deviceTimer = setInterval(() => this.refreshDevices(), 5000);
   }
 
   hide() {
-    // ซ่อนอย่างเดียว — WS + decoder ยังทำงานต่อ
+    // ซ่อนอย่างเดียว — WS + decoder ยังทำงานต่อ (กดปุ่ม nav อีกทีเพื่อเปิดกลับ)
     this.drawer.style.display = 'none';
     document.body.classList.remove('mirror-open');
     this.visible = false;
+    if (this._deviceTimer) { clearInterval(this._deviceTimer); this._deviceTimer = null; }
   }
 
   toggle() {
@@ -501,18 +547,7 @@ class MirrorPanel {
 
   open(serial) {
     this.show();
-    if (serial) {
-      // เลือก serial แล้วต่อทันที (เติมรายชื่อก่อนถ้ายังไม่มี option นี้)
-      const doConnect = () => {
-        if (![...this.deviceSelect.options].some((o) => o.value === serial)) {
-          this.deviceSelect.appendChild(el('option', { value: serial, text: serial }));
-        }
-        this.deviceSelect.value = serial;
-        this.connect(serial);
-      };
-      if (!this.deviceSelect.options.length) this.refreshDevices().then(doConnect);
-      else doConnect();
-    }
+    if (serial) this.connect(serial);
   }
 
   close() {

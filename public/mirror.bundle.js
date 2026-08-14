@@ -3843,23 +3843,22 @@
     }
     // ---------- สร้าง DOM ทั้งพาเนล ----------
     _buildDom() {
-      this.deviceSelect = el("select", { class: "mirror-select", title: "\u0E40\u0E25\u0E37\u0E2D\u0E01\u0E2D\u0E38\u0E1B\u0E01\u0E23\u0E13\u0E4C" });
       this.refreshBtn = el("button", { class: "mirror-icon-btn", title: "\u0E23\u0E35\u0E40\u0E1F\u0E23\u0E0A\u0E23\u0E32\u0E22\u0E0A\u0E37\u0E48\u0E2D\u0E2D\u0E38\u0E1B\u0E01\u0E23\u0E13\u0E4C", text: "\u27F2" });
-      this.connectBtn = el("button", { class: "mirror-btn primary", text: "\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D" });
       this.hideBtn = el("button", { class: "mirror-icon-btn", title: "\u0E0B\u0E48\u0E2D\u0E19\u0E1E\u0E32\u0E40\u0E19\u0E25 (\u0E22\u0E31\u0E07\u0E15\u0E48\u0E2D\u0E2D\u0E22\u0E39\u0E48)", text: "\u2014" });
       this.statusDot = el("span", { class: "mirror-dot" });
       this.statusText = el("span", { class: "mirror-status-text", text: "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D" });
+      this.deviceList = el("div", { class: "mirror-device-list" });
+      this.devices = [];
       this.refreshBtn.addEventListener("click", () => this.refreshDevices());
-      this.connectBtn.addEventListener("click", () => this._onConnectBtn());
       this.hideBtn.addEventListener("click", () => this.hide());
       const header = el("div", { class: "mirror-header" }, [
         el("div", { class: "mirror-header-row" }, [
           el("span", { class: "mirror-title", text: "\u{1F4F1} Mirror" }),
+          this.refreshBtn,
           this.hideBtn
         ]),
-        el("div", { class: "mirror-header-row" }, [this.deviceSelect, this.refreshBtn]),
+        this.deviceList,
         el("div", { class: "mirror-header-row" }, [
-          this.connectBtn,
           el("span", { class: "mirror-statusline" }, [this.statusDot, this.statusText])
         ])
       ]);
@@ -3903,26 +3902,50 @@
       this.drawer.style.display = "none";
       document.body.appendChild(this.drawer);
     }
-    // ---------- โหลดรายชื่ออุปกรณ์ ----------
+    // ---------- โหลดรายชื่ออุปกรณ์ (Device Manager style) ----------
     async refreshDevices() {
       try {
         const r = await fetch("/api/devices");
         const j = await r.json();
-        const devices = j && j.devices || [];
-        const prev = this.deviceSelect.value;
-        this.deviceSelect.innerHTML = "";
-        if (!devices.length) {
-          this.deviceSelect.appendChild(el("option", { value: "", text: "\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E2D\u0E38\u0E1B\u0E01\u0E23\u0E13\u0E4C" }));
-          return;
-        }
-        for (const d of devices) {
-          const label = `${d.model || d.serial}${d.emulator ? " (emu)" : ""} \u2014 ${d.serial}`;
-          this.deviceSelect.appendChild(el("option", { value: d.serial, text: label }));
-        }
-        if (prev && devices.some((d) => d.serial === prev)) this.deviceSelect.value = prev;
+        this.devices = j && j.devices || [];
       } catch (e) {
-        this.deviceSelect.innerHTML = "";
-        this.deviceSelect.appendChild(el("option", { value: "", text: "\u0E42\u0E2B\u0E25\u0E14\u0E2D\u0E38\u0E1B\u0E01\u0E23\u0E13\u0E4C\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49" }));
+        this.devices = null;
+      }
+      this._renderDevices();
+    }
+    _renderDevices() {
+      this.deviceList.innerHTML = "";
+      if (this.devices === null) {
+        this.deviceList.appendChild(el("div", { class: "mirror-device-empty", text: "\u0E42\u0E2B\u0E25\u0E14\u0E23\u0E32\u0E22\u0E0A\u0E37\u0E48\u0E2D\u0E2D\u0E38\u0E1B\u0E01\u0E23\u0E13\u0E4C\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49" }));
+        return;
+      }
+      if (!this.devices.length) {
+        this.deviceList.appendChild(el("div", { class: "mirror-device-empty", text: "\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E2D\u0E38\u0E1B\u0E01\u0E23\u0E13\u0E4C\u0E17\u0E35\u0E48 online" }));
+        return;
+      }
+      for (const d of this.devices) {
+        const isActive = Boolean(this.ws) && this.serial === d.serial;
+        const dot = el("span", { class: "mirror-device-dot" });
+        const name = el("div", { class: "mirror-device-name", text: `${d.model || d.serial}${d.emulator ? " (emulator)" : ""}` });
+        const sub = el("div", {
+          class: "mirror-device-sub",
+          text: `${d.serial} \xB7 ${d.transport || d.mode || ""}${d.connected ? " \xB7 proxy \u2713" : ""}`
+        });
+        const btn = el("button", {
+          class: "mirror-btn " + (isActive ? "danger" : "primary"),
+          text: isActive ? "\u23F9 \u0E2B\u0E22\u0E38\u0E14" : "\u25B6 \u0E14\u0E39\u0E08\u0E2D",
+          title: isActive ? "\u0E2B\u0E22\u0E38\u0E14 mirror \u0E40\u0E04\u0E23\u0E37\u0E48\u0E2D\u0E07\u0E19\u0E35\u0E49" : "\u0E40\u0E1B\u0E34\u0E14 mirror \u0E40\u0E04\u0E23\u0E37\u0E48\u0E2D\u0E07\u0E19\u0E35\u0E49 (\u0E15\u0E31\u0E49\u0E07 proxy \u0E43\u0E2B\u0E49\u0E14\u0E49\u0E27\u0E22)"
+        });
+        btn.addEventListener("click", () => {
+          if (isActive) this.disconnect();
+          else this.connect(d.serial);
+        });
+        const row = el("div", { class: "mirror-device-row" + (isActive ? " active" : "") }, [
+          dot,
+          el("div", { class: "mirror-device-info" }, [name, sub]),
+          btn
+        ]);
+        this.deviceList.appendChild(row);
       }
     }
     // ---------- สถานะ ----------
@@ -3931,13 +3954,8 @@
       this.statusText.textContent = text;
     }
     _setConnected(isConn) {
-      this.connectBtn.textContent = isConn ? "\u0E15\u0E31\u0E14\u0E01\u0E32\u0E23\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D" : "\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D";
-      this.connectBtn.classList.toggle("danger", isConn);
-      this.connectBtn.classList.toggle("primary", !isConn);
-    }
-    _onConnectBtn() {
-      if (this.ws) this.disconnect();
-      else this.connect(this.deviceSelect.value);
+      void isConn;
+      this._renderDevices();
     }
     // ---------- WebSocket lifecycle ----------
     connect(serial) {
@@ -3952,8 +3970,30 @@
       if (this.ws) this.disconnect();
       this.serial = serial;
       this.userDisconnected = false;
+      this._proxyEnsured = false;
       this._clearReconnect();
       this._openWs();
+    }
+    // ตั้ง proxy ให้เครื่องอัตโนมัติ (endpoint เดียวกับปุ่ม connect ในแท็บ Status) — best effort
+    // หมายเหตุ: เรียกครั้งเดียวต่อการกดเชื่อมต่อ เพราะบน emulator ที่ CA ยังไม่มี endpoint นี้
+    // จะติดตั้ง CA (restart framework ~90s) — ห้ามยิงรัวทุกรอบ auto-reconnect
+    async _ensureDeviceProxy() {
+      if (this._proxyEnsured) return;
+      this._proxyEnsured = true;
+      try {
+        const r = await fetch("/api/devices/connect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ serial: this.serial })
+        });
+        const j = await r.json().catch(() => null);
+        if (!j || j.ok === false) {
+          this._setStatus("connected", "\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D\u0E41\u0E25\u0E49\u0E27 (\u0E15\u0E31\u0E49\u0E07 proxy \u0E44\u0E21\u0E48\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08)");
+        }
+      } catch (e) {
+        this._setStatus("connected", "\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D\u0E41\u0E25\u0E49\u0E27 (\u0E15\u0E31\u0E49\u0E07 proxy \u0E44\u0E21\u0E48\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08)");
+      }
+      this.refreshDevices();
     }
     _openWs() {
       this._setStatus("connecting", "\u0E01\u0E33\u0E25\u0E31\u0E07\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D\u2026");
@@ -4048,6 +4088,7 @@
           this._setStatus("connected", "\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D\u0E41\u0E25\u0E49\u0E27");
           this._setConnected(true);
           this.videoPlaceholder.style.display = "none";
+          this._ensureDeviceProxy();
           break;
         case "meta":
           if (this.rendererEl && msg.width && msg.height) {
@@ -4231,16 +4272,22 @@
       this.textInput.value = "";
     }
     // ---------- แสดง/ซ่อนพาเนล ----------
+    // เปิด = dock ด้านขวา ดันเนื้อหาหลัก (body.mirror-open มี padding-right ใน CSS) ไม่ทับจอ
     show() {
       this.drawer.style.display = "flex";
       document.body.classList.add("mirror-open");
       this.visible = true;
-      if (!this.deviceSelect.options.length) this.refreshDevices();
+      this.refreshDevices();
+      if (!this._deviceTimer) this._deviceTimer = setInterval(() => this.refreshDevices(), 5e3);
     }
     hide() {
       this.drawer.style.display = "none";
       document.body.classList.remove("mirror-open");
       this.visible = false;
+      if (this._deviceTimer) {
+        clearInterval(this._deviceTimer);
+        this._deviceTimer = null;
+      }
     }
     toggle() {
       if (this.visible) this.hide();
@@ -4248,17 +4295,7 @@
     }
     open(serial) {
       this.show();
-      if (serial) {
-        const doConnect = () => {
-          if (![...this.deviceSelect.options].some((o) => o.value === serial)) {
-            this.deviceSelect.appendChild(el("option", { value: serial, text: serial }));
-          }
-          this.deviceSelect.value = serial;
-          this.connect(serial);
-        };
-        if (!this.deviceSelect.options.length) this.refreshDevices().then(doConnect);
-        else doConnect();
-      }
+      if (serial) this.connect(serial);
     }
     close() {
       this.disconnect();

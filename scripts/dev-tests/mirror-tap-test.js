@@ -15,9 +15,10 @@ const adb = (...a) => execFileSync('adb', ['-s', 'emulator-5554', ...a], { encod
   await page.setViewport({ width: 1600, height: 1000 });
   await page.goto('http://localhost:3100', { waitUntil: 'networkidle2' });
   await page.click('#mirrorToggleBtn');
-  await page.waitForFunction(() => [...document.querySelectorAll('.mirror-select option')].some((o) => o.value === 'emulator-5554'), { timeout: 20000 });
-  await page.select('.mirror-select', 'emulator-5554');
-  await page.click('.mirror-btn.primary');
+  await page.waitForFunction(() => [...document.querySelectorAll('.mirror-device-row')].some((r) => r.textContent.includes('emulator-5554')), { timeout: 20000 });
+  await page.$$eval('.mirror-device-row', (rows) => {
+    rows.find((r) => r.textContent.includes('emulator-5554')).querySelector('.mirror-btn').click();
+  });
   await page.waitForFunction(() => document.querySelector('.mirror-status-text').textContent === 'เชื่อมต่อแล้ว', { timeout: 20000 });
   await sleep(1500);
   const box = await page.$eval('.mirror-canvas', (c) => { const r = c.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
