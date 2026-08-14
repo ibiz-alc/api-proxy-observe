@@ -2228,10 +2228,17 @@ app.post('/api/send-form', upload.any(), async (req, res) => {
 });
 
 // ================= Start =================
-app.listen(PORT, '0.0.0.0', () => {
+const httpServer = app.listen(PORT, '0.0.0.0', () => {
   console.log(`API Tester รันอยู่ที่ http://localhost:${PORT}`);
   console.log(`Hook endpoint: http://localhost:${PORT}/hook (รับทุก method ทุก path ย่อย)`);
 });
+
+// scrcpy web mirror — ผูก WS /api/mirror เข้ากับ http server ตัวเดียวกัน
+try {
+  require('./mirror').initMirror({ httpServer });
+} catch (err) {
+  console.error('เริ่ม mirror ไม่สำเร็จ:', err.message);
+}
 
 // ประกาศ service ผ่าน mDNS/Bonjour ให้แอปในวง Wi-Fi เดียวกันค้นหา mitmproxy เจอเอง (auto-fill)
 try {
