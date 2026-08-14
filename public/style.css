@@ -39,7 +39,11 @@ header {
 
 header h1 { font-size: 1.2rem; }
 
-nav { display: flex; gap: 8px; }
+/* เมนูบน scroll ซ้าย-ขวาได้เมื่อพื้นที่แคบ (ตอน tool window เปิด) — ปุ่มไม่ตัดบรรทัด
+   ซ่อน scrollbar (ยัง scroll ได้ด้วย trackpad/ลูกกลิ้ง แค่ไม่โชว์แถบ) */
+nav { display: flex; gap: 8px; overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
+nav::-webkit-scrollbar { display: none; }
+nav .tab-btn { flex: 0 0 auto; white-space: nowrap; }
 
 .tab-btn {
   background: transparent;
@@ -1473,3 +1477,180 @@ button.mp-meta-btn:hover { color: var(--text); }
 .pin-swatch:hover { transform: scale(1.2); }
 .pin-swatch.sel { outline: 2px solid var(--text); outline-offset: 1px; }
 .flow-item.flow-pinned { border-left: 3px solid var(--yellow); } /* สีจริงตั้ง inline ตาม pin ที่เลือก */
+
+/* ============ Mirror drawer (พาเนล scrcpy ฝั่งขวา) ============ */
+.mirror-drawer {
+  position: fixed;
+  top: 0;
+  right: 44px; /* dock ข้าง icon rail */
+  width: var(--mirror-w);
+  height: 100vh;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  box-shadow: -8px 0 28px rgba(0, 0, 0, 0.45);
+  z-index: 9000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+
+.mirror-header { display: flex; flex-direction: column; gap: 8px; }
+.mirror-header-row { display: flex; align-items: center; gap: 8px; }
+.mirror-title { font-size: 1rem; font-weight: 600; flex: 1; }
+
+/* icon rail แนวตั้งมุมขวาแบบ Android Studio — อยู่ตลอดเวลา */
+.mirror-rail {
+  position: fixed; top: 0; right: 0;
+  width: 44px; height: 100vh;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  z-index: 9002;
+  display: flex; flex-direction: column; align-items: center;
+  gap: 6px; padding-top: 10px;
+}
+.mirror-rail-btn {
+  background: transparent; border: none; border-radius: 8px;
+  width: 34px; height: 34px; font-size: 1.05rem; line-height: 1;
+  color: var(--muted); cursor: pointer;
+}
+.mirror-rail-btn:hover { background: var(--panel-2); color: var(--text); }
+.mirror-rail-btn.active { background: var(--accent); }
+
+/* dock สไตล์ Android Studio: rail กินที่ 44px เสมอ, เปิด tool window แล้วดันเนื้อหาเพิ่ม ไม่ทับจอ
+   ระวัง: class บน body ชื่อ has-mirror-rail (ห้ามใช้ .mirror-rail — จะไปจับกล่อง rail เอง)
+   --mirror-w = ความกว้าง panel ปรับได้ด้วยการลากขอบซ้าย (mirror-resizer) */
+:root { --mirror-w: 380px; }
+body.has-mirror-rail { padding-right: 44px; transition: padding-right 0.15s ease; }
+body.mirror-open { padding-right: calc(44px + var(--mirror-w)); transition: none; }
+
+/* tool window แต่ละ view (Device Manager / Running Devices) — สลับกันแสดงตาม icon ที่กด */
+.mirror-view { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
+
+/* ตัวจับลากขยายความกว้าง — แถบบางๆ ขอบซ้ายของ drawer */
+.mirror-resizer {
+  position: absolute; left: -3px; top: 0;
+  width: 6px; height: 100%;
+  cursor: col-resize;
+  z-index: 1;
+}
+.mirror-resizer:hover, .mirror-resizer:active { background: var(--accent); opacity: 0.5; }
+
+/* รายการอุปกรณ์แบบ Device Manager (ซ่อน scrollbar) */
+.mirror-device-list {
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 180px; overflow-y: auto;
+  scrollbar-width: none;
+}
+.mirror-device-list::-webkit-scrollbar { display: none; }
+.mirror-device-row {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.mirror-device-row.active { border-color: var(--accent); }
+.mirror-device-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--green); flex: 0 0 auto;
+}
+.mirror-device-info { flex: 1; min-width: 0; }
+.mirror-device-name {
+  font-size: 0.88rem; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mirror-device-sub {
+  font-size: 0.74rem; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mirror-device-row .mirror-btn { padding: 5px 10px; font-size: 0.8rem; flex: 0 0 auto; }
+.mirror-device-empty {
+  color: var(--muted); font-size: 0.85rem; text-align: center;
+  padding: 10px; border: 1px dashed var(--border); border-radius: 8px;
+}
+
+.mirror-icon-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 1rem;
+  line-height: 1;
+}
+.mirror-icon-btn:hover { color: var(--text); border-color: var(--accent); }
+
+.mirror-btn {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 7px 16px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.mirror-btn.primary { background: var(--accent); border-color: var(--accent); color: #0f172a; }
+.mirror-btn.danger { background: transparent; border-color: var(--red); color: var(--red); }
+
+.mirror-statusline { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+.mirror-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--muted); flex: 0 0 auto;
+}
+.mirror-dot[data-state="connecting"] { background: var(--yellow); }
+.mirror-dot[data-state="connected"] { background: var(--green); }
+.mirror-dot[data-state="error"] { background: var(--red); }
+.mirror-status-text { font-size: 0.8rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.mirror-video {
+  flex: 1 1 auto;
+  min-height: 0;
+  background: #000;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  outline: none;
+  position: relative;
+}
+.mirror-video:focus-within { border-color: var(--accent); }
+.mirror-canvas {
+  max-width: 100%;
+  max-height: 100%;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  touch-action: none;
+  display: block;
+}
+.mirror-placeholder { color: var(--muted); font-size: 0.85rem; padding: 20px; text-align: center; }
+
+.mirror-toolbar { display: flex; gap: 6px; flex-wrap: wrap; justify-content: space-between; }
+.mirror-tool {
+  flex: 1;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 4px;
+  font-size: 1rem;
+  line-height: 1;
+}
+.mirror-tool:hover { border-color: var(--accent); }
+
+.mirror-bottom { display: flex; gap: 8px; }
+.mirror-text-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+.mirror-text-input:focus { outline: none; border-color: var(--accent); }
