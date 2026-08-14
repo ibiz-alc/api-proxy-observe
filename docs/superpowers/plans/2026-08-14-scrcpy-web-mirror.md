@@ -17,13 +17,36 @@
 
 ---
 
-## สถานะ (update ทุกครั้งที่จบ task)
+## สถานะ (update ทุกครั้งที่จบ task) — พักงาน 2026-08-14 ~08:25 (เจ้านายไป demo)
 
-- [x] Task 0: Scaffolding — deps ติดตั้งแล้ว, jar vendored ที่ `vendor/scrcpy-server-v3.3.3.bin`, baseline server boot :3100 ผ่าน
-- [ ] Task 1: Server mirror module (`mirror.js` + wiring ใน `server.js`)
-- [ ] Task 2: Client mirror panel (`client-src/mirror-panel.js` → `public/mirror.bundle.js` + wiring `public/index.html`)
-- [ ] Task 3: Integration + E2E (view บน device จริง แบบ read-only, input ครบชุดบน emulator)
-- [ ] Task 4: code-review → แก้ finding ที่คุ้ม → commit
+- [x] Task 0: Scaffolding — deps ติดตั้งแล้ว, jar vendored ที่ `vendor/scrcpy-server-v3.3.3.bin`, baseline server boot :3100 ผ่าน (commit `bba7769`)
+- [x] Task 1: Server mirror module — เสร็จ + smoke PASS บนเครื่องจริง (commit `6fe8d83`)
+- [x] Task 2: Client mirror panel — เสร็จ (commit `917c22e`)
+- [~] Task 3: Integration + E2E — **ค้างอยู่ตรงนี้** ผ่าน 11/14 เช็ค · ดูรายละเอียด "สถานะ E2E ล่าสุด" ด้านล่าง
+- [ ] Task 4: code-review → แก้ finding ที่คุ้ม → commit สุดท้าย (ลบ MIRROR_DEBUG log ก่อน หรือเก็บไว้ก็ได้ถ้า review บอกว่าโอเค)
+
+## สถานะ E2E ล่าสุด (สำคัญ — อ่านก่อนทำต่อ)
+
+Test assets ย้ายมาอยู่ `scripts/dev-tests/` แล้ว (mirror-e2e.js, mirror-probe.js, mirror-tap-test.js)
+รัน: dev server `env -u NODE_OPTIONS PORT=3100 PROXY_PORT=9199 MIRROR_DEBUG=1 node server.js` + emulator Pixel_4_XL (`-no-snapshot`) + `WORKTREE=<worktree> NODE_OPTIONS= node scripts/dev-tests/mirror-e2e.js`
+
+**ยืนยันแล้วว่าทำงาน (มีหลักฐาน screenshot/log):**
+- ภาพสด, เลือก device, connect/disconnect (ไม่มี process ค้าง), ซ่อน/แสดง, scroll, พิมพ์ไทย+ASCII ผ่าน clipboard, back, rotate (toggle 0↔1), auto-reconnect (PID เปลี่ยน), ไม่มี pageerror
+- `scripts/dev-tests/mirror-probe.js` (raw WS ตรงเข้า server) **ผ่านทุกคำสั่งครบ** — server-side พิสูจน์แล้วว่าถูก
+
+**บั๊กที่แก้ไปแล้วรอบ integration (อยู่ใน mirror.js + bundle แล้ว):**
+1. text ทุกแบบ → clipboard+paste (`sequence: 0n` เสมอ! ถ้า >0 lib จะรอ ack ค้างตลอดกาล) — injectText โดน keyboard layout แปลงอักษร
+2. `clipboardAutosync` ต้องเป็น true (ปิดแล้ว setClipboard throw ทันที) + ต้อง **drain `options.clipboard` stream** ไม่งั้น backpressure อุดตัน control ทั้งเส้น (อาการ: back/rotate ตายเงียบหลังส่ง text หลายครั้ง)
+3. rotate: ห้ามใช้ `controller.rotateDevice()` (โดน sensor ดีดกลับ) → ใช้ `settings put system user_rotation` toggle 0↔1 ผ่าน `adb.subprocess.noneProtocol.spawnWaitText` และห้ามอ่านค่าจาก `dumpsys|grep` (Broken pipe เป็นพักๆ ทำค่าว่าง) → อ่านจาก `settings get system user_rotation`
+4. client พิมพ์บน canvas → debounce 150ms รวมเป็นก้อนเดียว (paste ต่อตัวอักษร race กัน)
+
+**ปริศนาที่ยังไขไม่จบ (จุดที่ค้าง):** 2 รอบสุดท้ายของ mirror-e2e.js (ผ่าน **browser**) — tap ไม่เปิดหน้า search + rotate ติดบ้างไม่ติดบ้าง + pkill scrcpy บน emulator แล้ว session ไม่ drop ทั้งที่:
+- server debug log เห็น `<< touch` → `ok touch` ครบทุก message ไม่มี error
+- แต่ probe (raw WS, โค้ด server เดียวกัน คำสั่งเดียวกัน) ทำงานบน emulator ครบทุกอย่าง
+- canvas โชว์ภาพ emulator ถูกเครื่อง (เช็ค screenshot แล้ว) และ selector `{serial}` เป็น type ที่ถูกของ `createTransport`
+- **สงสัย**: session ผ่าน browser อาจไปเกาะ device ผิดตัว (เครื่องจริง RZCXB0AP8DZ?) — หลักฐานแย้งกันอยู่ ยังสรุปไม่ได้ · หรือมี 2 scrcpy process ซ้อน
+- **เครื่องมือที่เตรียมไว้แล้ว**: `MIRROR_DEBUG=1` ตอนนี้ log พิกัด touch + video size ต่อ message (`mirror.js` case 'touch') และมี `scripts/dev-tests/mirror-tap-test.js` (mini-test: connect → tap → เช็ค focus) **ยังไม่เคยรัน** — รันตัวนี้เป็นอย่างแรกเมื่อกลับมา แล้วเทียบ log `video=WxH` กับขนาดจริง (emulator 1440x3040 → ~488x1024 · SM A556E 1080x2340 → ~472x1024) จะรู้ทันทีว่า session เกาะเครื่องไหน
+- ระวัง: ระหว่างทดสอบตอนท้ายๆ **เครื่องจริงเป็นเครื่อง demo — ห้าม inject touch ใส่** จนกว่าจะพิสูจน์ได้ว่า session แยกเครื่องถูก
 
 ---
 

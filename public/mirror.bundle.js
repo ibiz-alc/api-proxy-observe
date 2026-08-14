@@ -4203,7 +4203,13 @@
           return;
         }
         if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-          this.send({ type: "text", text: e.key });
+          this._typeBuffer = (this._typeBuffer || "") + e.key;
+          clearTimeout(this._typeTimer);
+          this._typeTimer = setTimeout(() => {
+            const text = this._typeBuffer;
+            this._typeBuffer = "";
+            if (text) this.send({ type: "text", text });
+          }, 150);
           e.preventDefault();
         }
       });

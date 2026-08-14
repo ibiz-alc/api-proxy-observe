@@ -439,9 +439,17 @@ class MirrorPanel {
         e.preventDefault();
         return;
       }
-      // ตัวอักษรเดี่ยวที่พิมพ์ได้ (ไม่กด ctrl/meta) → ส่งเป็น text
+      // ตัวอักษรเดี่ยวที่พิมพ์ได้ (ไม่กด ctrl/meta) → รวมเป็นก้อนก่อนส่ง (debounce 150ms)
+      // ห้ามส่งทีละตัว: ฝั่ง server ใช้ clipboard paste ต่อ 1 ข้อความ ถ้ายิงถี่ๆ
+      // paste จะ race กันเองบนเครื่อง ตัวอักษรหาย/ซ้ำ (เจอจริงตอน E2E: "wifi" กลายเป็น "wii")
       if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        this.send({ type: 'text', text: e.key });
+        this._typeBuffer = (this._typeBuffer || '') + e.key;
+        clearTimeout(this._typeTimer);
+        this._typeTimer = setTimeout(() => {
+          const text = this._typeBuffer;
+          this._typeBuffer = '';
+          if (text) this.send({ type: 'text', text });
+        }, 150);
         e.preventDefault();
       }
     });

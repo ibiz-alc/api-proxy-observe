@@ -113,7 +113,6 @@ async function handleConnection(ws) {
   let disposeSizeChanged = null; // ตัวถอด listener sizeChanged
   let curWidth = 0;         // ขนาดวิดีโอปัจจุบัน (ใช้สเกล touch/scroll)
   let curHeight = 0;
-  let clipboardSeq = 0n;    // sequence สำหรับ setClipboard (ต้องเพิ่มขึ้นเรื่อยๆ)
   let libs = null;
 
   // ส่ง JSON ให้ client (เงียบถ้า WS ปิดไปแล้ว)
@@ -151,7 +150,10 @@ async function handleConnection(ws) {
       return;
     }
     // ทุก handler ห่อ catch เพื่อไม่ให้ rejection หลุด
-    onMessage(msg).catch((err) => {
+    if (process.env.MIRROR_DEBUG) console.log('[mirror] <<', msg.type);
+    onMessage(msg).then(() => {
+      if (process.env.MIRROR_DEBUG) console.log('[mirror] ok', msg.type);
+    }).catch((err) => {
       console.error('[mirror] onMessage error:', err && err.message);
       sendJson({ type: 'error', message: String(err && err.message || err) });
     });
@@ -198,6 +200,9 @@ async function handleConnection(ws) {
       case 'touch': {
         const action = msg.action === 'down' ? A.Down : msg.action === 'up' ? A.Up : A.Move;
         const pressed = msg.action !== 'up';
+        if (process.env.MIRROR_DEBUG) {
+          console.log(`[mirror] touch ${msg.action} px=${Math.round((msg.x ?? 0) * curWidth)},${Math.round((msg.y ?? 0) * curHeight)} video=${curWidth}x${curHeight}`);
+        }
         await controller.injectTouch({
           action,
           pointerId: BigInt(msg.pointerId ?? 0),
@@ -234,14 +239,14 @@ async function handleConnection(ws) {
       }
       case 'text': {
         const text = String(msg.text ?? '');
-        if (/^[\x00-\x7F]*$/.test(text)) {
-          // ascii ล้วน → พิมพ์ตรงๆ
-          await controller.injectText(text);
-        } else {
-          // มี unicode → ผ่าน clipboard แล้วสั่ง paste (sequence ต้องเพิ่มขึ้น)
-          clipboardSeq += 1n;
-          await controller.setClipboard({ sequence: clipboardSeq, content: text, paste: true });
-        }
+        if (!text) break;
+        // ส่งทุกข้อความผ่าน clipboard+paste เสมอ
+        // เหตุผล: injectText ของ scrcpy แปลงตัวอักษรเป็น keycode แล้วโดน keyboard layout/IME
+        // ของเครื่องตีความ → ตัวอักษรหาย/กลายเป็นตัวอื่น (เจอจริงตอน E2E: "wifi" เหลือ "wi"
+        // และมีตัวไทยแปลกโผล่) — clipboard paste เป็น atomic ไม่ขึ้นกับ layout
+        // sequence ต้องเป็น 0 เสมอ = ไม่รอ ack (ถ้า >0 lib จะ await ack จากเครื่อง
+        // ซึ่งไม่มีวันมาเพราะเราปิด clipboardAutosync → ค้างตลอดกาล)
+        await controller.setClipboard({ sequence: 0n, content: text, paste: true });
         break;
       }
       case 'back': {
@@ -253,7 +258,17 @@ async function handleConnection(ws) {
       case 'home': { await tapKey(3); break; }       // KEYCODE_HOME
       case 'appswitch': { await tapKey(187); break; } // KEYCODE_APP_SWITCH
       case 'power': { await tapKey(26); break; }      // KEYCODE_POWER
-      case 'rotate': { await controller.rotateDevice(); break; }
+      case 'rotate': {
+        // ไม่ใช้ controller.rotateDevice() เพราะบนเครื่องที่ auto-rotate เปิดอยู่
+        // sensor (emulator รายงาน portrait ตลอด) จะดีดกลับทันที → หมุนไม่ติด
+        // ใช้ user_rotation ตรงๆ แทน (ปิด auto-rotate ก่อน) — ทดสอบแล้วได้ผลชัวร์
+        // toggle 0↔1 (portrait↔landscape) — ไม่วนครบ 4 ทิศเพราะหลายเครื่องปฏิเสธ 180° (user_rotation 2 เป็น no-op)
+        // อ่านจาก settings ตรงๆ ห้ามใช้ dumpsys|grep เพราะเจอ Broken pipe เป็นพักๆ ทำให้ค่าว่าง → toggle ค้าง
+        await adb.subprocess.noneProtocol.spawnWaitText(
+          "settings put system accelerometer_rotation 0; r=$(settings get system user_rotation); settings put system user_rotation $(( r == 1 ? 0 : 1 ))",
+        );
+        break;
+      }
       case 'keyframe': { await controller.resetVideo(); break; }
       default: {
         sendJson({ type: 'error', message: 'ไม่รู้จัก type: ' + msg.type });
@@ -314,6 +329,10 @@ async function handleConnection(ws) {
         videoBitRate,
         maxFps,
         scid: ScrcpyInstanceId.random(),
+        // หมายเหตุ: clipboardAutosync ต้องเป็น true (ค่า default) — ถ้าปิด lib จะไม่สร้าง
+        // clipboard handler แล้ว setClipboard พังทันที ("reading 'serializeSetClipboard...'")
+        // ผลข้างเคียงคือเครื่องส่ง clipboard message กลับมาทาง control socket
+        // → ต้อง drain options.clipboard เสมอ (ดูหลัง start ด้านล่าง) กัน backpressure อุดตัน
       },
       { version: SERVER_VERSION },
     );
@@ -323,6 +342,19 @@ async function handleConnection(ws) {
     if (closed) { await cleanup('closed ระหว่าง start'); return; }
 
     controller = client.controller;
+
+    // drain clipboard stream ทิ้งเสมอ — ทุกครั้งที่ paste เครื่องจะ broadcast clipboard
+    // กลับมาทาง control socket ถ้าไม่มีใครอ่าน queue เต็มแล้ว device message parser
+    // อุดตันทั้งเส้น (ack/uhid ตามไปด้วย) — เจอจริงตอน E2E: control ตายเงียบหลังส่ง text หลายครั้ง
+    if (options.clipboard) {
+      (async () => {
+        const clipReader = options.clipboard.getReader();
+        for (;;) {
+          const { done } = await clipReader.read();
+          if (done) break;
+        }
+      })().catch(() => { /* จบ/พังพร้อม session — ไม่ต้องทำอะไร */ });
+    }
 
     // เมื่อ scrcpy จบเอง (process ตาย) → แจ้ง stopped + ปิด
     client.exited
