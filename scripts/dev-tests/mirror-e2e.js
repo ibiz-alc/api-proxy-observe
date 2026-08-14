@@ -7,7 +7,7 @@ const puppeteer = require(path.join(process.env.WORKTREE, 'node_modules', 'puppe
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const URL = 'http://localhost:3100';
 const SERIAL = 'emulator-5554';
-const OUT = __dirname;
+const OUT = process.cwd(); // เขียน screenshot ลง dir ที่รัน (อย่ารันจากใน repo — ภาพจะเข้า git)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const adb = (...args) => execFileSync('adb', ['-s', SERIAL, ...args], { encoding: 'utf8', timeout: 15000 });
 
@@ -23,6 +23,21 @@ const step = (name, ok, detail = '') => {
   try { adb('shell', 'am', 'force-stop', 'com.google.android.settings.intelligence'); } catch {}
   adb('shell', 'am', 'start', '-a', 'android.settings.SETTINGS');
   await sleep(3000);
+
+  // warm up search UI หนึ่งรอบผ่าน adb เพียวๆ — cold start ของ intelligence app ช้ามาก
+  // (วัดจริง 15-30s+ หลัง boot ใหม่) ถ้าไม่ warm รอบจริงผ่าน mirror จะ timeout แบบ false negative
+  const focusIsSearch = () => {
+    const focus = adb('shell', 'dumpsys', 'window').split('\n').find((l) => l.includes('mCurrentFocus')) || '';
+    return /SearchActivity/.test(focus);
+  };
+  adb('shell', 'input', 'tap', '720', '240');
+  {
+    const t = Date.now();
+    while (Date.now() - t < 60000 && !focusIsSearch()) await sleep(1000);
+    if (!focusIsSearch()) { console.log('WARMUP FAIL: search ไม่เปิดใน 60s — emulator อาจป่วย'); process.exit(2); }
+  }
+  // เปิด search ค้างไว้เลย — ใช้เป็นสนามทดสอบพิมพ์ (ไม่ต้องพึ่ง cold start ที่ช้า 30-60s)
+  console.log('warmup: search UI เปิดค้างไว้แล้ว');
 
   const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ['--window-size=1600,1000'] });
   const page = await browser.newPage();
@@ -55,41 +70,62 @@ const step = (name, ok, detail = '') => {
   step('canvas มีขนาดจริง', canvasBox.w > 100 && canvasBox.h > 200, JSON.stringify(canvasBox));
   await page.screenshot({ path: path.join(OUT, 'shot-1-connected.png') });
 
-  // 2) แตะ search bar ของ Settings (0.5, 0.078) → คีย์บอร์ดต้องโผล่บนเครื่อง
+  // helpers
   const tap = async (nx, ny) => {
     const x = canvasBox.x + canvasBox.w * nx, y = canvasBox.y + canvasBox.h * ny;
     await page.mouse.move(x, y); await page.mouse.down(); await sleep(60); await page.mouse.up();
   };
-  await tap(0.5, 0.078);
-  await sleep(2000);
-  // ดูเฉพาะ mCurrentFocus — grep ทั้ง dumpsys จะเจอ SearchActivity ค้างใน recent tasks (false positive)
-  const onSearch = () => {
-    const focus = adb('shell', 'dumpsys', 'window').split('\n').find((l) => l.includes('mCurrentFocus')) || '';
-    return /SearchActivity/.test(focus);
+  // ใช้ mFocusedApp เป็นหลัก (mCurrentFocus บน Android 17 เป็น null บ่อยตอน transition/หลัง uiautomator)
+  // — grep ทั้ง dumpsys ไม่ได้ จะเจอ activity ค้างใน recent tasks (false positive)
+  const focusLine = () => {
+    const lines = adb('shell', 'dumpsys', 'window').split('\n');
+    return lines.find((l) => l.includes('mFocusedApp')) || lines.find((l) => l.includes('mCurrentFocus')) || '';
   };
-  step('แตะ search bar แล้วหน้า search เปิด (tap ทำงานจริง)', onSearch());
+  const onSearch = () => /SearchActivity/.test(focusLine());
+  const waitFor = async (fn, ms) => { const t = Date.now(); while (Date.now() - t < ms) { if (fn()) return true; await sleep(500); } return fn(); };
+  // อ่านข้อความจริงบนจอด้วย uiautomator dump (แทนการเดาจาก screenshot)
+  const uiDump = () => {
+    try {
+      adb('shell', 'uiautomator', 'dump', '/sdcard/ui-e2e.xml');
+      return adb('shell', 'cat', '/sdcard/ui-e2e.xml');
+    } catch { return ''; }
+  };
 
-  // 3) พิมพ์ ASCII ผ่าน keyboard บน canvas
-  await page.click('.mirror-video'); // focus container
+  // 2) พิมพ์ ASCII ผ่าน keyboard บน canvas — ลงช่อง search ที่ warmup เปิดค้างไว้
+  // focus ด้วย JS ตรงๆ — ห้ามใช้ page.click เพราะ click = pointer event = tap กลางจอเครื่องจริงๆ!
+  await page.$eval('.mirror-video', (el) => el.focus());
   await page.keyboard.type('wifi', { delay: 120 });
-  await sleep(1500);
+  await sleep(2500);
+  step('พิมพ์ ASCII "wifi" ผ่าน canvas เข้าช่อง search', uiDump().includes('wifi'));
   execFileSync('bash', ['-c', `adb -s ${SERIAL} exec-out screencap -p > ${path.join(OUT, 'emu-2-ascii.png')}`]);
-  console.log('(ตรวจภาพ emu-2-ascii.png: ต้องเห็น "wifi" ในช่อง search)');
 
-  // 4) ลบข้อความ (Backspace x4) แล้วส่งภาษาไทยผ่านช่องข้อความ
-  for (let i = 0; i < 4; i++) { await page.keyboard.press('Backspace'); await sleep(150); }
+  // 3) ลบข้อความ (Backspace x4) แล้วส่งภาษาไทยผ่านช่องข้อความ
+  for (let i = 0; i < 4; i++) { await page.keyboard.press('Backspace'); await sleep(250); }
   await page.$eval('.mirror-text-input', (inp) => { inp.value = 'สวัสดีครับ'; });
   await page.$$eval('.mirror-btn', (btns) => btns.find((b) => b.textContent === 'ส่งข้อความ').click());
   await sleep(2500);
+  const dumpThai = uiDump();
+  step('Backspace ลบ "wifi" + ส่งภาษาไทย "สวัสดีครับ"', dumpThai.includes('สวัสดีครับ') && !dumpThai.includes('>wifi<'));
   execFileSync('bash', ['-c', `adb -s ${SERIAL} exec-out screencap -p > ${path.join(OUT, 'emu-3-thai.png')}`]);
-  console.log('(ตรวจภาพ emu-3-thai.png: ต้องเห็น "สวัสดีครับ" ในช่อง search)');
 
-  // 5) ปุ่ม Back → คีย์บอร์ด/หน้า search ปิด
+  // หมายเหตุ: ห้าม assert ด้วย mCurrentFocus/mFocusedApp — หลังรัน uiautomator dump
+  // สองค่านี้ค้างเป็น null ยาว (จนกว่าจะมี interaction ใหม่) → ใช้ text บนจอจาก uiDump แทน
+  // marker: หน้า Settings หลักมี "Connected devices" · หน้า Network dashboard มี "Hotspot"
+
+  // 4) ปุ่ม Back → ออกจากหน้า search กลับ Settings หลัก (search อุ่นแล้ว ตอบเร็ว)
   const tools = await page.$$('.mirror-tool');
-  // กด back ไปเรื่อยๆ จนหลุดจากหน้า search (คีย์บอร์ด/ข้อความค้างอาจกินไป 1-2 ครั้ง) สูงสุด 4 ครั้ง
+  const onHomepage = () => uiDump().includes('Connected devices');
   let backPresses = 0;
-  while (onSearch() && backPresses < 4) { await tools[0].click(); backPresses++; await sleep(1500); }
-  step('ปุ่ม Back ทำงาน (ออกจากหน้า search แล้ว)', !onSearch(), `กด ${backPresses} ครั้ง`);
+  while (!onHomepage() && backPresses < 4) { await tools[0].click(); backPresses++; await sleep(2000); }
+  step('ปุ่ม Back ทำงาน (ออกจาก search กลับหน้าหลัก)', onHomepage(), `กด ${backPresses} ครั้ง`);
+
+  // 5) tap test: แตะเมนู "Network & internet" (แถวบนของลิสต์ Settings ~y 0.28)
+  // — อยู่ในโปรเซส Settings เอง เปิดไว ไม่เจอปัญหา cold start แบบ search app
+  await tap(0.5, 0.28);
+  const tapOk = await waitFor(() => uiDump().includes('Hotspot'), 15000);
+  step('แตะเมนู Network & internet แล้วหน้าเปลี่ยน (tap ทำงานจริง)', tapOk);
+  await tools[0].click(); // back กลับหน้าหลัก Settings
+  await waitFor(onHomepage, 10000);
 
   // 6) scroll ด้วย wheel บนกลาง canvas
   execFileSync('bash', ['-c', `adb -s ${SERIAL} exec-out screencap -p > ${path.join(OUT, 'emu-4a-before-scroll.png')}`]);
@@ -99,16 +135,16 @@ const step = (name, ok, detail = '') => {
   execFileSync('bash', ['-c', `adb -s ${SERIAL} exec-out screencap -p > ${path.join(OUT, 'emu-4b-after-scroll.png')}`]);
   console.log('(ตรวจภาพ 4a/4b: รายการ Settings ต้องเลื่อนลง)');
 
-  // 7) หมุนจอ → canvas เปลี่ยน aspect + rotation บนเครื่องเปลี่ยน
+  // 7) หมุนจอ → canvas เปลี่ยน aspect + rotation บนเครื่องเปลี่ยน (poll — meta อาจมาช้ากว่า 3s)
+  const canvasBoxNow = () => page.$eval('.mirror-canvas', (c) => { const r = c.getBoundingClientRect(); return { w: r.width, h: r.height }; });
+  const waitCanvas = async (pred, ms) => { const t = Date.now(); let b; while (Date.now() - t < ms) { b = await canvasBoxNow(); if (pred(b)) return b; await sleep(500); } return canvasBoxNow(); };
   await tools[3].click(); // rotate
-  await sleep(3000);
-  const rot1 = (adb('shell', 'dumpsys', 'window').match(/mCurrentRotation=\S+|rotation=\d/) || ['?'])[0];
-  const box2 = await page.$eval('.mirror-canvas', (c) => { const r = c.getBoundingClientRect(); return { w: r.width, h: r.height }; });
-  step('หมุนจอ: canvas เป็นแนวนอน', box2.w > box2.h, `rot=${rot1} canvas=${JSON.stringify(box2)}`);
+  const box2 = await waitCanvas((b) => b.w > b.h, 15000);
+  step('หมุนจอ: canvas เป็นแนวนอน', box2.w > box2.h, JSON.stringify(box2));
   await page.screenshot({ path: path.join(OUT, 'shot-2-landscape.png') });
+  await sleep(3000); // ให้ rotation แรก settle (activity recreate บนแอปช้ากินเวลา)
   await tools[3].click(); // หมุนกลับ
-  await sleep(3000);
-  const box3 = await page.$eval('.mirror-canvas', (c) => { const r = c.getBoundingClientRect(); return { w: r.width, h: r.height }; });
+  const box3 = await waitCanvas((b) => b.h > b.w, 25000);
   step('หมุนกลับ: canvas เป็นแนวตั้ง', box3.h > box3.w, JSON.stringify(box3));
 
   // 8) resilience: ฆ่า scrcpy บนเครื่อง → panel ต้อง auto-reconnect เอง (session ใหม่ = PID ใหม่)

@@ -263,9 +263,19 @@ async function handleConnection(ws) {
         // sensor (emulator รายงาน portrait ตลอด) จะดีดกลับทันที → หมุนไม่ติด
         // ใช้ user_rotation ตรงๆ แทน (ปิด auto-rotate ก่อน) — ทดสอบแล้วได้ผลชัวร์
         // toggle 0↔1 (portrait↔landscape) — ไม่วนครบ 4 ทิศเพราะหลายเครื่องปฏิเสธ 180° (user_rotation 2 เป็น no-op)
-        // อ่านจาก settings ตรงๆ ห้ามใช้ dumpsys|grep เพราะเจอ Broken pipe เป็นพักๆ ทำให้ค่าว่าง → toggle ค้าง
+        // วิธีอ่าน rotation ปัจจุบันเป็นแบบ hybrid (ทุกทางเลือกอื่นพังมาแล้วจริงๆ ตอน E2E):
+        // - ถ้า accelerometer_rotation=0 (เราคุมเองอยู่) → เชื่อ `settings get user_rotation`
+        //   (authoritative, ห้ามใช้ dumpsys — ช่วงใกล้การหมุน ค่าใน dumpsys ไม่นิ่ง/มีบรรทัดค้าง)
+        // - ถ้า accelerometer_rotation=1 (sensor คุม ครั้งแรกที่กด) → user_rotation เชื่อไม่ได้
+        //   ต้องอ่านจอจริงจาก dumpsys: awk เอา match แรก แบบอ่านจนจบ stream
+        //   (ห้าม grep -m1/head — ปิด pipe ก่อนจบ → Broken pipe → ค่าว่างเป็นพักๆ
+        //    และห้ามเอา match สุดท้าย — เป็นค่าค้างของ window อื่น เป็น 0 เสมอ)
         await adb.subprocess.noneProtocol.spawnWaitText(
-          "settings put system accelerometer_rotation 0; r=$(settings get system user_rotation); settings put system user_rotation $(( r == 1 ? 0 : 1 ))",
+          "acc=$(settings get system accelerometer_rotation); "
+          + "if [ \"$acc\" = \"0\" ]; then r=$(settings get system user_rotation); "
+          + "else r=$(dumpsys window | awk '!d && match($0,/mRotation=[0-9]/){v=substr($0,RSTART+10,1); d=1} END{print v}'); fi; "
+          + "settings put system accelerometer_rotation 0; "
+          + "settings put system user_rotation $(( r == 1 ? 0 : 1 ))",
         );
         break;
       }
@@ -401,15 +411,24 @@ async function handleConnection(ws) {
   // อ่าน packet วิดีโอทีละก้อน → หุ้ม header 12 ไบต์ → ส่งเป็น binary
   async function pumpVideo(stream) {
     reader = stream.getReader();
+    let ended = false; // stream จบเอง = scrcpy ตาย (โดน kill / เครื่อง reboot)
     try {
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) { ended = true; break; }
         if (closed || ws.readyState !== WebSocket.OPEN) break;
         sendPacket(value);
       }
     } finally {
       try { reader.releaseLock(); } catch {}
+    }
+    // สำคัญ: stream จบแบบ done ต้องปิด session ด้วย — ไม่งั้นจะเป็น zombie
+    // (WS เปิดค้าง client เห็นเฟรมสุดท้าย + status "เชื่อมต่อแล้ว" ตลอดกาล ไม่มี auto-reconnect)
+    if (ended && !closed) {
+      console.log('[mirror] video stream จบ (scrcpy ตาย?) — ปิด session ให้ client reconnect');
+      sendJson({ type: 'stopped', reason: 'สตรีมวิดีโอจบ (scrcpy หยุดทำงาน)' });
+      await cleanup('video ended');
+      try { ws.close(); } catch {}
     }
   }
 

@@ -40,13 +40,11 @@ Test assets ย้ายมาอยู่ `scripts/dev-tests/` แล้ว (mi
 3. rotate: ห้ามใช้ `controller.rotateDevice()` (โดน sensor ดีดกลับ) → ใช้ `settings put system user_rotation` toggle 0↔1 ผ่าน `adb.subprocess.noneProtocol.spawnWaitText` และห้ามอ่านค่าจาก `dumpsys|grep` (Broken pipe เป็นพักๆ ทำค่าว่าง) → อ่านจาก `settings get system user_rotation`
 4. client พิมพ์บน canvas → debounce 150ms รวมเป็นก้อนเดียว (paste ต่อตัวอักษร race กัน)
 
-**ปริศนาที่ยังไขไม่จบ (จุดที่ค้าง):** 2 รอบสุดท้ายของ mirror-e2e.js (ผ่าน **browser**) — tap ไม่เปิดหน้า search + rotate ติดบ้างไม่ติดบ้าง + pkill scrcpy บน emulator แล้ว session ไม่ drop ทั้งที่:
-- server debug log เห็น `<< touch` → `ok touch` ครบทุก message ไม่มี error
-- แต่ probe (raw WS, โค้ด server เดียวกัน คำสั่งเดียวกัน) ทำงานบน emulator ครบทุกอย่าง
-- canvas โชว์ภาพ emulator ถูกเครื่อง (เช็ค screenshot แล้ว) และ selector `{serial}` เป็น type ที่ถูกของ `createTransport`
-- **สงสัย**: session ผ่าน browser อาจไปเกาะ device ผิดตัว (เครื่องจริง RZCXB0AP8DZ?) — หลักฐานแย้งกันอยู่ ยังสรุปไม่ได้ · หรือมี 2 scrcpy process ซ้อน
-- **เครื่องมือที่เตรียมไว้แล้ว**: `MIRROR_DEBUG=1` ตอนนี้ log พิกัด touch + video size ต่อ message (`mirror.js` case 'touch') และมี `scripts/dev-tests/mirror-tap-test.js` (mini-test: connect → tap → เช็ค focus) **ยังไม่เคยรัน** — รันตัวนี้เป็นอย่างแรกเมื่อกลับมา แล้วเทียบ log `video=WxH` กับขนาดจริง (emulator 1440x3040 → ~488x1024 · SM A556E 1080x2340 → ~472x1024) จะรู้ทันทีว่า session เกาะเครื่องไหน
-- ระวัง: ระหว่างทดสอบตอนท้ายๆ **เครื่องจริงเป็นเครื่อง demo — ห้าม inject touch ใส่** จนกว่าจะพิสูจน์ได้ว่า session แยกเครื่องถูก
+**ปริศนาไขแล้ว (2026-08-14 บ่าย):** ไม่ใช่บั๊กแยกเครื่อง — ยืนยันด้วย `MIRROR_DEBUG` ว่า touch ทุกอันไป emulator ถูกเครื่องถูกพิกัด (`video=488x1024`) สาเหตุจริงมี 3 ชั้น:
+1. **บั๊กจริงตัวที่ 5 — zombie session**: `pumpVideo` เจอ stream `done` (scrcpy ตาย/โดน pkill) แล้ว break เงียบๆ ไม่ cleanup/ปิด WS → client ค้าง "เชื่อมต่อแล้ว" ตลอดกาล ไม่ reconnect → **แก้แล้ว** (ended → ส่ง stopped + cleanup + close)
+2. **rotate toggle อิงค่า setting ที่ค้างไม่ตรงจอจริง** → แก้เป็นอ่าน `mRotation` จริงผ่าน awk แบบอ่านจนจบ stream (ห้าม grep -m1/head — Broken pipe ให้ค่าว่างเป็นพักๆ)
+3. **เครื่อง Mac โหลดสูงมาก** (Kotlin LSP ของ VSCode ค้างกิน 4 cores มา 21 ชม. — kill แล้ว) ทำให้ emulator อืดผิดปกติ: เปิดหน้า search ใช้เวลา 10-30 วิ → assertion ที่รอ 2-20 วิ กลายเป็น false negative ทั้งที่ feature ทำงาน (มีหลักฐาน screencap: ทั้ง flow — tap เปิด search, พิมพ์ wifi, ลบ, paste ไทย — สำเร็จครบแค่ช้า) · ส่วนที่ "probe ผ่านตลอด" เพราะ probe ไม่ assert เวลา
+- e2e ปรับให้ทนเครื่องอืดแล้ว: tap retry + poll ยาว, rotate poll 15s
 
 ---
 
