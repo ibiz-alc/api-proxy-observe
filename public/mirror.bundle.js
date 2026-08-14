@@ -3860,7 +3860,7 @@
       });
       this.railRunningBtn.addEventListener("click", () => this.togglePanel("running"));
       this.railDevicesBtn.addEventListener("click", () => this.togglePanel("devices"));
-      const rail = el("div", { class: "mirror-rail" }, [this.railRunningBtn, this.railDevicesBtn]);
+      const rail = el("div", { class: "mirror-rail" }, [this.railDevicesBtn, this.railRunningBtn]);
       this.refreshBtn = el("button", { class: "mirror-icon-btn", title: "\u0E23\u0E35\u0E40\u0E1F\u0E23\u0E0A\u0E23\u0E32\u0E22\u0E0A\u0E37\u0E48\u0E2D\u0E2D\u0E38\u0E1B\u0E01\u0E23\u0E13\u0E4C", text: "\u27F2" });
       this.refreshBtn.addEventListener("click", () => this.refreshDevices());
       this.deviceList = el("div", { class: "mirror-device-list" });
@@ -3917,7 +3917,6 @@
       ]);
       this.resizer = el("div", { class: "mirror-resizer", title: "\u0E25\u0E32\u0E01\u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E1B\u0E23\u0E31\u0E1A\u0E04\u0E27\u0E32\u0E21\u0E01\u0E27\u0E49\u0E32\u0E07" });
       this._bindResizer();
-      this.devicesView.classList.add("mirror-view-top");
       this.drawer = el("div", { class: "mirror-drawer", id: "mirrorDrawer" }, [
         this.resizer,
         this.devicesView,
@@ -4308,13 +4307,15 @@
     }
     // ---------- แสดง/ซ่อน tool window (แบบ Android Studio) ----------
     // เปิด = dock ด้านขวาข้าง rail ดันเนื้อหาหลัก (body.mirror-open ใน CSS) ไม่ทับจอ
-    // สองส่วนแสดงพร้อมกัน (Device Manager บน, Running Devices ล่าง) — rail icon ไหนกดก็เปิดแผงเดียวกัน
+    // แต่ละ icon มี view ของตัวเอง แยกกันชัดเจน: 🗂️ = รายการอุปกรณ์ / 📱 = จอ mirror
     // ปิด = กด icon เดิมซ้ำ · session mirror ยังทำงานต่อเสมอ (ปิดแค่หน้าต่าง)
     showPanel(view) {
       this.activeView = view;
       this.drawer.style.display = "flex";
-      this.railDevicesBtn.classList.add("active");
-      this.railRunningBtn.classList.add("active");
+      this.devicesView.style.display = view === "devices" ? "flex" : "none";
+      this.runningView.style.display = view === "running" ? "flex" : "none";
+      this.railDevicesBtn.classList.toggle("active", view === "devices");
+      this.railRunningBtn.classList.toggle("active", view === "running");
       document.body.classList.add("mirror-open");
       this.visible = true;
       this.refreshDevices();
@@ -4333,7 +4334,7 @@
       }
     }
     togglePanel(view) {
-      if (this.visible) this.closePanel();
+      if (this.activeView === view) this.closePanel();
       else this.showPanel(view);
     }
     // ---------- ลากขยายความกว้าง panel ----------

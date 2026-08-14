@@ -1524,9 +1524,8 @@ button.mp-meta-btn:hover { color: var(--text); }
 body.has-mirror-rail { padding-right: 44px; transition: padding-right 0.15s ease; }
 body.mirror-open { padding-right: calc(44px + var(--mirror-w)); transition: none; }
 
-/* tool window 2 ส่วนเรียงลงมาในแผงเดียว: Device Manager (บน คงขนาด) + Running Devices (ล่าง ยืด) */
+/* tool window แต่ละ view (Device Manager / Running Devices) — สลับกันแสดงตาม icon ที่กด */
 .mirror-view { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
-.mirror-view-top { flex: 0 0 auto; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
 
 /* ตัวจับลากขยายความกว้าง — แถบบางๆ ขอบซ้ายของ drawer */
 .mirror-resizer {

@@ -188,7 +188,9 @@ const step = (name, ok, detail = '') => {
   const shown = await page.$eval('#mirrorDrawer', (d) => getComputedStyle(d).display !== 'none');
   step('ปิด/เปิดจาก rail โดยยังเชื่อมต่ออยู่', hidden && shown && (await status()) === 'เชื่อมต่อแล้ว', `hidden=${hidden} shown=${shown} status=${await status()}`);
 
-  // 10) disconnect จากปุ่ม ⏹ ในแถว device (Device Manager อยู่ส่วนบนของแผงเดียวกัน เห็นอยู่แล้ว)
+  // 10) disconnect จากปุ่ม ⏹ ในแถว device — สลับไป view Device Manager ก่อน (คนละ view กัน)
+  await page.click('#mirrorRailDevices');
+  await sleep(600);
   await page.click('.mirror-btn.danger');
   await sleep(2500);
   const psOut = adb('shell', 'ps', '-A', '-o', 'PID,ARGS').split('\n').filter((l) => /scrcpy/i.test(l));

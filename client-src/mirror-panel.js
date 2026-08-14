@@ -76,7 +76,8 @@ class MirrorPanel {
     });
     this.railRunningBtn.addEventListener('click', () => this.togglePanel('running'));
     this.railDevicesBtn.addEventListener('click', () => this.togglePanel('devices'));
-    const rail = el('div', { class: 'mirror-rail' }, [this.railRunningBtn, this.railDevicesBtn]);
+    // ลำดับ icon: Device Manager อยู่บน, Running Devices อยู่ล่าง (ตามที่เจ้านายสั่ง)
+    const rail = el('div', { class: 'mirror-rail' }, [this.railDevicesBtn, this.railRunningBtn]);
 
     // --- view: Device Manager ---
     this.refreshBtn = el('button', { class: 'mirror-icon-btn', title: 'รีเฟรชรายชื่ออุปกรณ์', text: '⟲' });
@@ -144,8 +145,7 @@ class MirrorPanel {
     this.resizer = el('div', { class: 'mirror-resizer', title: 'ลากเพื่อปรับความกว้าง' });
     this._bindResizer();
 
-    // สองส่วนแสดงพร้อมกันเรียงลงมา: Device Manager ก่อน แล้ว Running Devices ต่อล่าง
-    this.devicesView.classList.add('mirror-view-top');
+    // สอง tool window แยกกันชัดเจน (กด icon ไหนเห็นเฉพาะ view นั้น — ไม่เอาแบบซ้อนในแผงเดียว)
     this.drawer = el('div', { class: 'mirror-drawer', id: 'mirrorDrawer' }, [
       this.resizer,
       this.devicesView,
@@ -558,13 +558,15 @@ class MirrorPanel {
 
   // ---------- แสดง/ซ่อน tool window (แบบ Android Studio) ----------
   // เปิด = dock ด้านขวาข้าง rail ดันเนื้อหาหลัก (body.mirror-open ใน CSS) ไม่ทับจอ
-  // สองส่วนแสดงพร้อมกัน (Device Manager บน, Running Devices ล่าง) — rail icon ไหนกดก็เปิดแผงเดียวกัน
+  // แต่ละ icon มี view ของตัวเอง แยกกันชัดเจน: 🗂️ = รายการอุปกรณ์ / 📱 = จอ mirror
   // ปิด = กด icon เดิมซ้ำ · session mirror ยังทำงานต่อเสมอ (ปิดแค่หน้าต่าง)
   showPanel(view) {
     this.activeView = view;
     this.drawer.style.display = 'flex';
-    this.railDevicesBtn.classList.add('active');
-    this.railRunningBtn.classList.add('active');
+    this.devicesView.style.display = view === 'devices' ? 'flex' : 'none';
+    this.runningView.style.display = view === 'running' ? 'flex' : 'none';
+    this.railDevicesBtn.classList.toggle('active', view === 'devices');
+    this.railRunningBtn.classList.toggle('active', view === 'running');
     document.body.classList.add('mirror-open');
     this.visible = true;
     this.refreshDevices();
@@ -583,8 +585,8 @@ class MirrorPanel {
   }
 
   togglePanel(view) {
-    // แผงเดียวแสดงทั้งสองส่วน → icon ไหนกดตอนเปิดอยู่ก็ปิด (พฤติกรรม tool window ของ AS)
-    if (this.visible) this.closePanel();
+    // กด icon ของ view ที่เปิดอยู่ = ปิด · กด icon อีกอัน = สลับ view (พฤติกรรม tool window ของ AS)
+    if (this.activeView === view) this.closePanel();
     else this.showPanel(view);
   }
 
