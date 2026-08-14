@@ -3949,6 +3949,7 @@
         this._setStatus("error", "\u0E40\u0E1A\u0E23\u0E32\u0E27\u0E4C\u0E40\u0E0B\u0E2D\u0E23\u0E4C\u0E19\u0E35\u0E49\u0E44\u0E21\u0E48\u0E23\u0E2D\u0E07\u0E23\u0E31\u0E1A WebCodecs \u2014 \u0E43\u0E0A\u0E49 Chrome/Edge");
         return;
       }
+      if (this.ws) this.disconnect();
       this.serial = serial;
       this.userDisconnected = false;
       this._clearReconnect();
@@ -4076,9 +4077,10 @@
       } catch (e) {
         renderer = new BitmapVideoFrameRenderer();
       }
+      const codecId = ready && ready.codec === "h265" ? ScrcpyVideoCodecId.H265 : ready && ready.codec === "av1" ? ScrcpyVideoCodecId.AV1 : ScrcpyVideoCodecId.H264;
       let decoder;
       try {
-        decoder = new WebCodecsVideoDecoder({ codec: ScrcpyVideoCodecId.H264, renderer });
+        decoder = new WebCodecsVideoDecoder({ codec: codecId, renderer });
       } catch (e) {
         this._setStatus("error", "\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E15\u0E31\u0E27\u0E16\u0E2D\u0E14\u0E27\u0E34\u0E14\u0E35\u0E42\u0E2D\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49");
         return;

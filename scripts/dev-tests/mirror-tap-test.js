@@ -31,7 +31,8 @@ const adb = (...a) => execFileSync('adb', ['-s', 'emulator-5554', ...a], { encod
   await sleep(2500);
   const focus = adb('shell', 'dumpsys', 'window').split('\n').find((l) => l.includes('mCurrentFocus'));
   console.log('focus after tap:', (focus || '').trim());
-  await page.screenshot({ path: path.join(__dirname, 'tap-test-panel.png') });
+  // เขียนภาพลง cwd — อย่ารันจากใน repo ไม่งั้นภาพเข้า git (รันจาก scratchpad เสมอ)
+  await page.screenshot({ path: path.join(process.cwd(), 'tap-test-panel.png') });
   await page.click('.mirror-btn.danger');
   await sleep(1000);
   await browser.close();

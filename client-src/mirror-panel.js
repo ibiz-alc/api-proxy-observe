@@ -181,6 +181,9 @@ class MirrorPanel {
       this._setStatus('error', 'เบราว์เซอร์นี้ไม่รองรับ WebCodecs — ใช้ Chrome/Edge');
       return;
     }
+    // ตัด session เดิมก่อนเสมอ — เรียก connect/open ซ้ำตอนต่ออยู่ จะได้ไม่ทิ้ง WS เก่า
+    // เป็น zombie ฝั่ง server (ปุ่มใน UI toggle ให้อยู่แล้ว แต่ open(serial) เรียกตรงได้)
+    if (this.ws) this.disconnect();
     this.serial = serial;
     this.userDisconnected = false;
     this._clearReconnect();
@@ -312,9 +315,13 @@ class MirrorPanel {
       renderer = new BitmapVideoFrameRenderer();
     }
 
+    // ใช้ codec ตามที่ server บอกใน ready (วันนี้ default h264 แต่กันเคสเครื่องส่ง h265/av1)
+    const codecId = ready && ready.codec === 'h265' ? ScrcpyVideoCodecId.H265
+      : ready && ready.codec === 'av1' ? ScrcpyVideoCodecId.AV1
+      : ScrcpyVideoCodecId.H264;
     let decoder;
     try {
-      decoder = new WebCodecsVideoDecoder({ codec: ScrcpyVideoCodecId.H264, renderer });
+      decoder = new WebCodecsVideoDecoder({ codec: codecId, renderer });
     } catch (e) {
       this._setStatus('error', 'สร้างตัวถอดวิดีโอไม่ได้');
       return;

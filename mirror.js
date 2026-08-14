@@ -110,6 +110,8 @@ async function handleConnection(ws) {
   let controller = null;    // ScrcpyControlMessageWriter
   let adb = null;           // Adb (ไว้ปิด transport ตอน cleanup)
   let reader = null;        // reader ของ video stream (ไว้ cancel)
+  let clipReader = null;    // reader ของ clipboard stream ที่ drain ทิ้ง (ไว้ cancel ตอน cleanup)
+  let keyframePending = false; // กัน resetVideo รัวตอน drop delta เพราะ backpressure
   let disposeSizeChanged = null; // ตัวถอด listener sizeChanged
   let curWidth = 0;         // ขนาดวิดีโอปัจจุบัน (ใช้สเกล touch/scroll)
   let curHeight = 0;
@@ -133,6 +135,7 @@ async function handleConnection(ws) {
     closed = true;
     if (disposeSizeChanged) { try { disposeSizeChanged(); } catch {} disposeSizeChanged = null; }
     if (reader) { try { await reader.cancel(); } catch {} reader = null; }
+    if (clipReader) { try { await clipReader.cancel(); } catch {} clipReader = null; }
     if (client) { try { await client.close(); } catch {} client = null; }
     if (adb) { try { await adb.close(); } catch {} adb = null; }
     controller = null;
@@ -349,7 +352,14 @@ async function handleConnection(ws) {
 
     client = await AdbScrcpyClient.start(adb, DefaultServerPath, options);
 
-    if (closed) { await cleanup('closed ระหว่าง start'); return; }
+    if (closed) {
+      // WS ปิดไประหว่างรอ start: cleanup() วิ่งไปแล้ว (closed=true) และเรียกซ้ำจะ return เฉยๆ
+      // → ต้องปิด client ที่เพิ่งเกิดตรงนี้เอง ไม่งั้น scrcpy process ค้างบนเครื่อง (zombie)
+      try { await client.close(); } catch {}
+      client = null;
+      console.log('[mirror] ปิด scrcpy ที่ start เสร็จหลัง WS ปิดไปแล้ว');
+      return;
+    }
 
     controller = client.controller;
 
@@ -357,8 +367,8 @@ async function handleConnection(ws) {
     // กลับมาทาง control socket ถ้าไม่มีใครอ่าน queue เต็มแล้ว device message parser
     // อุดตันทั้งเส้น (ack/uhid ตามไปด้วย) — เจอจริงตอน E2E: control ตายเงียบหลังส่ง text หลายครั้ง
     if (options.clipboard) {
+      clipReader = options.clipboard.getReader();
       (async () => {
-        const clipReader = options.clipboard.getReader();
         for (;;) {
           const { done } = await clipReader.read();
           if (done) break;
@@ -445,7 +455,17 @@ async function handleConnection(ws) {
     }
 
     // backpressure: ถ้าคิวส่งบวมเกิน 4MB ให้ทิ้งเฉพาะ delta (kind 2) — ห้ามทิ้ง config/keyframe
-    if (kind === 2 && ws.bufferedAmount > MAX_BUFFERED) return;
+    // และเมื่อทิ้งไปแล้ว decoder ฝั่ง browser จะอ้างอิงเฟรมที่หายไป (ภาพแตกจนกว่าจะมี IDR ใหม่)
+    // → ขอ keyframe อัตโนมัติหนึ่งครั้ง (debounce ด้วย flag เดียว) ให้ภาพซ่อมตัวเอง
+    if (kind === 2 && ws.bufferedAmount > MAX_BUFFERED) {
+      if (!keyframePending && controller) {
+        keyframePending = true;
+        controller.resetVideo()
+          .then(() => { keyframePending = false; })
+          .catch(() => { keyframePending = false; });
+      }
+      return;
+    }
 
     const payload = packet.data;
     const frame = Buffer.allocUnsafe(12 + payload.length);
