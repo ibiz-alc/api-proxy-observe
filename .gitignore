@@ -16,3 +16,6 @@ __pycache__/
 # MCP server deps
 mcp/node_modules/
 test-cases.json
+
+# worktree/สถานะของ Claude Code (สร้างโดยเครื่องมือ ไม่ใช่โค้ดโปรเจกต์)
+.claude/
