@@ -39,8 +39,10 @@ header {
 
 header h1 { font-size: 1.2rem; }
 
-/* เมนูบน scroll ซ้าย-ขวาได้เมื่อพื้นที่แคบ (ตอน tool window เปิด) — ปุ่มไม่ตัดบรรทัด */
-nav { display: flex; gap: 8px; overflow-x: auto; flex-wrap: nowrap; scrollbar-width: thin; }
+/* เมนูบน scroll ซ้าย-ขวาได้เมื่อพื้นที่แคบ (ตอน tool window เปิด) — ปุ่มไม่ตัดบรรทัด
+   ซ่อน scrollbar (ยัง scroll ได้ด้วย trackpad/ลูกกลิ้ง แค่ไม่โชว์แถบ) */
+nav { display: flex; gap: 8px; overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
+nav::-webkit-scrollbar { display: none; }
 nav .tab-btn { flex: 0 0 auto; white-space: nowrap; }
 
 .tab-btn {
@@ -1481,7 +1483,7 @@ button.mp-meta-btn:hover { color: var(--text); }
   position: fixed;
   top: 0;
   right: 44px; /* dock ข้าง icon rail */
-  width: 380px;
+  width: var(--mirror-w);
   height: 100vh;
   background: var(--panel);
   border-left: 1px solid var(--border);
@@ -1515,18 +1517,33 @@ button.mp-meta-btn:hover { color: var(--text); }
 .mirror-rail-btn:hover { background: var(--panel-2); color: var(--text); }
 .mirror-rail-btn.active { background: var(--accent); }
 
-/* dock สไตล์ Android Studio: rail กินที่ 44px เสมอ, เปิด tool window แล้วดันเนื้อหาเพิ่ม ไม่ทับจอ */
-body.mirror-rail { padding-right: 44px; transition: padding-right 0.15s ease; }
-body.mirror-open { padding-right: 440px; }
+/* dock สไตล์ Android Studio: rail กินที่ 44px เสมอ, เปิด tool window แล้วดันเนื้อหาเพิ่ม ไม่ทับจอ
+   ระวัง: class บน body ชื่อ has-mirror-rail (ห้ามใช้ .mirror-rail — จะไปจับกล่อง rail เอง)
+   --mirror-w = ความกว้าง panel ปรับได้ด้วยการลากขอบซ้าย (mirror-resizer) */
+:root { --mirror-w: 380px; }
+body.has-mirror-rail { padding-right: 44px; transition: padding-right 0.15s ease; }
+body.mirror-open { padding-right: calc(44px + var(--mirror-w)); transition: none; }
 
-/* tool window view (Device Manager / Running Devices) — สลับกันแสดงใน drawer เดียว */
+/* tool window 2 ส่วนเรียงลงมาในแผงเดียว: Device Manager (บน คงขนาด) + Running Devices (ล่าง ยืด) */
 .mirror-view { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
+.mirror-view-top { flex: 0 0 auto; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
 
-/* รายการอุปกรณ์แบบ Device Manager */
+/* ตัวจับลากขยายความกว้าง — แถบบางๆ ขอบซ้ายของ drawer */
+.mirror-resizer {
+  position: absolute; left: -3px; top: 0;
+  width: 6px; height: 100%;
+  cursor: col-resize;
+  z-index: 1;
+}
+.mirror-resizer:hover, .mirror-resizer:active { background: var(--accent); opacity: 0.5; }
+
+/* รายการอุปกรณ์แบบ Device Manager (ซ่อน scrollbar) */
 .mirror-device-list {
   display: flex; flex-direction: column; gap: 6px;
   max-height: 180px; overflow-y: auto;
+  scrollbar-width: none;
 }
+.mirror-device-list::-webkit-scrollbar { display: none; }
 .mirror-device-row {
   display: flex; align-items: center; gap: 8px;
   background: var(--panel-2);

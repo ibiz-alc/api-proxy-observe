@@ -140,15 +140,30 @@ class MirrorPanel {
       bottomRow,
     ]);
 
+    // ตัวจับลากขยายความกว้าง panel (ขอบซ้ายของ drawer) — เหมือนแผง URL/Devices ฝั่งซ้าย
+    this.resizer = el('div', { class: 'mirror-resizer', title: 'ลากเพื่อปรับความกว้าง' });
+    this._bindResizer();
+
+    // สองส่วนแสดงพร้อมกันเรียงลงมา: Device Manager ก่อน แล้ว Running Devices ต่อล่าง
+    this.devicesView.classList.add('mirror-view-top');
     this.drawer = el('div', { class: 'mirror-drawer', id: 'mirrorDrawer' }, [
+      this.resizer,
       this.devicesView,
       this.runningView,
     ]);
     this.drawer.style.display = 'none';
-    this.activeView = null; // null | 'devices' | 'running'
+    this.activeView = null; // view ล่าสุดที่ผู้ใช้กดจาก rail (ใช้ตัดสิน toggle ปิด)
+    // คืนค่าความกว้างที่ผู้ใช้เคยลากไว้
+    const savedW = Number(localStorage.getItem('mirrorPanelW'));
+    if (savedW >= 300 && savedW <= 900) {
+      document.documentElement.style.setProperty('--mirror-w', `${savedW}px`);
+    }
     document.body.appendChild(rail);
     document.body.appendChild(this.drawer);
-    document.body.classList.add('mirror-rail'); // เผื่อพื้นที่ให้ rail เสมอ (padding-right ใน CSS)
+    // เผื่อพื้นที่ให้ rail เสมอ (padding-right ใน CSS)
+    // ชื่อ class บน body ต้องไม่ซ้ำกับ .mirror-rail ของตัว rail — เคยพลาดแล้ว CSS จับ body
+    // กลายเป็นกล่อง fixed 44px ทั้งหน้า (layout พังยับ)
+    document.body.classList.add('has-mirror-rail');
   }
 
   // ---------- โหลดรายชื่ออุปกรณ์ (Device Manager style) ----------
@@ -543,14 +558,13 @@ class MirrorPanel {
 
   // ---------- แสดง/ซ่อน tool window (แบบ Android Studio) ----------
   // เปิด = dock ด้านขวาข้าง rail ดันเนื้อหาหลัก (body.mirror-open ใน CSS) ไม่ทับจอ
+  // สองส่วนแสดงพร้อมกัน (Device Manager บน, Running Devices ล่าง) — rail icon ไหนกดก็เปิดแผงเดียวกัน
   // ปิด = กด icon เดิมซ้ำ · session mirror ยังทำงานต่อเสมอ (ปิดแค่หน้าต่าง)
   showPanel(view) {
     this.activeView = view;
     this.drawer.style.display = 'flex';
-    this.devicesView.style.display = view === 'devices' ? 'flex' : 'none';
-    this.runningView.style.display = view === 'running' ? 'flex' : 'none';
-    this.railDevicesBtn.classList.toggle('active', view === 'devices');
-    this.railRunningBtn.classList.toggle('active', view === 'running');
+    this.railDevicesBtn.classList.add('active');
+    this.railRunningBtn.classList.add('active');
     document.body.classList.add('mirror-open');
     this.visible = true;
     this.refreshDevices();
@@ -569,8 +583,36 @@ class MirrorPanel {
   }
 
   togglePanel(view) {
-    if (this.activeView === view) this.closePanel();
+    // แผงเดียวแสดงทั้งสองส่วน → icon ไหนกดตอนเปิดอยู่ก็ปิด (พฤติกรรม tool window ของ AS)
+    if (this.visible) this.closePanel();
     else this.showPanel(view);
+  }
+
+  // ---------- ลากขยายความกว้าง panel ----------
+  _bindResizer() {
+    let dragging = false;
+    this.resizer.addEventListener('pointerdown', (e) => {
+      dragging = true;
+      this.resizer.setPointerCapture(e.pointerId);
+      document.body.style.userSelect = 'none'; // กันลากแล้วไป select ข้อความ
+      e.preventDefault();
+    });
+    this.resizer.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      // ความกว้าง = ระยะจากเมาส์ถึงขอบซ้ายของ rail (rail กว้าง 44px ชิดขวาสุด)
+      const w = Math.min(900, Math.max(300, window.innerWidth - 44 - e.clientX));
+      document.documentElement.style.setProperty('--mirror-w', `${w}px`);
+    });
+    const stop = (e) => {
+      if (!dragging) return;
+      dragging = false;
+      try { this.resizer.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+      document.body.style.userSelect = '';
+      const w = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--mirror-w'), 10);
+      if (w) localStorage.setItem('mirrorPanelW', String(w));
+    };
+    this.resizer.addEventListener('pointerup', stop);
+    this.resizer.addEventListener('pointercancel', stop);
   }
 
   // API เดิม (เผื่อโค้ดอื่นเรียก): show/hide/toggle จัดการ panel ที่เหมาะสม

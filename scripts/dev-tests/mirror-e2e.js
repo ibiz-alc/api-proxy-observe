@@ -95,28 +95,33 @@ const step = (name, ok, detail = '') => {
   const onSearch = () => /SearchActivity/.test(focusLine());
   const waitFor = async (fn, ms) => { const t = Date.now(); while (Date.now() - t < ms) { if (fn()) return true; await sleep(500); } return fn(); };
   // อ่านข้อความจริงบนจอด้วย uiautomator dump (แทนการเดาจาก screenshot)
+  // retry สูงสุด 3 รอบ — uiautomator flaky บน emulator boot ใหม่ ("null root node") เจอเป็นพักๆ
   const uiDump = () => {
-    try {
-      adb('shell', 'uiautomator', 'dump', '/sdcard/ui-e2e.xml');
-      return adb('shell', 'cat', '/sdcard/ui-e2e.xml');
-    } catch { return ''; }
+    for (let i = 0; i < 3; i++) {
+      try {
+        adb('shell', 'uiautomator', 'dump', '/sdcard/ui-e2e.xml');
+        const xml = adb('shell', 'cat', '/sdcard/ui-e2e.xml');
+        if (xml && xml.includes('<hierarchy')) return xml;
+      } catch { /* ลองใหม่ */ }
+    }
+    return '';
   };
 
   // 2) พิมพ์ ASCII ผ่าน keyboard บน canvas — ลงช่อง search ที่ warmup เปิดค้างไว้
   // focus ด้วย JS ตรงๆ — ห้ามใช้ page.click เพราะ click = pointer event = tap กลางจอเครื่องจริงๆ!
   await page.$eval('.mirror-video', (el) => el.focus());
   await page.keyboard.type('wifi', { delay: 120 });
-  await sleep(2500);
-  step('พิมพ์ ASCII "wifi" ผ่าน canvas เข้าช่อง search', uiDump().includes('wifi'));
+  await sleep(1500);
+  step('พิมพ์ ASCII "wifi" ผ่าน canvas เข้าช่อง search', await waitFor(() => uiDump().includes('wifi'), 12000));
   execFileSync('bash', ['-c', `adb -s ${SERIAL} exec-out screencap -p > ${path.join(OUT, 'emu-2-ascii.png')}`]);
 
   // 3) ลบข้อความ (Backspace x4) แล้วส่งภาษาไทยผ่านช่องข้อความ
   for (let i = 0; i < 4; i++) { await page.keyboard.press('Backspace'); await sleep(250); }
   await page.$eval('.mirror-text-input', (inp) => { inp.value = 'สวัสดีครับ'; });
   await page.$$eval('.mirror-btn', (btns) => btns.find((b) => b.textContent === 'ส่งข้อความ').click());
-  await sleep(2500);
-  const dumpThai = uiDump();
-  step('Backspace ลบ "wifi" + ส่งภาษาไทย "สวัสดีครับ"', dumpThai.includes('สวัสดีครับ') && !dumpThai.includes('>wifi<'));
+  await sleep(1500);
+  const thaiOk = await waitFor(() => { const d = uiDump(); return d.includes('สวัสดีครับ') && !d.includes('>wifi<'); }, 12000);
+  step('Backspace ลบ "wifi" + ส่งภาษาไทย "สวัสดีครับ"', thaiOk);
   execFileSync('bash', ['-c', `adb -s ${SERIAL} exec-out screencap -p > ${path.join(OUT, 'emu-3-thai.png')}`]);
 
   // หมายเหตุ: ห้าม assert ด้วย mCurrentFocus/mFocusedApp — หลังรัน uiautomator dump
@@ -183,9 +188,7 @@ const step = (name, ok, detail = '') => {
   const shown = await page.$eval('#mirrorDrawer', (d) => getComputedStyle(d).display !== 'none');
   step('ปิด/เปิดจาก rail โดยยังเชื่อมต่ออยู่', hidden && shown && (await status()) === 'เชื่อมต่อแล้ว', `hidden=${hidden} shown=${shown} status=${await status()}`);
 
-  // 10) disconnect จากปุ่ม ⏹ ในแถว device (สลับไป Device Manager ก่อน) → scrcpy หายจากเครื่อง
-  await page.click('#mirrorRailDevices');
-  await sleep(600);
+  // 10) disconnect จากปุ่ม ⏹ ในแถว device (Device Manager อยู่ส่วนบนของแผงเดียวกัน เห็นอยู่แล้ว)
   await page.click('.mirror-btn.danger');
   await sleep(2500);
   const psOut = adb('shell', 'ps', '-A', '-o', 'PID,ARGS').split('\n').filter((l) => /scrcpy/i.test(l));
