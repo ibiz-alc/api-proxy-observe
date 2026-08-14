@@ -17,13 +17,14 @@
 
 ---
 
-## สถานะ (update ทุกครั้งที่จบ task) — พักงาน 2026-08-14 ~08:25 (เจ้านายไป demo)
+## สถานะ — ✅ เสร็จสมบูรณ์ 2026-08-14 ~13:00 (รอเจ้านายสั่ง push/merge)
 
-- [x] Task 0: Scaffolding — deps ติดตั้งแล้ว, jar vendored ที่ `vendor/scrcpy-server-v3.3.3.bin`, baseline server boot :3100 ผ่าน (commit `bba7769`)
-- [x] Task 1: Server mirror module — เสร็จ + smoke PASS บนเครื่องจริง (commit `6fe8d83`)
-- [x] Task 2: Client mirror panel — เสร็จ (commit `917c22e`)
-- [~] Task 3: Integration + E2E — **ค้างอยู่ตรงนี้** ผ่าน 11/14 เช็ค · ดูรายละเอียด "สถานะ E2E ล่าสุด" ด้านล่าง
-- [ ] Task 4: code-review → แก้ finding ที่คุ้ม → commit สุดท้าย (ลบ MIRROR_DEBUG log ก่อน หรือเก็บไว้ก็ได้ถ้า review บอกว่าโอเค)
+- [x] Task 0: Scaffolding (commit `bba7769`)
+- [x] Task 1: Server mirror module + smoke PASS เครื่องจริง (commit `6fe8d83`)
+- [x] Task 2: Client mirror panel (commit `917c22e`)
+- [x] Task 3: Integration + E2E — **ผ่านครบ 14/14** (commits `a64e48d`, `8a92d0e`) + smoke view-only เครื่องจริง PASS
+- [x] Task 4: code-review (Opus reviewer) — 1 major + 6 minor → แก้ 5 ข้าม 1 (reconnect backoff — จงใจ, เหตุผลใน commit) (commit `dfa8a01`)
+- MIRROR_DEBUG เก็บไว้ (เงียบโดย default, เปิดด้วย env ตอน debug)
 
 ## สถานะ E2E ล่าสุด (สำคัญ — อ่านก่อนทำต่อ)
 
