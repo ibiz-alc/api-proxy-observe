@@ -1058,51 +1058,61 @@ async function wifiReachable(S, host) {
   } catch { return 'unknown'; }
 }
 
+// แกนของการเชื่อม device — ใช้ร่วมกันระหว่าง endpoint /connect กับ watcher auto-reconnect ฝั่ง server
+// คืน { status, body } ให้ผู้เรียกตัดสินใจเอง (endpoint ส่งเป็น HTTP response, watcher เช็ค status)
+// โยน error เมื่อ adb/คำสั่งพัง (ผู้เรียกครอบ try เอง)
+async function doConnectDevice(serial, mode = 'usb', method = 'proxy') {
+  const S = ['-s', serial];
+  // Guard โหมด Wi-Fi: มือถือต้องอยู่วง LAN เดียวกับ Mac ไม่งั้นตั้ง proxy ไปก็ยิงไม่ถึง (เงียบๆ)
+  // เช็คก่อนแตะ state ของเครื่อง — ถ้ายิงไม่ถึงคืน warning ทันที ไม่ตั้ง proxy ทิ้งค้าง
+  if (mode === 'wifi') {
+    const lan = getLanIp();
+    if (!lan) return { status: 409, body: { ok: false, unreachable: true,
+      error: 'หา LAN IP ของ Mac ไม่เจอ — ต่อ Wi-Fi/LAN ที่ Mac ก่อน' } };
+    const reach = await wifiReachable(S, lan);
+    if (reach === 'unreachable') {
+      return { status: 409, body: { ok: false, unreachable: true, host: lan,
+        error: `มือถือยิงหา Mac (${lan}:${MITM_PORT}) ไม่ถึง — โหมด Wi-Fi ต้องให้มือถืออยู่ Wi-Fi วงเดียวกับ Mac\n`
+          + '(ตอนนี้มือถือน่าจะอยู่บน 4G หรือคนละวง Wi-Fi) · ถ้าเสียบสาย USB อยู่ ให้ใช้โหมด USB แทน' } };
+    }
+    // reach === 'unknown' → ตรวจไม่ได้ (nc ไม่มี) ปล่อยผ่านแบบ best-effort
+  }
+  if (method === 'postern') {
+    // เลือก host: usb=127.0.0.1(+reverse) / wifi=IP Mac
+    const phost = (await resolveTarget(S, mode)).host; // usb จะตั้ง adb reverse ให้ด้วย
+    const pport = MITM_PORT;
+    // กันชนกับโหมด proxy: ล้าง global http_proxy ทิ้งก่อน (อย่าให้สองโหมดซ้อนกัน)
+    await adb([...S, 'shell', 'settings', 'delete', 'global', 'http_proxy']).catch(() => {});
+    // ฆ่า instance เก่าให้หมดก่อน — process :vpn init เอนจิน (lwIP) ได้ครั้งเดียว/process
+    // ถ้าไม่เคลียร์ process เก่าที่กำลังตาย จะชนกับ start ใหม่ → service ค้าง/ANR → tun ไม่ขึ้น
+    await adb([...S, 'shell', 'am', 'force-stop', POSTERN_PKG]).catch(() => {});
+    await new Promise((r) => setTimeout(r, 800));
+    // สั่งแอปผ่าน intent: auto-fill host/port แล้ว connect (VPN) ด้วย process ใหม่สด
+    await adb([...S, 'shell', 'am', 'start', '-n', `${POSTERN_PKG}/.MainActivity`,
+      '--es', 'apitester_host', phost,
+      '--ei', 'apitester_port', String(pport),
+      '--ez', 'apitester_connect', 'true']);
+    unmute();
+    return { status: 200, body: { ok: true, connected: true, method, mode, host: phost, port: pport } };
+  }
+  const { target } = await resolveTarget(S, mode);
+  // โหมด proxy: กันชนกับ Postern — ปิด VPN (force-stop แอป) ก่อน ไม่งั้น VPN จะ hijack
+  // loopback/reverse tunnel ทำให้ http_proxy 127.0.0.1:8888 ส่งไม่ถึง mitmproxy
+  await adb([...S, 'shell', 'am', 'force-stop', POSTERN_PKG]).catch(() => {});
+  await adb([...S, 'shell', 'settings', 'put', 'global', 'http_proxy', target]);
+  unmute(); // เปิดรับ flow อีกครั้ง
+  // emulator ที่ยังไม่มี system CA → บอก client ให้ชวนติดตั้งต่อทันที (HTTPS จะได้ถอดรหัสได้)
+  const caMissing = /^emulator-/.test(serial) ? (await hasSystemCa(serial)) === false : false;
+  return { status: 200, body: { ok: true, connected: true, method, mode, proxy: target, caMissing } };
+}
+
 // เชื่อม: method=proxy → ตั้ง global http_proxy | method=postern → เปิดแอป Proxy Postern พร้อม auto-fill+connect
 app.post('/api/devices/connect', express.json(), async (req, res) => {
   const { serial, mode = 'usb', method = 'proxy' } = req.body || {};
   if (!serial) return res.status(400).json({ ok: false, error: 'ต้องระบุ serial' });
-  const S = ['-s', serial];
   try {
-    // Guard โหมด Wi-Fi: มือถือต้องอยู่วง LAN เดียวกับ Mac ไม่งั้นตั้ง proxy ไปก็ยิงไม่ถึง (เงียบๆ)
-    // เช็คก่อนแตะ state ของเครื่อง — ถ้ายิงไม่ถึงคืน warning ทันที ไม่ตั้ง proxy ทิ้งค้าง
-    if (mode === 'wifi') {
-      const lan = getLanIp();
-      if (!lan) return res.status(409).json({ ok: false, unreachable: true,
-        error: 'หา LAN IP ของ Mac ไม่เจอ — ต่อ Wi-Fi/LAN ที่ Mac ก่อน' });
-      const reach = await wifiReachable(S, lan);
-      if (reach === 'unreachable') {
-        return res.status(409).json({ ok: false, unreachable: true, host: lan,
-          error: `มือถือยิงหา Mac (${lan}:${MITM_PORT}) ไม่ถึง — โหมด Wi-Fi ต้องให้มือถืออยู่ Wi-Fi วงเดียวกับ Mac\n`
-            + '(ตอนนี้มือถือน่าจะอยู่บน 4G หรือคนละวง Wi-Fi) · ถ้าเสียบสาย USB อยู่ ให้ใช้โหมด USB แทน' });
-      }
-      // reach === 'unknown' → ตรวจไม่ได้ (nc ไม่มี) ปล่อยผ่านแบบ best-effort
-    }
-    if (method === 'postern') {
-      // เลือก host: usb=127.0.0.1(+reverse) / wifi=IP Mac
-      const phost = (await resolveTarget(S, mode)).host; // usb จะตั้ง adb reverse ให้ด้วย
-      const pport = MITM_PORT;
-      // กันชนกับโหมด proxy: ล้าง global http_proxy ทิ้งก่อน (อย่าให้สองโหมดซ้อนกัน)
-      await adb([...S, 'shell', 'settings', 'delete', 'global', 'http_proxy']).catch(() => {});
-      // ฆ่า instance เก่าให้หมดก่อน — process :vpn init เอนจิน (lwIP) ได้ครั้งเดียว/process
-      // ถ้าไม่เคลียร์ process เก่าที่กำลังตาย จะชนกับ start ใหม่ → service ค้าง/ANR → tun ไม่ขึ้น
-      await adb([...S, 'shell', 'am', 'force-stop', POSTERN_PKG]).catch(() => {});
-      await new Promise((r) => setTimeout(r, 800));
-      // สั่งแอปผ่าน intent: auto-fill host/port แล้ว connect (VPN) ด้วย process ใหม่สด
-      await adb([...S, 'shell', 'am', 'start', '-n', `${POSTERN_PKG}/.MainActivity`,
-        '--es', 'apitester_host', phost,
-        '--ei', 'apitester_port', String(pport),
-        '--ez', 'apitester_connect', 'true']);
-      unmute();
-      return res.json({ ok: true, connected: true, method, mode, host: phost, port: pport });
-    }
-    const { target } = await resolveTarget(S, mode);
-    // โหมด proxy: กันชนกับ Postern — ปิด VPN (force-stop แอป) ก่อน ไม่งั้น VPN จะ hijack
-    // loopback/reverse tunnel ทำให้ http_proxy 127.0.0.1:8888 ส่งไม่ถึง mitmproxy
-    await adb([...S, 'shell', 'am', 'force-stop', POSTERN_PKG]).catch(() => {});
-    await adb([...S, 'shell', 'settings', 'put', 'global', 'http_proxy', target]);
-    unmute(); // เปิดรับ flow อีกครั้ง
-    res.json({ ok: true, connected: true, method, mode, proxy: target });
+    const r = await doConnectDevice(serial, mode, method);
+    res.status(r.status).json(r.body);
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
@@ -1132,6 +1142,9 @@ app.post('/api/devices/disconnect', express.json(), async (req, res) => {
       // ตัด reverse tunnel (USB/emulator) — path ไปหา mitmproxy ขาดทันที
       await adb([...S, 'reverse', '--remove', `tcp:${MITM_PORT}`]).catch(() => {});
     }
+    // ตัดเอง = ตั้งใจปลด → ปิด auto-reconnect ของเครื่องนี้ด้วย
+    // ไม่งั้น watcher ฝั่ง server จะเห็นว่า "หลุด" แล้วเชื่อมกลับให้ทันที กลายเป็นปลดไม่ได้
+    setAutoReconnect(serial, false);
     // mute ค้าง (จนกว่าจะ connect ใหม่/สั่งปลด) + ล้าง flow list — "ตัดแล้วเงียบ"
     // ถ้าเครื่องยัง cache proxy แล้วยิงต่อ flow จะถูกทิ้ง (นับไว้ที่ mutedDropCount โชว์ใน status)
     muteUntil = Infinity;
@@ -1144,6 +1157,87 @@ app.post('/api/devices/disconnect', express.json(), async (req, res) => {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
+
+// ===== Auto-reconnect (ฝั่ง server — ทำงานตลอดเวลา ไม่ต้องเปิดหน้าเว็บค้าง) =====
+// เดิมอยู่ฝั่ง browser (localStorage + setInterval ใน app.js) → หลุดตอนไม่มีใครเปิดเว็บ
+// ย้าย state มาไว้ที่ server: prefs = { serial: 'usb'|'wifi' } persist ลงไฟล์ รอด restart
+const AUTO_RECONNECT_FILE = path.join(__dirname, 'data', 'auto-reconnect.json');
+let autoReconnectMap = {};
+try {
+  if (fs.existsSync(AUTO_RECONNECT_FILE)) autoReconnectMap = JSON.parse(fs.readFileSync(AUTO_RECONNECT_FILE, 'utf8')) || {};
+} catch { autoReconnectMap = {}; }
+
+function setAutoReconnect(serial, on, mode) {
+  const before = autoReconnectMap[serial];
+  if (on) autoReconnectMap[serial] = mode === 'wifi' ? 'wifi' : 'usb';
+  else { delete autoReconnectMap[serial]; delete autoRcBackoff[serial]; delete autoCaBackoff[serial]; }
+  if (autoReconnectMap[serial] === before) return; // ไม่เปลี่ยน (เช่น disconnect เครื่องที่ไม่ได้เปิด auto) → ไม่ต้องเขียนไฟล์
+  try {
+    fs.mkdirSync(path.dirname(AUTO_RECONNECT_FILE), { recursive: true });
+    fs.writeFileSync(AUTO_RECONNECT_FILE, JSON.stringify(autoReconnectMap, null, 2));
+  } catch (e) { console.error('บันทึก auto-reconnect prefs ไม่สำเร็จ:', e.message); }
+}
+
+app.get('/api/devices/auto-reconnect', (req, res) => res.json({ ok: true, map: autoReconnectMap }));
+app.post('/api/devices/auto-reconnect', express.json(), (req, res) => {
+  const { serial, on, mode } = req.body || {};
+  if (!serial) return res.status(400).json({ ok: false, error: 'ต้องระบุ serial' });
+  setAutoReconnect(serial, !!on, mode);
+  if (on) autoReconnectTick(); // เปิดปุ๊บ ถ้าตอนนี้หลุดอยู่ให้ลองต่อเลย ไม่ต้องรอรอบหน้า (fire-and-forget)
+  res.json({ ok: true, map: autoReconnectMap });
+});
+
+const autoRcBackoff = {}; // serial → timestamp ที่อนุญาตให้ลองใหม่ (เว้นช่วงหลัง fail ไม่ถล่ม adb)
+const autoCaBackoff = {}; // serial → timestamp ที่ให้ลองติดตั้ง CA ใหม่ได้ (install หนัก ~90s + restart framework)
+let autoRcRunning = false; // กัน tick ซ้อน — listDevices ยิง adb หลายคำสั่ง อาจช้ากว่ารอบ interval
+// device "สุขภาพดี" = เชื่อม proxy อยู่ และ (ถ้า USB) adb reverse ยังอยู่ — เกณฑ์เดียวกับ okDev ใน UI
+function devHealthy(d) { return !!(d.connected || d.posternRunning) && !(d.mode === 'usb' && d.reverse === false); }
+async function autoReconnectTick() {
+  if (autoRcRunning) return;
+  const serials = Object.keys(autoReconnectMap);
+  if (!serials.length) return; // ไม่มีใครเปิด auto — ไม่แตะ adb เลย (เครื่องที่ไม่ใช้ฟีเจอร์นี้ไม่เสีย overhead)
+  autoRcRunning = true;
+  try {
+    const devices = await listDevices();
+    const now = Date.now();
+    for (const serial of serials) {
+      const dev = devices.find((x) => x.serial === serial);
+      if (!dev) continue; // ถอดสาย/emulator ปิดอยู่ — รอโผล่กลับมาค่อยลอง
+      if (dev.mode === 'usb') dev.reverse = await hasReverseTunnel(serial);
+      // emulator reboot → tmpfs หาย system CA หลุด แม้ proxy/reverse ปกติ → ติดตั้งใหม่ให้เอง
+      // (auto-reconnect = "ให้ capture ทำงานต่อ" ไม่งั้น HTTPS เงียบทั้งที่ status ขึ้นเขียว)
+      if (devHealthy(dev) && dev.emulator && !(autoCaBackoff[serial] && now < autoCaBackoff[serial])) {
+        if ((await hasSystemCa(serial)) === false) {
+          autoCaBackoff[serial] = Date.now() + 5 * 60000; // ลอง install ถี่สุดทุก 5 นาที (ถ้ายังพลาด)
+          try {
+            console.log(`[auto-reconnect] ${serial} system CA หาย (น่าจะ reboot) — ติดตั้งใหม่…`);
+            await doInstallCaEmulator(serial);
+            delete autoCaBackoff[serial];
+            console.log(`[auto-reconnect] ติดตั้ง system CA ให้ ${serial} สำเร็จ`);
+          } catch (e) { console.error(`[auto-reconnect] ติดตั้ง CA ให้ ${serial} ไม่สำเร็จ: ${e.message}`); }
+        }
+        continue;
+      }
+      if (devHealthy(dev)) { delete autoRcBackoff[serial]; continue; }
+      if (autoRcBackoff[serial] && now < autoRcBackoff[serial]) continue;
+      // re-check pref สดๆ ก่อนยิง — ระหว่าง listDevices (ช้า หลาย adb call) ผู้ใช้อาจกด disconnect
+      // ซึ่งลบ pref ไปแล้ว ถ้าใช้ค่าจากตอนต้น tick จะเชื่อมกลับทั้งที่เขาตั้งใจปลด
+      const mode = autoReconnectMap[serial];
+      if (!mode) continue;
+      try {
+        const r = await doConnectDevice(serial, mode);
+        if (r.status !== 200) throw new Error(r.body.error || 'connect ไม่สำเร็จ');
+        delete autoRcBackoff[serial];
+        console.log(`[auto-reconnect] เชื่อม ${serial} (${mode}) กลับสำเร็จ`);
+      } catch (e) {
+        autoRcBackoff[serial] = Date.now() + 15000; // fail → เว้น 15s ค่อยลองใหม่
+        console.error(`[auto-reconnect] เชื่อม ${serial} ไม่สำเร็จ: ${e.message}`);
+      }
+    }
+  } catch (e) { console.error('[auto-reconnect] รอบนี้ล้ม (adb?): ' + e.message); }
+  finally { autoRcRunning = false; }
+}
+setInterval(autoReconnectTick, 4000);
 
 // ตั้ง/ปลด mute ตรงๆ — จำเป็นสำหรับการเชื่อมต่อแบบ manual (ตั้ง proxy เองบนมือถือ
 // โดยไม่กด connect ในเว็บ): ถ้าก่อนหน้ากด disconnect ไว้ mute จะค้าง true และ server
@@ -1568,19 +1662,46 @@ async function isEmulator(serial) {
   } catch { return serial.startsWith('emulator-'); }
 }
 
-app.post('/api/devices/install-ca-emulator', express.json(), async (req, res) => {
-  const serial = (req.body || {}).serial;
-  if (!serial) return res.status(400).json({ ok: false, error: 'ต้องระบุ serial' });
-  const S = ['-s', serial];
+// hash ของ CA (Android เก็บ CA ใน trust store เป็นไฟล์ชื่อ <subject_hash_old>.0)
+// cache ได้ตลอดอายุ process — CA ของ mitmproxy ไม่เปลี่ยนระหว่างรัน
+let _caHashCache = null;
+async function mitmCaHash() {
+  if (_caHashCache) return _caHashCache;
+  const caPath = mitmCaPath();
+  if (!fs.existsSync(caPath)) return null; // ยังไม่มี CA บน Mac — อย่า gen ใหม่จากแค่การเช็คสถานะ
+  const { stdout } = await execFileP('openssl', ['x509', '-inform', 'PEM', '-subject_hash_old', '-noout', '-in', caPath], { timeout: 8000 });
+  const hash = stdout.trim().split('\n')[0];
+  if (!/^[0-9a-f]{8}$/.test(hash)) throw new Error('คำนวณ hash ของ CA ไม่ได้: ' + hash);
+  return (_caHashCache = hash);
+}
+
+// เช็คว่า CA ของเราอยู่ใน system store (apex) ของ emulator หรือยัง
+// trust store ที่ยัดเข้าไปเป็น tmpfs → หายทุกครั้งที่ reboot emulator เลยต้องเช็คสดเสมอ
+// คืน true/false, หรือ null = ตรวจไม่ได้ (ยังไม่มี CA บน Mac / adb มีปัญหา) → ฝั่ง UI จะไม่เตือน
+async function hasSystemCa(serial) {
   try {
-    if (!(await isEmulator(serial))) {
-      return res.status(400).json({ ok: false, error: 'ใช้ได้เฉพาะ Android Emulator — เครื่องจริงลง system CA ไม่ได้ (ไม่มี root) ใช้ปุ่ม "ติดตั้ง CA (คู่มือ)" แทน' });
-    }
-    const caPath = await ensureMitmCa();
-    // Android เก็บ CA เป็นไฟล์ชื่อ <subject_hash_old>.0
-    const { stdout: hashOut } = await execFileP('openssl', ['x509', '-inform', 'PEM', '-subject_hash_old', '-noout', '-in', caPath], { timeout: 8000 });
-    const hash = hashOut.trim().split('\n')[0];
-    if (!/^[0-9a-f]{8}$/.test(hash)) throw new Error('คำนวณ hash ของ CA ไม่ได้: ' + hash);
+    const hash = await mitmCaHash();
+    if (!hash) return null;
+    // one-liner ที่ exit 0 เสมอ — adb() โยน error เมื่อ exit ≠ 0 และ ls ไฟล์ที่ไม่มีคือ exit 1
+    const out = await adb(['-s', serial, 'shell',
+      `[ -f /apex/com.android.conscrypt/cacerts/${hash}.0 ] && echo CA_YES || echo CA_NO`]);
+    if (out.includes('CA_YES')) return true;
+    if (out.includes('CA_NO')) return false;
+    return null;
+  } catch { return null; }
+}
+
+// แกนของการติดตั้ง CA เข้า system store (share ระหว่าง endpoint กับ watcher auto-reconnect ฝั่ง server)
+// โยน error เมื่อไม่ใช่ emulator/ติดตั้งไม่สำเร็จ — ผู้เรียกครอบ try เอง · คืน { hash, booted, reverse, note }
+async function doInstallCaEmulator(serial) {
+  const S = ['-s', serial];
+  if (!(await isEmulator(serial))) {
+    const err = new Error('ใช้ได้เฉพาะ Android Emulator — เครื่องจริงลง system CA ไม่ได้ (ไม่มี root) ใช้ปุ่ม "ติดตั้ง CA (คู่มือ)" แทน');
+    err.notEmulator = true;
+    throw err;
+  }
+  const caPath = await ensureMitmCa();
+    const hash = await mitmCaHash(); // ensureMitmCa สร้างไฟล์ให้แล้ว → hash ไม่มีทาง null
 
     // ต้อง root ก่อน (userdebug/emulator เท่านั้น) — Play image จะ fail ตรงนี้
     try { await adb([...S, 'root'], 20000); } catch (e) { /* already root or transient */ }
@@ -1659,10 +1780,18 @@ app.post('/api/devices/install-ca-emulator', express.json(), async (req, res) =>
         reverse = true;
       }
     } catch { /* best-effort */ }
-    res.json({ ok: true, hash, booted, reverse,
-      note: 'ติดตั้ง CA เข้า system store แล้ว (restart framework เรียบร้อย) — HTTPS ถอดรหัสได้เลย ยกเว้นแอปที่ทำ certificate pinning' });
+  return { hash, booted, reverse,
+    note: 'ติดตั้ง CA เข้า system store แล้ว (restart framework เรียบร้อย) — HTTPS ถอดรหัสได้เลย ยกเว้นแอปที่ทำ certificate pinning' };
+}
+
+app.post('/api/devices/install-ca-emulator', express.json(), async (req, res) => {
+  const serial = (req.body || {}).serial;
+  if (!serial) return res.status(400).json({ ok: false, error: 'ต้องระบุ serial' });
+  try {
+    const r = await doInstallCaEmulator(serial);
+    res.json({ ok: true, ...r });
   } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
+    res.status(e.notEmulator ? 400 : 500).json({ ok: false, error: e.message });
   }
 });
 
@@ -1722,10 +1851,12 @@ app.get('/api/status', async (req, res) => {
     const [mitmUp, mcpUp, devices] = await Promise.all([
       checkPort(MITM_PORT), checkPort(MCP_PORT), listDevices(),
     ]);
-    // reverse tunnel เช็คเฉพาะ device ที่ต่อโหมด usb (ใช้ 127.0.0.1 ผ่าน adb reverse)
-    for (const d of devices) {
+    // enrich แต่ละ device ขนานกัน (ต่อ device ยิง adb ได้หลายตัว — อย่าต่อแบบ sequential ให้ status ช้าตามจำนวนเครื่อง)
+    //   reverse: เฉพาะโหมด usb (127.0.0.1 ผ่าน adb reverse) · systemCa: เฉพาะ emulator (tmpfs หายทุก reboot → UI เตือน HTTPS)
+    await Promise.all(devices.map(async (d) => {
       d.reverse = d.mode === 'usb' ? await hasReverseTunnel(d.serial) : null;
-    }
+      d.systemCa = d.emulator ? await hasSystemCa(d.serial) : null;
+    }));
     let lastFlowAt = null;
     for (const f of proxyStore.flows) if (!lastFlowAt || f.time > lastFlowAt) lastFlowAt = f.time;
     // iOS Simulator: โผล่เป็น device ในลิสต์เหมือน Android (proxy เป็น macOS-wide → แชร์ทุก sim)
@@ -1745,6 +1876,7 @@ app.get('/api/status', async (req, res) => {
       muted: isMuted(),
       mutedDropped: mutedDropCount,
       flows: { count: proxyStore.flows.length, lastAt: lastFlowAt },
+      autoReconnect: autoReconnectMap, // serial → 'usb'|'wifi' (ฝั่ง server จัดการเอง)
       lanIp: getLanIp(),
     });
   } catch (e) {

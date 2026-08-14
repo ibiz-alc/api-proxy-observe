@@ -2899,6 +2899,9 @@ async function stConnectDevice(serial, mode) {
   // Guard โหมด Wi-Fi: มือถือไม่ได้อยู่วงเดียวกับ Mac → เตือนชัดๆ ไม่ตั้ง proxy ค้าง
   if (r.unreachable) { alert('⚠️ เชื่อม Wi-Fi ไม่ได้\n\n' + r.error); return; }
   if (!r.ok) throw new Error(r.error || 'connect ไม่สำเร็จ');
+  // emulator ที่ยังไม่มี system CA → ติดตั้งต่อให้เลย ไม่ต้องรอกดปุ่ม 🔐 เอง
+  // (ใช้เวลา ~90 วิ เพราะต้อง restart framework แล้วรอ boot จริง — ปุ่มจะขึ้น ⏳ ค้างไว้ ปกติ)
+  if (r.caMissing) await stInstallCaEmulator(serial);
 }
 
 function stCard(icon, title, up, details, actions = []) {
@@ -3116,60 +3119,43 @@ async function stSimDisconnect() {
   if (!r.ok) throw new Error(r.error || 'disconnect ไม่สำเร็จ');
 }
 
-// ===== Auto-reconnect USB device (ฝั่ง browser: ทำงานเฉพาะตอนเปิดหน้าเว็บ) =====
-// เก็บ preference ต่อ serial ใน localStorage → เปิดหน้าใหม่ยังจำได้
+// ===== Auto-reconnect (ตัว watcher ย้ายไปอยู่ฝั่ง server แล้ว — ทำงานตลอดแม้ปิดหน้าเว็บ) =====
+// UI เหลือหน้าที่เดียว: toggle เปิด/ปิดผ่าน API — สถานะปัจจุบันอ่านจาก /api/status (ฟิลด์ autoReconnect)
+let autoRcMap = {}; // serial → 'usb'|'wifi' — sync จาก /api/status ทุกครั้งที่ renderStatus
+async function setAuto(serial, on, mode) {
+  const r = await (await fetch('/api/devices/auto-reconnect', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ serial, on, mode }),
+  })).json();
+  if (!r.ok) throw new Error(r.error || 'ตั้งค่า auto-reconnect ไม่สำเร็จ');
+  autoRcMap = r.map || {};
+}
+
+// migrate ค่ายุค browser-only (localStorage) ขึ้น server ครั้งเดียวแล้วลบทิ้ง
+// ค่าเก่าที่เก็บเป็น true (ก่อนมีฟิลด์โหมด) → ถือเป็น 'usb' ตามพฤติกรรมเดิม
 const AUTO_KEY = 'apitester.autoConnect';
-function getAutoMap() { try { return JSON.parse(localStorage.getItem(AUTO_KEY) || '{}') || {}; } catch { return {}; } }
-function isAutoOn(serial) { return !!getAutoMap()[serial]; }
-// จำ "โหมด" ที่ผู้ใช้ต่อไว้ตอนเปิด auto ด้วย — ตอน watcher ทำงาน device จะ proxy หลุดไปแล้ว
-// (/api/status คืน mode=null เมื่อ connected=false) เลยอ่านโหมดจาก device ตอนนั้นไม่ได้
-// ค่าเก่าที่เก็บเป็น true (ก่อนมีฟิลด์นี้) → ถือเป็น 'usb' ตามพฤติกรรมเดิม
-function autoMode(serial) { return getAutoMap()[serial] === 'wifi' ? 'wifi' : 'usb'; }
-function setAuto(serial, on, mode) {
-  const m = getAutoMap();
-  if (on) m[serial] = mode === 'wifi' ? 'wifi' : 'usb'; else delete m[serial];
-  localStorage.setItem(AUTO_KEY, JSON.stringify(m));
-  if (!on) { delete autoBusy[serial]; delete autoNextTry[serial]; }
-}
-const autoBusy = {};     // serial → กำลังยิง connect อยู่ (กันยิงซ้อน)
-const autoNextTry = {};  // serial → เวลาที่ให้ลองใหม่ได้ (backoff หลัง fail)
-// device ถือว่า "สุขภาพดี" = เชื่อม proxy อยู่ และ (ถ้า USB) adb reverse ยังอยู่ — ตรงกับ okDev ใน renderStatus
-function devHealthy(dev) { return !!(dev.connected || dev.posternRunning) && !(dev.mode === 'usb' && dev.reverse === false); }
-// วนทุกไม่กี่วินาที: device ไหนเปิด auto ไว้ + ยังเสียบอยู่ + หลุด (reverse หาย/proxy โดนล้าง/เพิ่งเสียบใหม่) → สั่ง connect USB ให้เอง
-async function autoReconnectTick() {
-  const m = getAutoMap();
-  const serials = Object.keys(m).filter((s) => m[s]);
-  if (!serials.length) return;
-  let devices;
-  try { devices = (await (await fetch('/api/status')).json()).devices || []; } catch { return; }
-  const now = Date.now();
-  let didAct = false;
-  for (const serial of serials) {
-    const dev = devices.find((x) => x.serial === serial);
-    if (!dev) continue;                 // ถอดสายอยู่จริง (ไม่เห็น device) — รอจนเสียบกลับค่อยลอง
-    if (devHealthy(dev)) continue;      // ปกติดี ไม่ต้องทำอะไร
-    if (autoBusy[serial]) continue;     // ยิงอยู่ ยังไม่จบ
-    if (autoNextTry[serial] && now < autoNextTry[serial]) continue; // อยู่ในช่วง backoff
-    autoBusy[serial] = true;
-    try { await stConnectDevice(serial, autoMode(serial)); delete autoNextTry[serial]; didAct = true; }
-    catch { autoNextTry[serial] = Date.now() + 15000; } // fail → เว้น 15s ค่อยลองใหม่ (ไม่ถล่ม adb)
-    finally { autoBusy[serial] = false; }
-  }
-  // ถ้าเพิ่งเชื่อมกลับสำเร็จและกำลังเปิดแท็บ status อยู่ → รีเฟรชการ์ดให้เห็นผลทันที
-  if (didAct && document.getElementById('tab-status').classList.contains('active')) renderStatus();
-}
-setInterval(autoReconnectTick, 4000);
+(async function migrateAutoPrefs() {
+  let m; try { m = JSON.parse(localStorage.getItem(AUTO_KEY) || 'null'); } catch { m = null; }
+  if (!m || typeof m !== 'object') return;
+  try {
+    for (const [serial, v] of Object.entries(m)) {
+      if (v) await setAuto(serial, true, v === 'wifi' ? 'wifi' : 'usb');
+    }
+    localStorage.removeItem(AUTO_KEY); // ลบเฉพาะเมื่อส่งขึ้นครบ — server ล่มก็ยังเหลือไว้ลองรอบหน้า
+  } catch { /* ไว้ migrate ใหม่ตอนเปิดหน้าครั้งถัดไป */ }
+})();
 
 // ปุ่ม toggle auto-reconnect ต่อ device (ใช้ .toggle-chip เดิม) — วางในแถว actions ของการ์ด device
 function stAutoToggle(serial, dev = {}) {
   const cb = el('input', { type: 'checkbox' });
-  cb.checked = isAutoOn(serial);
-  cb.addEventListener('change', () => {
+  cb.checked = !!autoRcMap[serial];
+  cb.addEventListener('change', async () => {
     // ต่ออยู่ → จำโหมดปัจจุบัน / ยังไม่ได้ต่อ → เดาจาก transport (adb-over-wifi serial = ip:port)
-    setAuto(serial, cb.checked, dev.mode || dev.transport);
-    if (cb.checked) autoReconnectTick(); // เปิดปุ๊บ ถ้าตอนนี้หลุดอยู่ให้ลองต่อเลย ไม่ต้องรอรอบหน้า
+    try { await setAuto(serial, cb.checked, dev.mode || dev.transport); }
+    catch (e) { cb.checked = !cb.checked; alert('ตั้งค่า auto-reconnect ไม่สำเร็จ: ' + e.message); }
   });
-  return el('label', { class: 'toggle-chip st-auto-chip', title: 'เปิดไว้ → ถ้าหลุด (สายหลุด/reverse หาย/proxy โดนล้าง) จะเชื่อมกลับด้วยโหมดเดิมให้อัตโนมัติ ขณะเปิดหน้านี้' },
+  return el('label', { class: 'toggle-chip st-auto-chip', title: 'เปิดไว้ → ถ้าหลุด (สายหลุด/reverse หาย/proxy โดนล้าง) server จะเชื่อมกลับด้วยโหมดเดิมให้อัตโนมัติ — ทำงานตลอดแม้ปิดหน้านี้' },
     [cb, el('span', { text: '🔁 Auto-reconnect' })]);
 }
 
@@ -3182,6 +3168,7 @@ async function renderStatus() {
     return;
   }
   const { services: sv, devices, iosSims = [], iosProxy = {}, muted, mutedDropped = 0, flows, lanIp } = d;
+  autoRcMap = d.autoReconnect || {}; // sync สถานะ toggle auto-reconnect จาก server
   statusCards.innerHTML = '';
 
   // --- ความพร้อมรวมของ pipeline บันทึก traffic ---
@@ -3192,6 +3179,9 @@ async function renderStatus() {
   if (!devices.length) blockers.push('ไม่พบ device — เสียบสาย USB + เปิด USB debugging');
   else if (!connectedDev) blockers.push('มือถือยังไม่ได้เชื่อม proxy — กดปุ่มเชื่อมที่การ์ด Device');
   if (usbNoReverse) blockers.push('adb reverse หายไป (สายหลุด/เสียบใหม่) — กดเชื่อม USB ใหม่');
+  // emulator ต่ออยู่แต่ยังไม่มี system CA → HTTP บันทึกได้แต่ HTTPS (traffic ส่วนใหญ่) จะถอดรหัสไม่ได้
+  const emuNoCa = devices.find((x) => x.emulator && x.connected && x.systemCa === false);
+  if (emuNoCa) blockers.push('emulator ยังไม่มี system CA — HTTPS จะถอดรหัสไม่ได้ (CA หายทุกครั้งที่ reboot emulator) · กด 🔐 ติดตั้ง CA (Auto) ที่การ์ด device');
   if (muted) blockers.push('การบันทึกถูก mute อยู่ (หลังกด disconnect)' + (mutedDropped ? ` — ทิ้งไป ${mutedDropped} flows` : '') + ' · กดปลด mute ที่การ์ด "การบันทึก traffic"');
   statusBanner.className = 'status-banner ' + (blockers.length ? 'bad' : 'ok');
   statusBanner.innerHTML = blockers.length
@@ -3236,13 +3226,20 @@ async function renderStatus() {
     } else {
       details.push('ยังไม่ได้เชื่อม proxy' + (lanIp ? ` (Wi-Fi ใช้ Host ${lanIp}:8888)` : ''));
     }
+    // สถานะ system CA ของ emulator (จำเป็นต่อการถอดรหัส HTTPS — tmpfs หายทุก reboot)
+    if (dev.emulator && dev.systemCa === false) {
+      details.push('⚠️ ยังไม่มี system CA — HTTPS จะถอดรหัสไม่ได้ · กด 🔐 หรือกดเชื่อมใหม่ (ติดตั้งให้อัตโนมัติ ~90 วิ)');
+    } else if (dev.emulator && dev.systemCa === true) {
+      details.push('🔐 system CA ติดตั้งแล้ว — HTTPS ถอดรหัสได้ (ติดตั้งใหม่ถ้า reboot emulator)');
+    }
     const acts = [];
     if (!okDev) {
       acts.push(stBtn('🔌 เชื่อม USB', () => stConnectDevice(dev.serial, 'usb')));
       acts.push(stBtn('📶 เชื่อม Wi-Fi', () => stConnectDevice(dev.serial, 'wifi')));
     } else {
-      // กดตัดเอง = ตั้งใจปลด → ปิด auto ด้วย ไม่งั้น watcher จะเชื่อมกลับทันทีจนปลดไม่ได้
-      acts.push(stBtn('⛔ ตัดการเชื่อมต่อ', () => { setAuto(dev.serial, false); return stDisconnectDevice(dev.serial); }, 'stop'));
+      // กดตัดเอง = ตั้งใจปลด → ฝั่ง server ปิด auto-reconnect ของเครื่องนี้ให้ด้วย (ใน endpoint disconnect)
+      // ไม่งั้น watcher จะเชื่อมกลับทันทีจนปลดไม่ได้
+      acts.push(stBtn('⛔ ตัดการเชื่อมต่อ', () => stDisconnectDevice(dev.serial), 'stop'));
     }
     // toggle auto-reconnect (เฉพาะ device จริงที่มี serial ต่อผ่าน adb) — โชว์ได้ทุกสถานะเพื่อ pre-arm ไว้ก่อน
     if (dev.serial) acts.push(stAutoToggle(dev.serial, dev));
