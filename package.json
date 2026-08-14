@@ -5,6 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "build:mirror": "node scripts/build-mirror.mjs",
     "postinstall": "patch-package"
   },
   "engines": {

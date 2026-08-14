@@ -17,6 +17,7 @@ if (USB_ONLY) document.querySelectorAll('[data-usbonly-hide]').forEach((e) => { 
 // ================= Tab switching =================
 document.querySelectorAll('.tab-btn').forEach((btn) => {
   btn.addEventListener('click', () => {
+    if (!btn.dataset.tab) return; // ปุ่มที่ไม่ใช่ tab จริง (เช่น Mirror) จัดการเอง
     document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
     document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
     btn.classList.add('active');
@@ -24,6 +25,9 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
     if (typeof renderTcProxyPopup === 'function') renderTcProxyPopup(); // โชว์/ซ่อน popup Test Case ในหน้า Proxy
   });
 });
+
+// ปุ่ม Mirror: เปิด/ปิด drawer พาเนล scrcpy (ไม่ใช่การสลับ tab)
+document.getElementById('mirrorToggleBtn').addEventListener('click', () => window.MirrorPanel.toggle());
 
 // ================= Helpers =================
 function el(tag, attrs = {}, children = []) {
