@@ -3842,25 +3842,41 @@
       this._buildDom();
     }
     // ---------- สร้าง DOM ทั้งพาเนล ----------
+    // โครงแบบ Android Studio: icon rail แนวตั้งชิดขวาสุด + tool window 2 อัน
+    // (🗂️ Device Manager = รายการอุปกรณ์ / 📱 Running Devices = จอที่กำลัง mirror)
+    // กด icon เปิด/ปิด panel ของตัวเอง · กด ▶ ใน Device Manager จะสลับไป Running Devices เอง
     _buildDom() {
+      this.railRunningBtn = el("button", {
+        class: "mirror-rail-btn",
+        id: "mirrorRailRunning",
+        title: "Running Devices \u2014 \u0E08\u0E2D\u0E17\u0E35\u0E48\u0E01\u0E33\u0E25\u0E31\u0E07 mirror",
+        text: "\u{1F4F1}"
+      });
+      this.railDevicesBtn = el("button", {
+        class: "mirror-rail-btn",
+        id: "mirrorRailDevices",
+        title: "Device Manager \u2014 \u0E2D\u0E38\u0E1B\u0E01\u0E23\u0E13\u0E4C\u0E17\u0E35\u0E48 online",
+        text: "\u{1F5C2}\uFE0F"
+      });
+      this.railRunningBtn.addEventListener("click", () => this.togglePanel("running"));
+      this.railDevicesBtn.addEventListener("click", () => this.togglePanel("devices"));
+      const rail = el("div", { class: "mirror-rail" }, [this.railRunningBtn, this.railDevicesBtn]);
       this.refreshBtn = el("button", { class: "mirror-icon-btn", title: "\u0E23\u0E35\u0E40\u0E1F\u0E23\u0E0A\u0E23\u0E32\u0E22\u0E0A\u0E37\u0E48\u0E2D\u0E2D\u0E38\u0E1B\u0E01\u0E23\u0E13\u0E4C", text: "\u27F2" });
-      this.hideBtn = el("button", { class: "mirror-icon-btn", title: "\u0E0B\u0E48\u0E2D\u0E19\u0E1E\u0E32\u0E40\u0E19\u0E25 (\u0E22\u0E31\u0E07\u0E15\u0E48\u0E2D\u0E2D\u0E22\u0E39\u0E48)", text: "\u2014" });
-      this.statusDot = el("span", { class: "mirror-dot" });
-      this.statusText = el("span", { class: "mirror-status-text", text: "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D" });
+      this.refreshBtn.addEventListener("click", () => this.refreshDevices());
       this.deviceList = el("div", { class: "mirror-device-list" });
       this.devices = [];
-      this.refreshBtn.addEventListener("click", () => this.refreshDevices());
-      this.hideBtn.addEventListener("click", () => this.hide());
-      const header = el("div", { class: "mirror-header" }, [
+      this.devicesView = el("div", { class: "mirror-view" }, [
         el("div", { class: "mirror-header-row" }, [
-          el("span", { class: "mirror-title", text: "\u{1F4F1} Mirror" }),
-          this.refreshBtn,
-          this.hideBtn
+          el("span", { class: "mirror-title", text: "\u{1F5C2}\uFE0F Device Manager" }),
+          this.refreshBtn
         ]),
-        this.deviceList,
-        el("div", { class: "mirror-header-row" }, [
-          el("span", { class: "mirror-statusline" }, [this.statusDot, this.statusText])
-        ])
+        this.deviceList
+      ]);
+      this.statusDot = el("span", { class: "mirror-dot" });
+      this.statusText = el("span", { class: "mirror-status-text", text: "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D" });
+      const runningHeader = el("div", { class: "mirror-header-row" }, [
+        el("span", { class: "mirror-title", text: "\u{1F4F1} Running Devices" }),
+        el("span", { class: "mirror-statusline" }, [this.statusDot, this.statusText])
       ]);
       this.videoArea = el("div", { class: "mirror-video", tabindex: "0" });
       this.videoPlaceholder = el("div", { class: "mirror-placeholder", text: "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35\u0E20\u0E32\u0E1E \u2014 \u0E01\u0E14\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D" });
@@ -3893,14 +3909,21 @@
       const sendBtn = el("button", { class: "mirror-btn", text: "\u0E2A\u0E48\u0E07\u0E02\u0E49\u0E2D\u0E04\u0E27\u0E32\u0E21" });
       sendBtn.addEventListener("click", () => this._sendText());
       const bottomRow = el("div", { class: "mirror-bottom" }, [this.textInput, sendBtn]);
-      this.drawer = el("div", { class: "mirror-drawer", id: "mirrorDrawer" }, [
-        header,
+      this.runningView = el("div", { class: "mirror-view" }, [
+        runningHeader,
         this.videoArea,
         toolbar,
         bottomRow
       ]);
+      this.drawer = el("div", { class: "mirror-drawer", id: "mirrorDrawer" }, [
+        this.devicesView,
+        this.runningView
+      ]);
       this.drawer.style.display = "none";
+      this.activeView = null;
+      document.body.appendChild(rail);
       document.body.appendChild(this.drawer);
+      document.body.classList.add("mirror-rail");
     }
     // ---------- โหลดรายชื่ออุปกรณ์ (Device Manager style) ----------
     async refreshDevices() {
@@ -3937,8 +3960,12 @@
           title: isActive ? "\u0E2B\u0E22\u0E38\u0E14 mirror \u0E40\u0E04\u0E23\u0E37\u0E48\u0E2D\u0E07\u0E19\u0E35\u0E49" : "\u0E40\u0E1B\u0E34\u0E14 mirror \u0E40\u0E04\u0E23\u0E37\u0E48\u0E2D\u0E07\u0E19\u0E35\u0E49 (\u0E15\u0E31\u0E49\u0E07 proxy \u0E43\u0E2B\u0E49\u0E14\u0E49\u0E27\u0E22)"
         });
         btn.addEventListener("click", () => {
-          if (isActive) this.disconnect();
-          else this.connect(d.serial);
+          if (isActive) {
+            this.disconnect();
+            return;
+          }
+          this.connect(d.serial);
+          this.showPanel("running");
         });
         const row = el("div", { class: "mirror-device-row" + (isActive ? " active" : "") }, [
           dot,
@@ -4271,17 +4298,26 @@
       this.send({ type: "text", text });
       this.textInput.value = "";
     }
-    // ---------- แสดง/ซ่อนพาเนล ----------
-    // เปิด = dock ด้านขวา ดันเนื้อหาหลัก (body.mirror-open มี padding-right ใน CSS) ไม่ทับจอ
-    show() {
+    // ---------- แสดง/ซ่อน tool window (แบบ Android Studio) ----------
+    // เปิด = dock ด้านขวาข้าง rail ดันเนื้อหาหลัก (body.mirror-open ใน CSS) ไม่ทับจอ
+    // ปิด = กด icon เดิมซ้ำ · session mirror ยังทำงานต่อเสมอ (ปิดแค่หน้าต่าง)
+    showPanel(view) {
+      this.activeView = view;
       this.drawer.style.display = "flex";
+      this.devicesView.style.display = view === "devices" ? "flex" : "none";
+      this.runningView.style.display = view === "running" ? "flex" : "none";
+      this.railDevicesBtn.classList.toggle("active", view === "devices");
+      this.railRunningBtn.classList.toggle("active", view === "running");
       document.body.classList.add("mirror-open");
       this.visible = true;
       this.refreshDevices();
       if (!this._deviceTimer) this._deviceTimer = setInterval(() => this.refreshDevices(), 5e3);
     }
-    hide() {
+    closePanel() {
+      this.activeView = null;
       this.drawer.style.display = "none";
+      this.railDevicesBtn.classList.remove("active");
+      this.railRunningBtn.classList.remove("active");
       document.body.classList.remove("mirror-open");
       this.visible = false;
       if (this._deviceTimer) {
@@ -4289,17 +4325,32 @@
         this._deviceTimer = null;
       }
     }
+    togglePanel(view) {
+      if (this.activeView === view) this.closePanel();
+      else this.showPanel(view);
+    }
+    // API เดิม (เผื่อโค้ดอื่นเรียก): show/hide/toggle จัดการ panel ที่เหมาะสม
+    show() {
+      this.showPanel(this.ws ? "running" : "devices");
+    }
+    hide() {
+      this.closePanel();
+    }
     toggle() {
-      if (this.visible) this.hide();
+      if (this.visible) this.closePanel();
       else this.show();
     }
     open(serial) {
+      if (serial) {
+        this.connect(serial);
+        this.showPanel("running");
+        return;
+      }
       this.show();
-      if (serial) this.connect(serial);
     }
     close() {
       this.disconnect();
-      this.hide();
+      this.closePanel();
     }
   };
   var panel = new MirrorPanel();

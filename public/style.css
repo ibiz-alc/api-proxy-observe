@@ -39,7 +39,9 @@ header {
 
 header h1 { font-size: 1.2rem; }
 
-nav { display: flex; gap: 8px; }
+/* เมนูบน scroll ซ้าย-ขวาได้เมื่อพื้นที่แคบ (ตอน tool window เปิด) — ปุ่มไม่ตัดบรรทัด */
+nav { display: flex; gap: 8px; overflow-x: auto; flex-wrap: nowrap; scrollbar-width: thin; }
+nav .tab-btn { flex: 0 0 auto; white-space: nowrap; }
 
 .tab-btn {
   background: transparent;
@@ -1478,7 +1480,7 @@ button.mp-meta-btn:hover { color: var(--text); }
 .mirror-drawer {
   position: fixed;
   top: 0;
-  right: 0;
+  right: 44px; /* dock ข้าง icon rail */
   width: 380px;
   height: 100vh;
   background: var(--panel);
@@ -1495,8 +1497,30 @@ button.mp-meta-btn:hover { color: var(--text); }
 .mirror-header-row { display: flex; align-items: center; gap: 8px; }
 .mirror-title { font-size: 1rem; font-weight: 600; flex: 1; }
 
-/* dock สไตล์ Android Studio: เปิด panel แล้วดันเนื้อหาหลัก ไม่ทับจอ */
-body.mirror-open { padding-right: 396px; transition: padding-right 0.15s ease; }
+/* icon rail แนวตั้งมุมขวาแบบ Android Studio — อยู่ตลอดเวลา */
+.mirror-rail {
+  position: fixed; top: 0; right: 0;
+  width: 44px; height: 100vh;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  z-index: 9002;
+  display: flex; flex-direction: column; align-items: center;
+  gap: 6px; padding-top: 10px;
+}
+.mirror-rail-btn {
+  background: transparent; border: none; border-radius: 8px;
+  width: 34px; height: 34px; font-size: 1.05rem; line-height: 1;
+  color: var(--muted); cursor: pointer;
+}
+.mirror-rail-btn:hover { background: var(--panel-2); color: var(--text); }
+.mirror-rail-btn.active { background: var(--accent); }
+
+/* dock สไตล์ Android Studio: rail กินที่ 44px เสมอ, เปิด tool window แล้วดันเนื้อหาเพิ่ม ไม่ทับจอ */
+body.mirror-rail { padding-right: 44px; transition: padding-right 0.15s ease; }
+body.mirror-open { padding-right: 440px; }
+
+/* tool window view (Device Manager / Running Devices) — สลับกันแสดงใน drawer เดียว */
+.mirror-view { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
 
 /* รายการอุปกรณ์แบบ Device Manager */
 .mirror-device-list {

@@ -14,7 +14,7 @@ const adb = (...a) => execFileSync('adb', ['-s', 'emulator-5554', ...a], { encod
   const page = await browser.newPage();
   await page.setViewport({ width: 1600, height: 1000 });
   await page.goto('http://localhost:3100', { waitUntil: 'networkidle2' });
-  await page.click('#mirrorToggleBtn');
+  await page.click('#mirrorRailDevices');
   await page.waitForFunction(() => [...document.querySelectorAll('.mirror-device-row')].some((r) => r.textContent.includes('emulator-5554')), { timeout: 20000 });
   await page.$$eval('.mirror-device-row', (rows) => {
     rows.find((r) => r.textContent.includes('emulator-5554')).querySelector('.mirror-btn').click();

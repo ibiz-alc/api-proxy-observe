@@ -63,29 +63,40 @@ class MirrorPanel {
   }
 
   // ---------- สร้าง DOM ทั้งพาเนล ----------
+  // โครงแบบ Android Studio: icon rail แนวตั้งชิดขวาสุด + tool window 2 อัน
+  // (🗂️ Device Manager = รายการอุปกรณ์ / 📱 Running Devices = จอที่กำลัง mirror)
+  // กด icon เปิด/ปิด panel ของตัวเอง · กด ▶ ใน Device Manager จะสลับไป Running Devices เอง
   _buildDom() {
-    // header สไตล์ Device Manager ของ Android Studio: รายการอุปกรณ์ online เป็นแถว
-    // แต่ละแถวมีปุ่มเปิด/หยุด mirror ของตัวเอง (ไม่มี dropdown + ปุ่ม connect รวม)
+    // --- rail มุมขวา ---
+    this.railRunningBtn = el('button', {
+      class: 'mirror-rail-btn', id: 'mirrorRailRunning', title: 'Running Devices — จอที่กำลัง mirror', text: '📱',
+    });
+    this.railDevicesBtn = el('button', {
+      class: 'mirror-rail-btn', id: 'mirrorRailDevices', title: 'Device Manager — อุปกรณ์ที่ online', text: '🗂️',
+    });
+    this.railRunningBtn.addEventListener('click', () => this.togglePanel('running'));
+    this.railDevicesBtn.addEventListener('click', () => this.togglePanel('devices'));
+    const rail = el('div', { class: 'mirror-rail' }, [this.railRunningBtn, this.railDevicesBtn]);
+
+    // --- view: Device Manager ---
     this.refreshBtn = el('button', { class: 'mirror-icon-btn', title: 'รีเฟรชรายชื่ออุปกรณ์', text: '⟲' });
-    this.hideBtn = el('button', { class: 'mirror-icon-btn', title: 'ซ่อนพาเนล (ยังต่ออยู่)', text: '—' });
-    this.statusDot = el('span', { class: 'mirror-dot' });
-    this.statusText = el('span', { class: 'mirror-status-text', text: 'ยังไม่เชื่อมต่อ' });
+    this.refreshBtn.addEventListener('click', () => this.refreshDevices());
     this.deviceList = el('div', { class: 'mirror-device-list' });
     this.devices = [];
-
-    this.refreshBtn.addEventListener('click', () => this.refreshDevices());
-    this.hideBtn.addEventListener('click', () => this.hide());
-
-    const header = el('div', { class: 'mirror-header' }, [
+    this.devicesView = el('div', { class: 'mirror-view' }, [
       el('div', { class: 'mirror-header-row' }, [
-        el('span', { class: 'mirror-title', text: '📱 Mirror' }),
+        el('span', { class: 'mirror-title', text: '🗂️ Device Manager' }),
         this.refreshBtn,
-        this.hideBtn,
       ]),
       this.deviceList,
-      el('div', { class: 'mirror-header-row' }, [
-        el('span', { class: 'mirror-statusline' }, [this.statusDot, this.statusText]),
-      ]),
+    ]);
+
+    // --- view: Running Devices (สถานะ + วิดีโอ + ควบคุม) ---
+    this.statusDot = el('span', { class: 'mirror-dot' });
+    this.statusText = el('span', { class: 'mirror-status-text', text: 'ยังไม่เชื่อมต่อ' });
+    const runningHeader = el('div', { class: 'mirror-header-row' }, [
+      el('span', { class: 'mirror-title', text: '📱 Running Devices' }),
+      el('span', { class: 'mirror-statusline' }, [this.statusDot, this.statusText]),
     ]);
 
     // พื้นที่วิดีโอ — canvas ของ renderer จะถูกแทรกที่นี่
@@ -122,14 +133,22 @@ class MirrorPanel {
     sendBtn.addEventListener('click', () => this._sendText());
     const bottomRow = el('div', { class: 'mirror-bottom' }, [this.textInput, sendBtn]);
 
-    this.drawer = el('div', { class: 'mirror-drawer', id: 'mirrorDrawer' }, [
-      header,
+    this.runningView = el('div', { class: 'mirror-view' }, [
+      runningHeader,
       this.videoArea,
       toolbar,
       bottomRow,
     ]);
+
+    this.drawer = el('div', { class: 'mirror-drawer', id: 'mirrorDrawer' }, [
+      this.devicesView,
+      this.runningView,
+    ]);
     this.drawer.style.display = 'none';
+    this.activeView = null; // null | 'devices' | 'running'
+    document.body.appendChild(rail);
     document.body.appendChild(this.drawer);
+    document.body.classList.add('mirror-rail'); // เผื่อพื้นที่ให้ rail เสมอ (padding-right ใน CSS)
   }
 
   // ---------- โหลดรายชื่ออุปกรณ์ (Device Manager style) ----------
@@ -168,8 +187,9 @@ class MirrorPanel {
         title: isActive ? 'หยุด mirror เครื่องนี้' : 'เปิด mirror เครื่องนี้ (ตั้ง proxy ให้ด้วย)',
       });
       btn.addEventListener('click', () => {
-        if (isActive) this.disconnect();
-        else this.connect(d.serial);
+        if (isActive) { this.disconnect(); return; }
+        this.connect(d.serial);
+        this.showPanel('running'); // เริ่ม mirror แล้วสลับไป Running Devices (rail highlight ตาม)
       });
       const row = el('div', { class: 'mirror-device-row' + (isActive ? ' active' : '') }, [
         dot,
@@ -521,10 +541,16 @@ class MirrorPanel {
     this.textInput.value = '';
   }
 
-  // ---------- แสดง/ซ่อนพาเนล ----------
-  // เปิด = dock ด้านขวา ดันเนื้อหาหลัก (body.mirror-open มี padding-right ใน CSS) ไม่ทับจอ
-  show() {
+  // ---------- แสดง/ซ่อน tool window (แบบ Android Studio) ----------
+  // เปิด = dock ด้านขวาข้าง rail ดันเนื้อหาหลัก (body.mirror-open ใน CSS) ไม่ทับจอ
+  // ปิด = กด icon เดิมซ้ำ · session mirror ยังทำงานต่อเสมอ (ปิดแค่หน้าต่าง)
+  showPanel(view) {
+    this.activeView = view;
     this.drawer.style.display = 'flex';
+    this.devicesView.style.display = view === 'devices' ? 'flex' : 'none';
+    this.runningView.style.display = view === 'running' ? 'flex' : 'none';
+    this.railDevicesBtn.classList.toggle('active', view === 'devices');
+    this.railRunningBtn.classList.toggle('active', view === 'running');
     document.body.classList.add('mirror-open');
     this.visible = true;
     this.refreshDevices();
@@ -532,28 +558,38 @@ class MirrorPanel {
     if (!this._deviceTimer) this._deviceTimer = setInterval(() => this.refreshDevices(), 5000);
   }
 
-  hide() {
-    // ซ่อนอย่างเดียว — WS + decoder ยังทำงานต่อ (กดปุ่ม nav อีกทีเพื่อเปิดกลับ)
+  closePanel() {
+    this.activeView = null;
     this.drawer.style.display = 'none';
+    this.railDevicesBtn.classList.remove('active');
+    this.railRunningBtn.classList.remove('active');
     document.body.classList.remove('mirror-open');
     this.visible = false;
     if (this._deviceTimer) { clearInterval(this._deviceTimer); this._deviceTimer = null; }
   }
 
+  togglePanel(view) {
+    if (this.activeView === view) this.closePanel();
+    else this.showPanel(view);
+  }
+
+  // API เดิม (เผื่อโค้ดอื่นเรียก): show/hide/toggle จัดการ panel ที่เหมาะสม
+  show() { this.showPanel(this.ws ? 'running' : 'devices'); }
+  hide() { this.closePanel(); }
   toggle() {
-    if (this.visible) this.hide();
+    if (this.visible) this.closePanel();
     else this.show();
   }
 
   open(serial) {
+    if (serial) { this.connect(serial); this.showPanel('running'); return; }
     this.show();
-    if (serial) this.connect(serial);
   }
 
   close() {
-    // ตัดการเชื่อมต่อเต็มรูปแบบ + ซ่อน
+    // ตัดการเชื่อมต่อเต็มรูปแบบ + ปิดหน้าต่าง
     this.disconnect();
-    this.hide();
+    this.closePanel();
   }
 }
 

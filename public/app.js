@@ -26,8 +26,7 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
   });
 });
 
-// ปุ่ม Mirror: เปิด/ปิด drawer พาเนล scrcpy (ไม่ใช่การสลับ tab)
-document.getElementById('mirrorToggleBtn').addEventListener('click', () => window.MirrorPanel.toggle());
+// Mirror ย้ายไป icon rail มุมขวา (mirror.bundle.js สร้าง rail + panel เองทั้งหมด)
 
 // ================= Helpers =================
 function el(tag, attrs = {}, children = []) {

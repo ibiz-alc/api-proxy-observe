@@ -46,8 +46,8 @@ const step = (name, ok, detail = '') => {
   page.on('pageerror', (e) => pageErrors.push(String(e)));
   await page.goto(URL, { waitUntil: 'networkidle2' });
 
-  // 1) เปิด panel + กด ▶ ดูจอ ที่แถวของ emulator ใน device list (UI แบบ Device Manager)
-  await page.click('#mirrorToggleBtn');
+  // 1) เปิด Device Manager จาก icon rail มุมขวา + กด ▶ ดูจอ ที่แถวของ emulator
+  await page.click('#mirrorRailDevices');
   await page.waitForSelector('#mirrorDrawer', { visible: true });
   // รอจนแถวของ emulator โผล่ (endpoint /api/devices enrich ผ่าน adb ใช้เวลาหลายวิ)
   await page.waitForFunction(
@@ -61,6 +61,14 @@ const step = (name, ok, detail = '') => {
     return true;
   }, SERIAL);
   step('เจอแถว device emulator-5554 ใน list แล้วกดดูจอ', rowFound);
+  // กด ▶ แล้วต้องสลับไป view Running Devices + rail icon highlight (พฤติกรรมแบบ Android Studio)
+  await sleep(400);
+  const switched = await page.evaluate(() => {
+    const running = [...document.querySelectorAll('.mirror-view')].find((v) => v.textContent.includes('Running Devices'));
+    return running && getComputedStyle(running).display !== 'none'
+      && document.querySelector('#mirrorRailRunning').classList.contains('active');
+  });
+  step('สลับไป Running Devices + rail highlight อัตโนมัติ', switched);
   const status = async () => page.$eval('.mirror-status-text', (n) => n.textContent);
   const waitStatus = async (want, ms) => {
     const t0 = Date.now();
@@ -166,14 +174,18 @@ const step = (name, ok, detail = '') => {
     dropped && Boolean(pidBefore) && Boolean(pidAfter) && pidBefore !== pidAfter && backOnline,
     `dropped=${dropped} pidBefore=${pidBefore} pidAfter=${pidAfter} backOnline=${backOnline}`);
 
-  // 9) ซ่อน/แสดง โดย session ไม่หลุด
-  await page.$$eval('.mirror-icon-btn', (btns) => btns.find((b) => b.title.includes('ซ่อน')).click());
-  const hidden = await page.$eval('#mirrorDrawer', (d) => getComputedStyle(d).display === 'none' || d.offsetParent === null);
-  await page.click('#mirrorToggleBtn');
+  // 9) ปิด/เปิด tool window จาก rail icon โดย session ไม่หลุด (พฤติกรรม AS: กด icon เดิมซ้ำ = ปิด)
+  await page.click('#mirrorRailRunning'); // ปิด
+  await sleep(300);
+  const hidden = await page.$eval('#mirrorDrawer', (d) => getComputedStyle(d).display === 'none');
+  await page.click('#mirrorRailRunning'); // เปิดกลับ
+  await sleep(300);
   const shown = await page.$eval('#mirrorDrawer', (d) => getComputedStyle(d).display !== 'none');
-  step('ซ่อน/แสดง panel โดยยังเชื่อมต่ออยู่', hidden && shown && (await status()) === 'เชื่อมต่อแล้ว', `hidden=${hidden} shown=${shown} status=${await status()}`);
+  step('ปิด/เปิดจาก rail โดยยังเชื่อมต่ออยู่', hidden && shown && (await status()) === 'เชื่อมต่อแล้ว', `hidden=${hidden} shown=${shown} status=${await status()}`);
 
-  // 10) disconnect → scrcpy หายจากเครื่อง
+  // 10) disconnect จากปุ่ม ⏹ ในแถว device (สลับไป Device Manager ก่อน) → scrcpy หายจากเครื่อง
+  await page.click('#mirrorRailDevices');
+  await sleep(600);
   await page.click('.mirror-btn.danger');
   await sleep(2500);
   const psOut = adb('shell', 'ps', '-A', '-o', 'PID,ARGS').split('\n').filter((l) => /scrcpy/i.test(l));
