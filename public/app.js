@@ -3348,12 +3348,79 @@ setupSettings();
 const JV_TEXT_KEY = 'jsonViewerText';
 const JV_MAX_PARSE = 5 * 1024 * 1024;  // เกินนี้ไม่ parse — tree เป็น DOM เต็ม จะค้าง
 const JV_MAX_SAVE = 500 * 1024;        // เกินนี้ไม่เขียน localStorage (กัน quota)
-function jvErrorPos(msg, text) { // หา line/col จาก error message ของ browser → {line, col, pos} หรือ null
+function jvScanError(text) { // mini JSON scanner: คืน index ตัวแรกที่ผิด spec
+  // Chrome รุ่นใหม่เลิกบอก "at position N" ใน error message (เหลือแค่ snippet) จึงต้องหาตำแหน่งเอง
+  let i = 0; const n = text.length;
+  const fail = { at: -1 };
+  const ws = () => { while (i < n && (text[i] === ' ' || text[i] === '\t' || text[i] === '\n' || text[i] === '\r')) i++; };
+  const bad = () => { if (fail.at < 0) fail.at = Math.min(i, Math.max(0, n - 1)); return false; };
+  function str() {
+    i++; // เปิด "
+    while (i < n) {
+      if (text[i] === '\\') { i += 2; continue; }
+      if (text[i] === '"') { i++; return true; }
+      if (text[i] === '\n') return bad(); // ขึ้นบรรทัดดิบใน string = ผิด spec
+      i++;
+    }
+    return bad();
+  }
+  function num() {
+    const m = /^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?/.exec(text.slice(i));
+    if (!m || !m[0]) return bad();
+    i += m[0].length; return true;
+  }
+  function value() {
+    ws();
+    if (i >= n) return bad();
+    const c = text[i];
+    if (c === '{') return obj();
+    if (c === '[') return arr();
+    if (c === '"') return str();
+    if (c === '-' || (c >= '0' && c <= '9')) return num();
+    if (text.startsWith('true', i)) { i += 4; return true; }
+    if (text.startsWith('false', i)) { i += 5; return true; }
+    if (text.startsWith('null', i)) { i += 4; return true; }
+    return bad();
+  }
+  function obj() {
+    i++; ws();
+    if (text[i] === '}') { i++; return true; }
+    for (;;) {
+      ws();
+      if (text[i] !== '"') return bad();
+      if (!str()) return false;
+      ws();
+      if (text[i] !== ':') return bad();
+      i++;
+      if (!value()) return false;
+      ws();
+      if (text[i] === ',') { i++; continue; }
+      if (text[i] === '}') { i++; return true; }
+      return bad();
+    }
+  }
+  function arr() {
+    i++; ws();
+    if (text[i] === ']') { i++; return true; }
+    for (;;) {
+      if (!value()) return false;
+      ws();
+      if (text[i] === ',') { i++; continue; }
+      if (text[i] === ']') { i++; return true; }
+      return bad();
+    }
+  }
+  if (value()) { ws(); return i < n ? i : null; } // parse ผ่านแต่มีของเหลือท้าย = ผิดตรงนั้น
+  return fail.at < 0 ? null : fail.at;
+}
+function jvErrorPos(msg, text) { // หา line/col ของจุดพัง → {line, col, pos} หรือ null
+  let pos = null;
   let m = msg.match(/line (\d+) column (\d+)/i);
   if (m) return { line: +m[1], col: +m[2], pos: null };
   m = msg.match(/position (\d+)/i);
-  if (!m) return null;
-  const pos = Math.min(+m[1], text.length);
+  if (m) pos = Math.min(+m[1], text.length);
+  if (pos == null) pos = jvScanError(text); // browser ไม่บอกตำแหน่ง → scan หาเอง
+  if (pos == null) return null;
   const before = text.slice(0, pos);
   const line = (before.match(/\n/g) || []).length + 1;
   return { line, col: pos - before.lastIndexOf('\n'), pos };
