@@ -83,6 +83,14 @@ async function setEditor(page, text) { // วางข้อความใน e
   check('3 กระโดดแล้วกางบล็อกที่พับ + match อยู่ใน viewport', collapsedBefore && r3.itemsExpanded && r3.curVisible);
   const r3b = await page.evaluate(() => { document.getElementById('jv-next-btn').click(); return document.getElementById('jv-search-count').textContent; });
   check('3 ปุ่ม ▼ ไปตัวถัดไป (2/2)', r3b === '2/2', r3b);
+  // 3c) คำที่โผล่แค่ใน summary ที่ระบบสร้าง ("N keys") ต้องไม่ match
+  await page.evaluate(() => { const s = document.getElementById('jv-search'); s.value = 'keys'; s.dispatchEvent(new Event('input', { bubbles: true })); });
+  await sleep(400);
+  const r3c = await page.evaluate(() => ({
+    hits: document.querySelectorAll('#jv-tree .jt-hit').length,
+    count: document.getElementById('jv-search-count').textContent,
+  }));
+  check('3 ค้น "keys" ไม่โดน summary ของระบบ', r3c.hits === 0 && r3c.count === 'ไม่พบ', `hits=${r3c.hits} count=${r3c.count}`);
   await page.evaluate(() => { const s = document.getElementById('jv-search'); s.value = ''; s.dispatchEvent(new Event('input', { bubbles: true })); });
   await sleep(400);
 

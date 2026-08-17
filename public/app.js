@@ -3364,8 +3364,10 @@ function jvScanError(text) { // mini JSON scanner: คืน index ตัวแ�
     }
     return bad();
   }
+  const numRe = /-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?/y; // sticky — ห้าม slice(i) เดี๋ยว O(n²) กับไฟล์ใหญ่
   function num() {
-    const m = /^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?/.exec(text.slice(i));
+    numRe.lastIndex = i;
+    const m = numRe.exec(text);
     if (!m || !m[0]) return bad();
     i += m[0].length; return true;
   }
@@ -3416,7 +3418,11 @@ function jvScanError(text) { // mini JSON scanner: คืน index ตัวแ�
 function jvErrorPos(msg, text) { // หา line/col ของจุดพัง → {line, col, pos} หรือ null
   let pos = null;
   let m = msg.match(/line (\d+) column (\d+)/i);
-  if (m) return { line: +m[1], col: +m[2], pos: null };
+  if (m) { // Firefox บอก line/col ตรงๆ — แปลงกลับเป็น pos เพื่อให้ scroll-to-error ทำงานด้วย
+    let idx = 0;
+    for (let ln = 1; ln < +m[1] && idx !== -1; ln++) idx = text.indexOf('\n', idx) + 1 || -1;
+    return { line: +m[1], col: +m[2], pos: idx === -1 ? null : Math.min(idx + (+m[2]) - 1, text.length) };
+  }
   m = msg.match(/position (\d+)/i);
   if (m) pos = Math.min(+m[1], text.length);
   if (pos == null) pos = jvScanError(text); // browser ไม่บอกตำแหน่ง → scan หาเอง
@@ -3444,7 +3450,8 @@ function setupJsonViewer() {
 
   function parseNow() {
     const text = ta.value;
-    try { if (text.length <= JV_MAX_SAVE) localStorage.setItem(JV_TEXT_KEY, text); } catch { /* quota เต็ม — ข้าม */ }
+    // เกิน cap ต้องล้างค่าเก่าด้วย ไม่งั้น reload แล้วได้ของเก่าที่ไม่ตรงกับที่เห็นล่าสุด
+    try { if (text.length <= JV_MAX_SAVE) localStorage.setItem(JV_TEXT_KEY, text); else localStorage.removeItem(JV_TEXT_KEY); } catch { /* quota เต็ม — ข้าม */ }
     if (!text.trim()) {
       parsed = null; parseOk = false; clearError(); jvClearSearch();
       treeBox.replaceChildren(el('p', { class: 'empty-msg', text: 'วาง JSON ฝั่งซ้าย หรือกด 📂 เปิดไฟล์' }));
@@ -3468,7 +3475,9 @@ function setupJsonViewer() {
       parseOk = false; fmtBtn.disabled = minBtn.disabled = true;
       const p = jvErrorPos(String(e.message || e), text);
       showError(p ? `บรรทัด ${p.line} คอลัมน์ ${p.col}: ${e.message}` : String(e.message || e));
-      if (p && p.pos != null) { // เลื่อน editor ไปแถวที่พัง (ประมาณจาก line-height)
+      // เลื่อน editor ไปแถวที่พัง (ประมาณจาก line-height) — เฉพาะตอน editor ไม่ได้โฟกัส
+      // (กำลังพิมพ์อยู่ห้ามดึง scroll หนีมือ — parse ยิงทุก 300ms)
+      if (p && p.pos != null && document.activeElement !== ta) {
         const lh = parseFloat(getComputedStyle(ta).lineHeight) || 19;
         ta.scrollTop = Math.max(0, (p.line - 3) * lh);
         ed.wrap.querySelector('.je-highlight').scrollTop = ta.scrollTop;
@@ -3519,13 +3528,21 @@ function setupJsonViewer() {
     line.scrollIntoView({ block: 'center' });
     countLbl.textContent = `${hitIdx + 1}/${hits.length}`;
   }
+  function jvLineText(l) { // ข้อความจริงของบรรทัด — ตัด summary "N items/keys", ellipsis และ icon 📋 ที่ระบบสร้างเอง
+    let s = '';
+    for (const c of l.childNodes) {
+      if (c.nodeType === 1 && (c.classList.contains('jt-summary') || c.classList.contains('jt-ellipsis') || c.classList.contains('jt-copy'))) continue;
+      s += c.textContent;
+    }
+    return s;
+  }
   function jvRunSearch() {
     const q = searchInput.value.trim().toLowerCase();
     hits.forEach((l) => l.classList.remove('jt-hit', 'jt-hit-cur'));
     hits = []; hitIdx = -1;
     if (!q) { countLbl.textContent = ''; return; }
     treeBox.querySelectorAll('.jt-line').forEach((l) => {
-      if (l.textContent.toLowerCase().includes(q)) { l.classList.add('jt-hit'); hits.push(l); }
+      if (jvLineText(l).toLowerCase().includes(q)) { l.classList.add('jt-hit'); hits.push(l); }
     });
     countLbl.textContent = hits.length ? `0/${hits.length}` : 'ไม่พบ';
     if (hits.length) jvGoto(0);
