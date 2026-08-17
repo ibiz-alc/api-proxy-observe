@@ -1100,6 +1100,10 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 .tc-popup { border-radius: 10px; overflow: hidden; } /* กรอบโค้งมนทุกมุม + clip เนื้อหาให้ตามโค้ง */
 .tc-popup.dock-right { right: 0; }
 .tc-popup.dock-left { left: 0; }
+/* popup เป็น position:fixed — padding-right ของ body ช่วยไม่ได้ ต้องขยับหลบ icon rail (44px)
+   และหลบ tool window ตอน mirror เปิด ไม่งั้นโดน rail (z-index สูงกว่า) ทับปุ่ม Enable/Disable */
+body.has-mirror-rail .tc-popup.dock-right { right: 44px; }
+body.mirror-open .tc-popup.dock-right { right: calc(44px + var(--mirror-w)); }
 .tc-popup.dragging { opacity: 0.95; box-shadow: 0 14px 54px rgba(0, 0, 0, 0.7); transition: none; }
 .tc-popup.collapsed { width: auto !important; min-width: 0; }
 /* ตัวลากปรับความสูง (ขอบล่าง) */
