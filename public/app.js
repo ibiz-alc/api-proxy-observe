@@ -195,7 +195,8 @@ function jtNode(key, value, isIndex, last, path = []) {
 function jsonTree(value) {
   const root = el('div', { class: 'jt' }, [jtNode(null, value, false, true, [])]);
   // hover บรรทัดไหน → โชว์ path ของบรรทัดนั้นบน .jt-pathbar ของ pane เดียวกัน (เช่น หลังปุ่ม Raw)
-  const bar = () => root.closest('.detail-pane') && root.closest('.detail-pane').querySelector('.jt-pathbar');
+  // host: .detail-pane (Inspector/Proxy) หรือ .jt-pane-host (แท็บ JSON Viewer)
+  const bar = () => { const h = root.closest('.jt-pane-host, .detail-pane'); return h && h.querySelector('.jt-pathbar'); };
   root.addEventListener('mouseover', (e) => {
     const b = bar(); if (!b) return;
     const line = e.target.closest && e.target.closest('.jt-line');
@@ -3340,3 +3341,134 @@ function setupSettings() {
   });
 }
 setupSettings();
+
+// ================= JSON Viewer tab =================
+// วาง/เปิดไฟล์ JSON ฝั่งซ้าย (makeJsonEditor) → parse (debounce) → tree ฝั่งขวา (jsonTree)
+// + ค้นหาใน tree, Format/Minify, แถบ error ชี้บรรทัด, จำข้อความล่าสุดใน localStorage
+const JV_TEXT_KEY = 'jsonViewerText';
+const JV_MAX_PARSE = 5 * 1024 * 1024;  // เกินนี้ไม่ parse — tree เป็น DOM เต็ม จะค้าง
+const JV_MAX_SAVE = 500 * 1024;        // เกินนี้ไม่เขียน localStorage (กัน quota)
+function jvErrorPos(msg, text) { // หา line/col จาก error message ของ browser → {line, col, pos} หรือ null
+  let m = msg.match(/line (\d+) column (\d+)/i);
+  if (m) return { line: +m[1], col: +m[2], pos: null };
+  m = msg.match(/position (\d+)/i);
+  if (!m) return null;
+  const pos = Math.min(+m[1], text.length);
+  const before = text.slice(0, pos);
+  const line = (before.match(/\n/g) || []).length + 1;
+  return { line, col: pos - before.lastIndexOf('\n'), pos };
+}
+function setupJsonViewer() {
+  const host = document.getElementById('jv-editor-host');
+  if (!host) return;
+  const ed = makeJsonEditor(localStorage.getItem(JV_TEXT_KEY) || '');
+  host.appendChild(ed.wrap);
+  const ta = ed.textarea;
+  const treeBox = document.getElementById('jv-tree');
+  const errBar = document.getElementById('jv-error');
+  const statLbl = document.getElementById('jv-stat');
+  const fmtBtn = document.getElementById('jv-format-btn');
+  const minBtn = document.getElementById('jv-minify-btn');
+  let parsed = null; let parseOk = false;
+
+  const showError = (text) => { errBar.textContent = text; errBar.style.display = ''; treeBox.classList.add('jv-stale'); };
+  const clearError = () => { errBar.style.display = 'none'; treeBox.classList.remove('jv-stale'); };
+  const setText = (v) => { ta.value = v; ed.refresh(); parseNow(); };
+
+  function parseNow() {
+    const text = ta.value;
+    try { if (text.length <= JV_MAX_SAVE) localStorage.setItem(JV_TEXT_KEY, text); } catch { /* quota เต็ม — ข้าม */ }
+    if (!text.trim()) {
+      parsed = null; parseOk = false; clearError(); jvClearSearch();
+      treeBox.replaceChildren(el('p', { class: 'empty-msg', text: 'วาง JSON ฝั่งซ้าย หรือกด 📂 เปิดไฟล์' }));
+      statLbl.textContent = ''; fmtBtn.disabled = minBtn.disabled = true;
+      return;
+    }
+    if (text.length > JV_MAX_PARSE) {
+      parseOk = false; fmtBtn.disabled = minBtn.disabled = true; jvClearSearch();
+      showError(`ข้อความใหญ่เกิน ${Math.round(JV_MAX_PARSE / 1024 / 1024)}MB — ไม่ render (จะค้าง)`);
+      return;
+    }
+    try {
+      parsed = JSON.parse(text); parseOk = true; clearError();
+      fmtBtn.disabled = minBtn.disabled = false;
+      jvClearSearch(); // tree เก่ากำลังถูกแทน — ล้าง reference ของผลค้นหาก่อน
+      treeBox.replaceChildren(jsonTree(parsed));
+      const n = treeBox.querySelectorAll('.jt-line').length;
+      statLbl.textContent = `${(text.length / 1024).toFixed(1)} KB · ${n} บรรทัด`;
+      jvRunSearch(); // ถ้ามีคำค้นค้างอยู่ ให้ค้นใหม่บน tree ใหม่
+    } catch (e) {
+      parseOk = false; fmtBtn.disabled = minBtn.disabled = true;
+      const p = jvErrorPos(String(e.message || e), text);
+      showError(p ? `บรรทัด ${p.line} คอลัมน์ ${p.col}: ${e.message}` : String(e.message || e));
+      if (p && p.pos != null) { // เลื่อน editor ไปแถวที่พัง (ประมาณจาก line-height)
+        const lh = parseFloat(getComputedStyle(ta).lineHeight) || 19;
+        ta.scrollTop = Math.max(0, (p.line - 3) * lh);
+        ed.wrap.querySelector('.je-highlight').scrollTop = ta.scrollTop;
+      }
+    }
+  }
+  let jvTimer = null;
+  ta.addEventListener('input', () => { clearTimeout(jvTimer); jvTimer = setTimeout(parseNow, 300); });
+
+  // toolbar
+  fmtBtn.addEventListener('click', () => { if (parseOk) setText(JSON.stringify(parsed, null, 2)); });
+  minBtn.addEventListener('click', () => { if (parseOk) setText(JSON.stringify(parsed)); });
+  document.getElementById('jv-clear-btn').addEventListener('click', () => setText(''));
+  const fileInput = document.getElementById('jv-file');
+  document.getElementById('jv-open-btn').addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {
+    const f = fileInput.files && fileInput.files[0];
+    if (!f) return;
+    if (f.size > JV_MAX_PARSE) { showError(`ไฟล์ใหญ่เกิน ${Math.round(JV_MAX_PARSE / 1024 / 1024)}MB`); fileInput.value = ''; return; }
+    const r = new FileReader();
+    r.onload = () => { setText(String(r.result)); fileInput.value = ''; };
+    r.readAsText(f);
+  });
+
+  // ===== ค้นหาใน tree: match ทั้ง key/value บนบรรทัด (.jt-line มีเฉพาะข้อความบรรทัดตัวเอง ลูกอยู่ใน .jt-children แยก) =====
+  const searchInput = document.getElementById('jv-search');
+  const countLbl = document.getElementById('jv-search-count');
+  let hits = []; let hitIdx = -1;
+  function jvClearSearch() {
+    hits.forEach((l) => l.classList.remove('jt-hit', 'jt-hit-cur'));
+    hits = []; hitIdx = -1; countLbl.textContent = '';
+  }
+  function jvExpandTo(line) { // กางบล็อกบรรพบุรุษที่พับอยู่ (คลิก head — state พับเก็บใน closure ของ jtNode)
+    for (let elx = line.parentElement; elx && elx !== treeBox; elx = elx.parentElement) {
+      if (elx.classList.contains('jt-children') && elx.style.display === 'none') {
+        const head = elx.parentElement.querySelector(':scope > .jt-head');
+        if (head) head.click();
+      }
+    }
+  }
+  function jvGoto(i) {
+    if (!hits.length) return;
+    if (hitIdx >= 0 && hits[hitIdx]) hits[hitIdx].classList.remove('jt-hit-cur');
+    hitIdx = ((i % hits.length) + hits.length) % hits.length;
+    const line = hits[hitIdx];
+    line.classList.add('jt-hit-cur');
+    jvExpandTo(line);
+    line.scrollIntoView({ block: 'center' });
+    countLbl.textContent = `${hitIdx + 1}/${hits.length}`;
+  }
+  function jvRunSearch() {
+    const q = searchInput.value.trim().toLowerCase();
+    hits.forEach((l) => l.classList.remove('jt-hit', 'jt-hit-cur'));
+    hits = []; hitIdx = -1;
+    if (!q) { countLbl.textContent = ''; return; }
+    treeBox.querySelectorAll('.jt-line').forEach((l) => {
+      if (l.textContent.toLowerCase().includes(q)) { l.classList.add('jt-hit'); hits.push(l); }
+    });
+    countLbl.textContent = hits.length ? `0/${hits.length}` : 'ไม่พบ';
+    if (hits.length) jvGoto(0);
+  }
+  let jvSearchTimer = null;
+  searchInput.addEventListener('input', () => { clearTimeout(jvSearchTimer); jvSearchTimer = setTimeout(jvRunSearch, 200); });
+  searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); jvGoto(hitIdx + 1); } });
+  document.getElementById('jv-next-btn').addEventListener('click', () => jvGoto(hitIdx + 1));
+  document.getElementById('jv-prev-btn').addEventListener('click', () => jvGoto(hitIdx - 1));
+
+  parseNow(); // render ค่าที่จำไว้จาก localStorage ตอนเปิดหน้า
+}
+setupJsonViewer();
