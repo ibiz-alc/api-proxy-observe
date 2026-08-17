@@ -1658,3 +1658,21 @@ body.mirror-open { padding-right: calc(44px + var(--mirror-w)); transition: none
   font-size: 0.9rem;
 }
 .mirror-text-input:focus { outline: none; border-color: var(--accent); }
+
+/* ===== แท็บ JSON Viewer — ซ้ายวาง (je-wrap เดิม) ขวา tree (jt เดิม) ===== */
+.jv-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+.jv-toolbar button { padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); cursor: pointer; font-size: 0.82rem; }
+.jv-toolbar button:hover:not(:disabled) { border-color: var(--accent); }
+.jv-toolbar button:disabled { opacity: 0.45; cursor: default; }
+.jv-layout { display: flex; gap: 10px; height: calc(100vh - 150px); min-height: 320px; }
+.jv-pane { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.jv-editor-host { flex: 1; min-height: 0; display: flex; }
+.jv-error { background: rgba(239, 68, 68, 0.12); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 8px; padding: 6px 10px; font-size: 0.8rem; white-space: pre-wrap; flex-shrink: 0; }
+.jv-searchbar { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+.jv-searchbar input { flex: 1; min-width: 0; }
+.jv-searchbar button { padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text); cursor: pointer; }
+.jv-searchbar button:hover { border-color: var(--accent); }
+#jv-tree { flex: 1; min-height: 0; overflow: auto; margin: 0; }
+#jv-tree.jv-stale { opacity: 0.45; } /* JSON พัง — โชว์ tree เก่าแบบจาง */
+.jt-hit { background: rgba(250, 204, 21, 0.16); border-radius: 4px; }
+.jt-hit-cur { background: rgba(250, 204, 21, 0.36); outline: 1px solid #facc15; }
