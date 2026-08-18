@@ -787,9 +787,20 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
   flex: 1;
   min-height: 120px;
 }
-.detail-split { display: grid; grid-template-columns: 1fr 1fr; height: 100%; }
-.detail-pane { display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--border); overflow: hidden; }
-.detail-pane:last-child { border-right: none; }
+/* Request | ตัวลาก | Response — ความกว้างฝั่งซ้ายเก็บใน --detail-l (ลากปรับได้) */
+.detail-split { display: grid; grid-template-columns: var(--detail-l, calc(50% - 5px)) 10px minmax(0, 1fr); height: 100%; }
+.detail-pane { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+/* ตัวลากคั่น Request/Response — เส้นคั่นเต็มความสูง + ขีดจับตรงกลาง (เส้นคั่นย้ายมาอยู่ที่ตัวลาก pane จึงไม่มี border แล้ว) */
+.detail-hresizer {
+  cursor: col-resize;
+  background:
+    linear-gradient(var(--border), var(--border)) center / 1px 100% no-repeat,
+    linear-gradient(var(--border), var(--border)) center / 3px 40px no-repeat;
+  transition: background-color 0.15s;
+}
+.detail-hresizer:hover, .detail-hresizer.dragging { background-color: var(--panel-2); }
+/* ตอนลาก: กัน iframe (PDF preview) กลืน mousemove จนลากค้าง */
+body.col-dragging iframe { pointer-events: none; }
 .detail-pane-head {
   display: flex;
   align-items: center;
