@@ -3825,7 +3825,8 @@
     " ": 62
     // Space
   };
-  var START_OPTS = { maxSize: 1024, bitRate: 4e6, maxFps: 30 };
+  var START_OPTS = { maxSize: 1024, bitRate: 8e6, maxFps: 60 };
+  var IOS_START_OPTS = { pipeline: 4, maxWidth: 0 };
   var RECONNECT_DELAY_MS = 3e3;
   var MirrorPanel = class {
     constructor() {
@@ -3840,8 +3841,8 @@
       this.iosPending = null;
       this.iosInput = false;
       this.fpsCount = 0;
-      this.fpsAt = 0;
       this.fps = 0;
+      this._fpsTimer = null;
       this.userDisconnected = false;
       this.reconnectTimer = null;
       this.pendingMove = null;
@@ -4081,7 +4082,7 @@
       ws.binaryType = "arraybuffer";
       this.ws = ws;
       ws.addEventListener("open", () => {
-        if (this.platform === "ios") this.send({ type: "start", platform: "ios", udid: this.serial, pipeline: 3 });
+        if (this.platform === "ios") this.send({ type: "start", platform: "ios", udid: this.serial, ...IOS_START_OPTS });
         else this.send({ type: "start", serial: this.serial, ...START_OPTS });
       });
       ws.addEventListener("message", (ev) => this._onMessage(ev));
@@ -4160,6 +4161,7 @@
           if (msg.platform === "ios") this._setupIosView(msg);
           else this._setupDecoder(msg);
           this._setStatus("connected", "\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D\u0E41\u0E25\u0E49\u0E27");
+          this._startFpsTimer();
           this._setConnected(true);
           this.videoPlaceholder.style.display = "none";
           this._ensureDeviceProxy();
@@ -4260,22 +4262,29 @@
         this.iosBusy = false;
       });
     }
-    // นับ fps จริงที่วาดได้ โชว์ที่แถบสถานะ (ลูป screenshot แรงไม่เท่า scrcpy — ให้เห็นตัวเลขจริง)
+    // นับเฟรมที่วาดได้ — แค่บวกตัวนับ ส่วนการโชว์ให้ตัวจับเวลาเป็นคนทำ
     _tickFps() {
-      const now = performance.now();
-      if (!this.fpsAt) {
-        this.fpsAt = now;
-        this.fpsCount = 0;
-        return;
-      }
       this.fpsCount++;
-      if (now - this.fpsAt >= 1e3) {
-        this.fps = Math.round(this.fpsCount * 1e3 / (now - this.fpsAt));
-        this.fpsAt = now;
+    }
+    // อัปเดตแถบสถานะทุกวินาทีด้วยนาฬิกา ไม่ใช่รอเฟรมถัดไป
+    // (ฝั่ง iOS ข้ามเฟรมที่ซ้ำ → จอนิ่งแล้วไม่มีเฟรมเข้ามาเลย ถ้าผูกกับเฟรมตัวเลขจะค้าง
+    //  และข้อความอื่นที่เขียนทับไว้ เช่น "ตั้ง proxy ไม่สำเร็จ" จะค้างถาวร)
+    _startFpsTimer() {
+      this._stopFpsTimer();
+      this.fpsCount = 0;
+      this._fpsTimer = setInterval(() => {
+        if (!this.ws) return;
+        this.fps = this.fpsCount;
         this.fpsCount = 0;
-        if (this.ws && this.iosCanvas) {
-          this._setStatus("connected", `\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D\u0E41\u0E25\u0E49\u0E27 \xB7 ${this.fps} fps${this.iosInput ? "" : " \xB7 \u0E14\u0E39\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E40\u0E14\u0E35\u0E22\u0E27"}`);
-        }
+        const note = this.platform === "ios" && !this.iosInput ? " \xB7 \u0E14\u0E39\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E40\u0E14\u0E35\u0E22\u0E27" : "";
+        const idle = this.fps === 0 ? " (\u0E08\u0E2D\u0E19\u0E34\u0E48\u0E07)" : "";
+        this._setStatus("connected", `\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D\u0E41\u0E25\u0E49\u0E27 \xB7 ${this.fps} fps${idle}${note}`);
+      }, 1e3);
+    }
+    _stopFpsTimer() {
+      if (this._fpsTimer) {
+        clearInterval(this._fpsTimer);
+        this._fpsTimer = null;
       }
     }
     // ปุ่มบน toolbar ที่ใช้ได้ต่างกันระหว่าง Android กับ iOS
@@ -4288,6 +4297,7 @@
       }
     }
     _teardownDecoder() {
+      this._stopFpsTimer();
       if (this.writer) {
         try {
           this.writer.releaseLock();
@@ -4310,7 +4320,6 @@
       this.iosCtx = null;
       this.iosBusy = false;
       this.iosPending = null;
-      this.fpsAt = 0;
       this.fpsCount = 0;
       if (this.videoPlaceholder) this.videoPlaceholder.style.display = "";
     }
@@ -4320,6 +4329,7 @@
         return;
       }
       if (!this.writer) return;
+      this._tickFps();
       let packet;
       try {
         const dv = new DataView(buf);
@@ -4446,7 +4456,17 @@
       document.body.classList.add("mirror-open");
       this.visible = true;
       this.refreshDevices();
-      if (!this._deviceTimer) this._deviceTimer = setInterval(() => this.refreshDevices(), 5e3);
+      this._syncDeviceTimer(view);
+    }
+    // เปิด/ปิด timer ตาม view ที่กำลังแสดง
+    _syncDeviceTimer(view) {
+      const want = view === "devices";
+      if (want && !this._deviceTimer) {
+        this._deviceTimer = setInterval(() => this.refreshDevices(), 5e3);
+      } else if (!want && this._deviceTimer) {
+        clearInterval(this._deviceTimer);
+        this._deviceTimer = null;
+      }
     }
     closePanel() {
       this.activeView = null;

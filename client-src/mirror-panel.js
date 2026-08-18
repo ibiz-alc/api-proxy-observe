@@ -44,7 +44,16 @@ const KEYCODE_MAP = {
 };
 
 // พารามิเตอร์ start (คงที่ตาม contract)
-const START_OPTS = { maxSize: 1024, bitRate: 4000000, maxFps: 30 };
+// Android (scrcpy): 60 fps ลื่นกว่าชัดเจน · bitrate ขึ้นตามเพื่อไม่ให้ภาพแตกเวลาเลื่อนเร็ว
+// (maxSize 1024 พอสำหรับพาเนลกว้างสุด 900px — ใหญ่กว่านี้เสีย decode ฟรี)
+const START_OPTS = { maxSize: 1024, bitRate: 8000000, maxFps: 60 };
+// iOS Simulator (ลูป screenshot) — ตัวเลขที่วัดมาจริงบนเครื่องนี้ (scripts/dev-tests/mirror-fps-bench.js):
+//   ต้นทุนต่อเฟรม `simctl io screenshot` = 218ms แต่ `simctl help` ที่ไม่ทำอะไรเลยกิน 170ms
+//   → 78% เป็นค่าเกิด process ล้วนๆ ไม่ใช่การถ่ายภาพ ต่อสายละ ~4.6 fps เป็นเพดาน
+//   ทางเดียวที่เร็วขึ้นคือถ่ายพร้อมกันหลายสาย (pipeline) · 4 สายกำลังพอดีกับ CPU
+//   ย่อฝั่ง server (maxWidth) ปิดไว้ — sips กินเวลามากกว่าที่ประหยัดได้ 2-3 เท่า
+//   (แต่ยังเปิดได้ถ้าเน็ตช้า/ต่อไกล เพราะเฟรมเล็กลง ~10 เท่า)
+const IOS_START_OPTS = { pipeline: 4, maxWidth: 0 };
 const RECONNECT_DELAY_MS = 3000;
 
 class MirrorPanel {
@@ -60,8 +69,8 @@ class MirrorPanel {
     this.iosPending = null;    // เฟรมล่าสุดที่รอ decode (เก่ากว่านั้นทิ้งได้ ไม่ต้องวาดย้อนหลัง)
     this.iosInput = false;     // มี idb ไหม (ไม่มี = ดูได้อย่างเดียว)
     this.fpsCount = 0;
-    this.fpsAt = 0;
     this.fps = 0;
+    this._fpsTimer = null;
     this.userDisconnected = false; // true = ผู้ใช้กด disconnect เอง → ห้าม auto-reconnect
     this.reconnectTimer = null;
     this.pendingMove = null; // touch move ล่าสุดที่รอส่ง (throttle ด้วย rAF)
@@ -328,7 +337,7 @@ class MirrorPanel {
 
     ws.addEventListener('open', () => {
       // start ต้องเป็นข้อความแรกเสมอ
-      if (this.platform === 'ios') this.send({ type: 'start', platform: 'ios', udid: this.serial, pipeline: 3 });
+      if (this.platform === 'ios') this.send({ type: 'start', platform: 'ios', udid: this.serial, ...IOS_START_OPTS });
       else this.send({ type: 'start', serial: this.serial, ...START_OPTS });
     });
     ws.addEventListener('message', (ev) => this._onMessage(ev));
@@ -402,6 +411,7 @@ class MirrorPanel {
         if (msg.platform === 'ios') this._setupIosView(msg);
         else this._setupDecoder(msg);
         this._setStatus('connected', 'เชื่อมต่อแล้ว');
+        this._startFpsTimer();
         this._setConnected(true);
         this.videoPlaceholder.style.display = 'none';
         this._ensureDeviceProxy(); // ตั้ง proxy ให้เครื่องอัตโนมัติ (ครั้งเดียวต่อการกดเชื่อมต่อ)
@@ -513,19 +523,27 @@ class MirrorPanel {
     }).catch(() => { this.iosBusy = false; });
   }
 
-  // นับ fps จริงที่วาดได้ โชว์ที่แถบสถานะ (ลูป screenshot แรงไม่เท่า scrcpy — ให้เห็นตัวเลขจริง)
-  _tickFps() {
-    const now = performance.now();
-    if (!this.fpsAt) { this.fpsAt = now; this.fpsCount = 0; return; }
-    this.fpsCount++;
-    if (now - this.fpsAt >= 1000) {
-      this.fps = Math.round((this.fpsCount * 1000) / (now - this.fpsAt));
-      this.fpsAt = now;
+  // นับเฟรมที่วาดได้ — แค่บวกตัวนับ ส่วนการโชว์ให้ตัวจับเวลาเป็นคนทำ
+  _tickFps() { this.fpsCount++; }
+
+  // อัปเดตแถบสถานะทุกวินาทีด้วยนาฬิกา ไม่ใช่รอเฟรมถัดไป
+  // (ฝั่ง iOS ข้ามเฟรมที่ซ้ำ → จอนิ่งแล้วไม่มีเฟรมเข้ามาเลย ถ้าผูกกับเฟรมตัวเลขจะค้าง
+  //  และข้อความอื่นที่เขียนทับไว้ เช่น "ตั้ง proxy ไม่สำเร็จ" จะค้างถาวร)
+  _startFpsTimer() {
+    this._stopFpsTimer();
+    this.fpsCount = 0;
+    this._fpsTimer = setInterval(() => {
+      if (!this.ws) return;
+      this.fps = this.fpsCount;
       this.fpsCount = 0;
-      if (this.ws && this.iosCanvas) {
-        this._setStatus('connected', `เชื่อมต่อแล้ว · ${this.fps} fps${this.iosInput ? '' : ' · ดูอย่างเดียว'}`);
-      }
-    }
+      const note = this.platform === 'ios' && !this.iosInput ? ' · ดูอย่างเดียว' : '';
+      const idle = this.fps === 0 ? ' (จอนิ่ง)' : '';
+      this._setStatus('connected', `เชื่อมต่อแล้ว · ${this.fps} fps${idle}${note}`);
+    }, 1000);
+  }
+
+  _stopFpsTimer() {
+    if (this._fpsTimer) { clearInterval(this._fpsTimer); this._fpsTimer = null; }
   }
 
   // ปุ่มบน toolbar ที่ใช้ได้ต่างกันระหว่าง Android กับ iOS
@@ -539,6 +557,7 @@ class MirrorPanel {
   }
 
   _teardownDecoder() {
+    this._stopFpsTimer();
     if (this.writer) {
       try { this.writer.releaseLock(); } catch (e) { /* ignore */ }
       this.writer = null;
@@ -555,7 +574,6 @@ class MirrorPanel {
     this.iosCtx = null;
     this.iosBusy = false;
     this.iosPending = null;
-    this.fpsAt = 0;
     this.fpsCount = 0;
     if (this.videoPlaceholder) this.videoPlaceholder.style.display = '';
   }
@@ -563,6 +581,7 @@ class MirrorPanel {
   _onBinary(buf) {
     if (this.platform === 'ios') { this._onIosFrame(buf); return; }
     if (!this.writer) return;
+    this._tickFps(); // นับเฟรมวิดีโอที่เข้า decoder (Android) — โชว์ที่แถบสถานะเหมือนฝั่ง iOS
     let packet;
     try {
       const dv = new DataView(buf);
@@ -698,8 +717,21 @@ class MirrorPanel {
     document.body.classList.add('mirror-open');
     this.visible = true;
     this.refreshDevices();
-    // รีเฟรชรายการอุปกรณ์เป็นระยะระหว่างเปิด (เครื่องเสียบ/ถอด/proxy เปลี่ยน)
-    if (!this._deviceTimer) this._deviceTimer = setInterval(() => this.refreshDevices(), 5000);
+    // รีเฟรชรายการอุปกรณ์เป็นระยะ — เฉพาะตอนที่ "เห็นรายการอยู่จริง"
+    // (/api/devices ยิง adb, /api/devices/ios-sims ยิง simctl — spawn process ทุกรอบ
+    //  ถ้า poll ทิ้งไว้ตอนดูจอ ภาพจะสะดุดเป็นจังหวะ ๆ ทั้ง Android และ iOS)
+    this._syncDeviceTimer(view);
+  }
+
+  // เปิด/ปิด timer ตาม view ที่กำลังแสดง
+  _syncDeviceTimer(view) {
+    const want = view === 'devices';
+    if (want && !this._deviceTimer) {
+      this._deviceTimer = setInterval(() => this.refreshDevices(), 5000);
+    } else if (!want && this._deviceTimer) {
+      clearInterval(this._deviceTimer);
+      this._deviceTimer = null;
+    }
   }
 
   closePanel() {

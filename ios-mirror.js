@@ -109,6 +109,9 @@ class IosMirrorSession {
     this.idb = null;
     this.frameMs = 0;             // เวลาถ่าย 1 เฟรม (วัดจากเฟรมแรก)
     this.lastEmitAt = 0;          // เวลาเริ่มถ่ายของเฟรมล่าสุดที่ส่งออกไป (กันส่งเฟรมเก่าย้อนหลัง)
+    this.lastBuf = null;          // เฟรมล่าสุดที่ส่งไป (ใช้เทียบว่าจอเปลี่ยนไหม)
+    this.idleHits = 0;            // จำนวนเฟรมซ้ำติดกัน
+    this.idleDelay = 0;           // ระยะพักระหว่างถ่าย (ms) ตอนจอนิ่ง
     this.dir = fs.mkdtempSync(path.join(os.tmpdir(), 'apitester-ios-'));
   }
 
@@ -177,8 +180,16 @@ class IosMirrorSession {
   // idb describe บอก screen_dimensions มาให้ (pixel + density) → ได้ scale ไว้แปลงพิกัด
   async _loadPointSize() {
     try {
-      const { stdout } = await execFileP(this.idb, ['describe', '--udid', this.udid, '--json'],
-        { timeout: 30000, env: this._idbEnv() });
+      let stdout;
+      try {
+        ({ stdout } = await execFileP(this.idb, ['describe', '--udid', this.udid, '--json'],
+          { timeout: 30000, env: this._idbEnv() }));
+      } catch (e) {
+        // state ค้าง → ล้างแล้วลองใหม่ครั้งเดียว (เหมือน _idbRun)
+        try { fs.rmSync('/tmp/idb', { recursive: true, force: true }); } catch {}
+        ({ stdout } = await execFileP(this.idb, ['describe', '--udid', this.udid, '--json'],
+          { timeout: 30000, env: this._idbEnv() }));
+      }
       const j = JSON.parse(stdout);
       const d = j.screen_dimensions || {};
       // ตัวจริงคืน width_points/height_points มาให้ตรงๆ (เหลือ density ไว้เป็นทางสำรอง)
@@ -208,6 +219,8 @@ class IosMirrorSession {
   async _chain(slot, delay) {
     if (delay) await new Promise((r) => setTimeout(r, delay));
     while (!this.stopped) {
+      if (this.idleDelay) await new Promise((r) => setTimeout(r, this.idleDelay));
+      if (this.stopped) break;
       const startedAt = Date.now();
       const { buf } = await this._shot(this.sc, slot);
       if (this.stopped) break;
@@ -219,6 +232,19 @@ class IosMirrorSession {
       // สายอื่นอาจแซงไปแล้ว — เฟรมที่เริ่มถ่ายก่อนเฟรมล่าสุดที่ส่งไป = ของเก่า ทิ้ง
       if (startedAt < this.lastEmitAt) continue;
       this.lastEmitAt = startedAt;
+      // จอนิ่ง = JPEG ออกมาไบต์ตรงกันเป๊ะ → ไม่ต้องส่งซ้ำ ประหยัดทั้งสายส่งและ decode ฝั่ง client
+      // (Android ผ่าน scrcpy ส่งเฉพาะตอนภาพเปลี่ยนอยู่แล้ว ฝั่ง iOS ต้องทำเอง)
+      if (this.lastBuf && this.lastBuf.length === buf.length && this.lastBuf.equals(buf)) {
+        // จอนิ่งติดกันหลายเฟรม → ผ่อนสปีดถ่าย ไม่ต้องเผา CPU กับภาพเดิม
+        // (ขยับขึ้นทีละ 40ms ถึงเพดาน 240ms · มีอะไรเปลี่ยนก็กลับเต็มสปีดทันที
+        //  เสียเวลาตื่นแค่รอบเดียว ~1 เฟรม)
+        this.idleHits++;
+        if (this.idleHits >= 4) this.idleDelay = Math.min(240, this.idleDelay + 40);
+        continue;
+      }
+      this.idleHits = 0;
+      this.idleDelay = 0;
+      this.lastBuf = buf;
       if (this.shouldSend()) this.onFrame(buf);
     }
   }
@@ -256,13 +282,20 @@ class IosMirrorSession {
     return env;
   }
 
-  async _idbRun(args, timeout = 15000) {
+  async _idbRun(args, timeout = 15000, retried = false) {
     if (!this.idb) return false;
     try {
       await execFileP(this.idb, [...args, '--udid', this.udid], { timeout, env: this._idbEnv() });
       return true;
     } catch (e) {
-      this.onError('idb: ' + (e && e.message ? e.message.split('\n')[0] : 'สั่งงานไม่สำเร็จ'));
+      const msg = (e && e.message) || '';
+      // companion ตายแต่ socket/state ยังค้างใน /tmp/idb → idb จะพยายามต่อ socket เดิมแล้วพังทุกครั้ง
+      // (ไม่ยอม spawn ตัวใหม่เอง) ล้าง state ทิ้งแล้วลองอีกครั้ง = กลับมาใช้ได้เลย
+      if (!retried && /Failed to connect to companion|Connection refused|No such file or directory/i.test(msg)) {
+        try { fs.rmSync('/tmp/idb', { recursive: true, force: true }); } catch {}
+        return this._idbRun(args, timeout, true);
+      }
+      this.onError('idb: ' + (msg ? msg.split('\n')[0] : 'สั่งงานไม่สำเร็จ'));
       return false;
     }
   }
