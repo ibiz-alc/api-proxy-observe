@@ -172,7 +172,7 @@ class IosMirrorSession {
   // idb describe บอก screen_dimensions มาให้ (pixel + density) → ได้ scale ไว้แปลงพิกัด
   async _loadPointSize() {
     try {
-      const { stdout } = await execFileP(this.idb, ['describe', '--udid', this.udid, '--json'], { timeout: 20000 });
+      const { stdout } = await execFileP(this.idb, [...this._baseArgs(), 'describe', '--udid', this.udid, '--json'], { timeout: 20000 });
       const j = JSON.parse(stdout);
       const d = j.screen_dimensions || {};
       const density = Number(d.density) || 1;
@@ -235,10 +235,16 @@ class IosMirrorSession {
     return { x: cl(Number(xN) || 0, w), y: cl(Number(yN) || 0, h) };
   }
 
+  // flag ระดับ global ของ idb ต้องมาก่อนชื่อ subcommand — ใช้ตอน idb_companion ไม่ได้อยู่ใน PATH
+  // (เช่น build เองไว้ที่อื่น) ชี้ด้วย env IDB_COMPANION
+  _baseArgs() {
+    return process.env.IDB_COMPANION ? ['--companion-path', process.env.IDB_COMPANION] : [];
+  }
+
   async _idbRun(args, timeout = 15000) {
     if (!this.idb) return false;
     try {
-      await execFileP(this.idb, [...args, '--udid', this.udid], { timeout });
+      await execFileP(this.idb, [...this._baseArgs(), ...args, '--udid', this.udid], { timeout });
       return true;
     } catch (e) {
       this.onError('idb: ' + (e && e.message ? e.message.split('\n')[0] : 'สั่งงานไม่สำเร็จ'));

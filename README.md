@@ -116,6 +116,58 @@ banking apps) won't traverse the proxy even with the CA trusted — that's a lim
 of the target app, not the setup. The USB and Proxy Postern modes do not apply
 to iOS.
 
+### iOS Simulator (screen mirror + traffic capture)
+
+A booted iOS Simulator shows up **twice**: as a 🍎 device card in the **Status**
+tab (Connect / Disconnect / Install CA) and as a 🍎 row in the mirror panel's
+**Device Manager**, next to Android devices. Press **▶ ดูจอ** to mirror it.
+
+How it works, and why it differs from Android:
+
+- **Traffic**: the Simulator has no proxy setting of its own — it reads the
+  **macOS system proxy**. Connecting sets it to `127.0.0.1:8888` (no password
+  needed) and installs the CA into the sim's trust store via
+  `simctl keychain add-root-cert`. Because the proxy is machine-wide, other Mac
+  apps route through mitmproxy while it is on and may show certificate errors
+  (they clear on Disconnect). Command-line tools that verify certs themselves —
+  `pip`, `softwareupdate` — fail while it is on; bypass with
+  `NO_PROXY='*' pip install --proxy "" …` or disconnect first.
+- **Screen**: scrcpy is Android-only and `simctl` cannot stream video
+  (`screenshot -` writes a file literally named `-`; `recordVideo /dev/stdout`
+  fails inside AVFoundation), so the server loops `simctl io … screenshot` and
+  pushes JPEG frames over the same `/api/mirror` WebSocket. Expect **~10-15 fps**
+  — it is a screenshot loop, not a video codec. Three capture chains run with
+  staggered starts; without the stagger they finish together and the browser can
+  only decode one frame per batch.
+- **Input** (tap / swipe / type) needs [idb](https://fbidb.io) — `simctl` has no
+  input command at all. Without idb the mirror is view-only and the status line
+  says so. With idb, taps become `idb ui tap`, drags become `idb ui swipe`, the
+  text box uses `idb ui text`, and the toolbar exposes Home / Lock / Siri
+  (`idb ui button`).
+
+Installing idb (as of Aug 2026 this is bumpier than the official docs suggest):
+
+```bash
+# 1) companion — no bottle, builds from source; brew refuses if your Command Line
+#    Tools are older than Xcode (check: brew install facebook/fb/idb-companion)
+brew trust --formula facebook/fb/idb-companion
+brew install facebook/fb/idb-companion
+#    ...or build it yourself with Xcode only (no sudo, no CLT update):
+#    git clone https://github.com/facebook/idb && cd idb
+#    brew install xcodegen protobuf swift-protobuf
+#    XCODEGEN_STRIP_XATTRS=false ./build.sh build idb_companion
+
+# 2) client — the pip package is from 2022 and breaks on Python 3.12+,
+#    so pin it to Python 3.11 in a venv
+/opt/homebrew/bin/python3.11 -m venv ~/.idb-venv
+~/.idb-venv/bin/pip install fb-idb
+
+# 3) point ApiTester at them (env, read before PATH)
+export IDB=~/.idb-venv/bin/idb
+export IDB_COMPANION=/path/to/idb_companion   # only if not on PATH
+npm start
+```
+
 ### Media detection & preview
 
 Responses are classified by **magic bytes / URL extension / content-type** (not
