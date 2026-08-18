@@ -66,6 +66,24 @@ curl -X POST http://localhost:3000/hook/test \
   -d '{"hello": "world"}'
 ```
 
+### Restarting
+
+`./restart.sh` restarts only the two long-running processes — no setup, no ngrok,
+no CA work:
+
+```bash
+./restart.sh            # server :3000 + mitmproxy :8888
+./restart.sh server     # only the node server (after editing server.js / mirror.js)
+./restart.sh mitm       # only mitmproxy (mitm-to-apitester.py is NOT hot-reloaded)
+```
+
+It stops processes **by the PID listening on the port** (never `pkill`, which would
+also hit unrelated node/python processes), waits for both ports to come back, sends
+one request *through* the proxy to prove it really forwards (a wedged mitmproxy still
+holds the listening socket, so "port is open" alone proves nothing), and re-applies
+the device proxy to every attached adb device — a fresh server knows nothing about
+them. Captured flows live in memory only, so a server restart clears them.
+
 ## 🌐 Proxy (MITM — Proxyman-style)
 
 The Proxy tab shows live device traffic, including decrypted HTTPS, backed by

@@ -7,7 +7,9 @@ mitmproxy addon สำหรับ ApiTester
 import base64
 import json
 import os
+import queue
 import re
+import threading
 import time
 import urllib.request
 from mitmproxy import http
@@ -29,6 +31,32 @@ RULES_TTL = 3.0  # cache กฎ Map Local กี่วินาที
 _IMG_EXT = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".heic", ".heif", ".svg")
 _VID_EXT = (".mp4", ".m4v", ".mov", ".webm", ".mkv", ".avi")
 _PDF_EXT = (".pdf",)
+
+
+# ---- ส่ง flow เข้า ApiTester แบบไม่บล็อก proxy ----
+# hook response() ของ mitmproxy รันบน event loop ของมันเอง → ถ้ายิง HTTP แบบรอผลตรงนั้น
+# server ตอบช้า/กำลัง restart แค่ครั้งเดียวก็ทำให้ proxy หยุดรับ connection ทั้งตัว
+# (เจอจริง 18 ส.ค. 2026: mitmdump ยัง LISTEN แต่ต่อเข้าไป timeout, CPU 0% เพราะจมกอง POST
+#  ที่รอ timeout 3 วิ ทีละใบ) → โยนเข้าคิวแล้วให้เธรดเดียวส่งตามลำดับ คิวเต็มก็ทิ้ง flow ทิ้งไป
+#  ดีกว่าหยุดดักทราฟฟิกทั้งเครื่อง
+_INGEST_Q = queue.Queue(maxsize=300)
+_dropped = 0
+
+
+def _ingest_worker():
+    global _dropped
+    while True:
+        data = _INGEST_Q.get()
+        try:
+            r = urllib.request.Request(INGEST, data=data, headers={"Content-Type": "application/json"})
+            urllib.request.urlopen(r, timeout=3).read()
+        except Exception as e:
+            print(f"[apitester] ingest failed: {e}")
+        finally:
+            _INGEST_Q.task_done()
+
+
+threading.Thread(target=_ingest_worker, name="apitester-ingest", daemon=True).start()
 
 
 def _sniff_image_mime(content):
@@ -360,9 +388,14 @@ def response(flow: http.HTTPFlow):
     payload["resMediaType"] = rs_mime
     payload["resMediaKind"] = rs_kind
     payload["resMediaTooBig"] = rs_big
+    global _dropped
     try:
         data = json.dumps(payload).encode("utf-8")
-        r = urllib.request.Request(INGEST, data=data, headers={"Content-Type": "application/json"})
-        urllib.request.urlopen(r, timeout=3).read()
+        try:
+            _INGEST_Q.put_nowait(data)
+        except queue.Full:
+            _dropped += 1
+            if _dropped % 20 == 1:
+                print(f"[apitester] คิวเต็ม — ทิ้งไปแล้ว {_dropped} flows (server ตามไม่ทัน/ไม่ตอบ)")
     except Exception as e:
-        print(f"[apitester] ingest failed: {e}")
+        print(f"[apitester] ingest encode failed: {e}")
