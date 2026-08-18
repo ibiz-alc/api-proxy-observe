@@ -837,6 +837,57 @@ let resTab = 'Body';
     localStorage.setItem('proxyDeviceW', String(parseInt(tree.style.flexBasis, 10) || 190));
   });
 })();
+
+// ตัวลากปรับความกว้าง Request | Response ใน detail — เก็บเป็น % ใน localStorage
+// (detail ถูก render ใหม่ทุกครั้งที่สลับ subtab จึงเก็บค่าไว้นอก DOM แล้ว apply ตอนสร้าง split)
+const DETAIL_RZ_W = 10;      // ต้องเท่ากับความกว้างคอลัมน์ตัวลากใน .detail-split
+const DETAIL_MIN_PX = 180;   // พื้นที่ขั้นต่ำของแต่ละฝั่ง
+let detailSplitPct = (() => {  // % = ตำแหน่งกึ่งกลางตัวลาก วัดจากขอบซ้ายของ split
+  const v = parseFloat(localStorage.getItem('proxyDetailSplit') || '');
+  return v >= 5 && v <= 95 ? v : 50;
+})();
+// คอลัมน์ซ้าย = ตำแหน่งตัวลาก ลบครึ่งความกว้างตัวลาก → 50% แล้วสองฝั่งกว้างเท่ากันพอดี
+const detailLeftCss = (pct) => `calc(${pct}% - ${DETAIL_RZ_W / 2}px)`;
+function makeDetailResizer() {
+  const rz = el('div', {
+    class: 'detail-hresizer',
+    title: 'ลากเพื่อปรับความกว้าง Request/Response · ดับเบิลคลิก = 50/50',
+  });
+  rz.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const split = rz.parentElement;
+    const rect = split.getBoundingClientRect();
+    const min = Math.min(DETAIL_MIN_PX, rect.width / 3); // จอแคบ ๆ ก็ยังลากได้
+    rz.classList.add('dragging');
+    document.body.classList.add('col-dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    const onMove = (ev) => {
+      // clamp ที่กึ่งกลางตัวลาก: เผื่อครึ่งตัวลากทั้งสองข้าง ทั้งสอง pane จึงไม่แคบกว่า min
+      const half = DETAIL_RZ_W / 2;
+      const pos = Math.max(min + half, Math.min(rect.width - min - half, ev.clientX - rect.left));
+      detailSplitPct = (pos / rect.width) * 100;
+      split.style.setProperty('--detail-l', detailLeftCss(detailSplitPct));
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      rz.classList.remove('dragging');
+      document.body.classList.remove('col-dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      localStorage.setItem('proxyDetailSplit', detailSplitPct.toFixed(2));
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  });
+  rz.addEventListener('dblclick', () => {
+    detailSplitPct = 50;
+    rz.parentElement.style.setProperty('--detail-l', detailLeftCss(50));
+    localStorage.setItem('proxyDetailSplit', '50');
+  });
+  return rz;
+}
 document.getElementById('clear-flows').addEventListener('click', async () => {
   await fetch('/api/proxy/flows', { method: 'DELETE' });
 });
@@ -1758,7 +1809,8 @@ function renderFlowDetail(f) {
     ]);
   const resPane = buildDetailPane('Response', resHeadline, resTabs, resTab, (name) => { resTab = name; renderFlowDetail(f); });
 
-  const split = el('div', { class: 'detail-split' }, [reqPane, resPane]);
+  const split = el('div', { class: 'detail-split' }, [reqPane, makeDetailResizer(), resPane]);
+  split.style.setProperty('--detail-l', detailLeftCss(detailSplitPct));
   flowDetailEl.appendChild(split);
 }
 
