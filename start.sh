@@ -203,6 +203,34 @@ if [ "$SKIP_SETUP" != yes ]; then
     echo "   📦 npm install (MCP server)…"
     npm --prefix mcp install || echo "   ⚠️ MCP npm install ล้มเหลว (ข้ามได้ถ้าไม่ใช้ agent)"
   fi
+
+  # ===== mirror (ดูจอ/ควบคุมเครื่องจากเว็บ) — ตรวจของที่ต้องมี ติดตั้งให้ถ้าทำได้ =====
+  echo "==> 0.1) ตรวจของสำหรับ mirror"
+  # adb: จำเป็นสำหรับ mirror (ensure ด้านบนเป็น optional — ถ้ายังไม่มีให้บอกชัดว่า mirror ใช้ไม่ได้)
+  if command -v adb >/dev/null 2>&1; then
+    echo "   ✅ adb ($(command -v adb))"
+  else
+    echo "   ⚠️ ไม่มี adb — mirror/ควบคุมเครื่องใช้ไม่ได้ → ลง: brew install android-platform-tools"
+  fi
+  # scrcpy-server jar: อยู่ใน repo (vendor/) — ระบบ push เข้าเครื่องเองตอนกด ▶ ไม่ต้องลง scrcpy บนเครื่อง
+  if [ -f vendor/scrcpy-server-v3.3.3.bin ]; then
+    echo "   ✅ scrcpy-server jar (vendor/scrcpy-server-v3.3.3.bin)"
+  else
+    echo "   ⚠️ ไม่พบ vendor/scrcpy-server-v3.3.3.bin — ลองกู้จาก git…"
+    if git checkout -- vendor/ 2>/dev/null && [ -f vendor/scrcpy-server-v3.3.3.bin ]; then
+      echo "   ✅ กู้ scrcpy-server jar สำเร็จ"
+    else
+      echo "   ❌ กู้ไม่ได้ — mirror ใช้ไม่ได้ (clone repo ไม่ครบ? ลอง git fetch แล้ว checkout ใหม่)"
+    fi
+  fi
+  # dependency ของ mirror (@yume-chan): npm install ด้านบนรันเฉพาะตอนไม่มี node_modules เลย —
+  # เครื่องที่ลงไว้ก่อนฟีเจอร์ mirror จะไม่มีตัวนี้ ต้องเช็คแยกแล้วลงเพิ่มให้
+  if [ -d node_modules/@yume-chan/adb-scrcpy ]; then
+    echo "   ✅ mirror deps (@yume-chan) ใน node_modules"
+  else
+    echo "   📦 node_modules ยังไม่มี dependency ของ mirror — npm install เพิ่ม…"
+    npm install && echo "   ✅ ติดตั้ง mirror deps สำเร็จ" || echo "   ⚠️ npm install ล้มเหลว — mirror อาจใช้ไม่ได้"
+  fi
 fi
 
 echo "==> ปิดของเก่า (ถ้ามี)"
