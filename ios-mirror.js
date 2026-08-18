@@ -34,12 +34,17 @@ async function simctlPath() {
   return _simctl;
 }
 
+// ที่อยู่มาตรฐานของ idb ที่ ApiTester ติดตั้งไว้ให้ (ดูวิธีลงใน README)
+// แยกเป็นโฟลเดอร์ของเราเองเพราะ fb-idb (client) รันได้แค่ Python <= 3.11 → ต้องอยู่ใน venv
+// และ idb_companion ต้อง build เอง (ไม่มี bottle ใน brew)
+const IDB_HOME = path.join(os.homedir(), '.apitester');
+const DEFAULT_IDB = path.join(IDB_HOME, 'idb-venv', 'bin', 'idb');
+const DEFAULT_COMPANION = path.join(IDB_HOME, 'idb', 'idb_companion');
+
 let _idb; // path ของ idb CLI (null = ไม่ได้ติดตั้ง)
-// หา idb CLI — env IDB มาก่อนเสมอ เพราะ fb-idb (client ของ idb) รันได้แค่ Python <= 3.11
-// (3.14 พังที่ asyncio.get_event_loop) คนส่วนใหญ่จึงลงไว้ใน venv ไม่ได้อยู่ใน PATH
 async function idbPath({ recheck = false } = {}) {
   if (_idb !== undefined && !recheck) return _idb;
-  const candidates = ['idb', '/opt/homebrew/bin/idb', '/usr/local/bin/idb', path.join(os.homedir(), '.local/bin/idb')];
+  const candidates = [DEFAULT_IDB, 'idb', '/opt/homebrew/bin/idb', '/usr/local/bin/idb', path.join(os.homedir(), '.local/bin/idb')];
   if (process.env.IDB) candidates.unshift(process.env.IDB);
   for (const p of candidates) {
     try {
@@ -172,12 +177,14 @@ class IosMirrorSession {
   // idb describe บอก screen_dimensions มาให้ (pixel + density) → ได้ scale ไว้แปลงพิกัด
   async _loadPointSize() {
     try {
-      const { stdout } = await execFileP(this.idb, ['describe', '--udid', this.udid, '--json'], { timeout: 20000 });
+      const { stdout } = await execFileP(this.idb, ['describe', '--udid', this.udid, '--json'],
+        { timeout: 30000, env: this._idbEnv() });
       const j = JSON.parse(stdout);
       const d = j.screen_dimensions || {};
+      // ตัวจริงคืน width_points/height_points มาให้ตรงๆ (เหลือ density ไว้เป็นทางสำรอง)
       const density = Number(d.density) || 1;
-      this.ptW = Math.round((Number(d.width) || this.pxW) / density);
-      this.ptH = Math.round((Number(d.height) || this.pxH) / density);
+      this.ptW = Number(d.width_points) || Math.round((Number(d.width) || this.pxW) / density);
+      this.ptH = Number(d.height_points) || Math.round((Number(d.height) || this.pxH) / density);
     } catch {
       // อ่านไม่ได้ก็เดาจาก scale 3x (iPhone รุ่นใหม่ทั้งหมด) ดีกว่าไม่มีพิกัดเลย
       this.ptW = Math.round(this.pxW / 3);
@@ -235,10 +242,24 @@ class IosMirrorSession {
     return { x: cl(Number(xN) || 0, w), y: cl(Number(yN) || 0, h) };
   }
 
+  // idb CLI จะ spawn idb_companion เองโดยหาจาก PATH เท่านั้น
+  // ห้ามใช้ --companion-path / env IDB_COMPANION ชี้ตัว binary — สองอันนั้นคือ "address ของ
+  // unix socket" ที่ให้ไปต่อกับ companion ที่รันอยู่แล้ว ใส่ path ของ binary ลงไปจะได้
+  // "AF_UNIX path too long" → เราเลยใช้ env ของเราเอง IDB_COMPANION_BIN แล้วเสียบ
+  // โฟลเดอร์ของมันเข้าหน้า PATH ของ child (พร้อมล้าง IDB_COMPANION ของ idb ออกกันชนกัน)
+  _idbEnv() {
+    const bin = process.env.IDB_COMPANION_BIN
+      || (fs.existsSync(DEFAULT_COMPANION) ? DEFAULT_COMPANION : '');
+    if (!bin) return process.env;
+    const env = { ...process.env, PATH: `${path.dirname(bin)}:${process.env.PATH || ''}` };
+    delete env.IDB_COMPANION;
+    return env;
+  }
+
   async _idbRun(args, timeout = 15000) {
     if (!this.idb) return false;
     try {
-      await execFileP(this.idb, [...args, '--udid', this.udid], { timeout });
+      await execFileP(this.idb, [...args, '--udid', this.udid], { timeout, env: this._idbEnv() });
       return true;
     } catch (e) {
       this.onError('idb: ' + (e && e.message ? e.message.split('\n')[0] : 'สั่งงานไม่สำเร็จ'));

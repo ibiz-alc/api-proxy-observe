@@ -41,8 +41,8 @@ const readLog = () => (fs.existsSync(LOG) ? fs.readFileSync(LOG, 'utf8').trim().
   // 1) เห็น idb → บอกว่าสั่งงานได้ (ไม่ขึ้น "ดูอย่างเดียว") + describe ถูกเรียกเอาขนาด point
   const status = await page.evaluate(() => document.querySelector('.mirror-status-text')?.textContent || '');
   check('1 มี idb → ไม่ขึ้น "ดูอย่างเดียว"', !/ดูอย่างเดียว|ติดตั้ง idb/.test(status), status);
-  check('1 เรียก idb describe เอาขนาดจอ (point)', readLog().some((l) => l.startsWith('describe')),
-    readLog().find((l) => l.startsWith('describe')) || 'ไม่มี describe ใน log');
+  check('1 เรียก idb describe เอาขนาดจอ (point)', readLog().some((l) => l.includes('describe')),
+    readLog().find((l) => l.includes('describe')) || 'ไม่มี describe ใน log');
 
   // 2) แตะกลาง canvas → ui tap ที่ ~กลางจอ (จอ 1206x2622 density 3 → 402x874 point)
   const box = await page.evaluate(() => {
@@ -51,7 +51,7 @@ const readLog = () => (fs.existsSync(LOG) ? fs.readFileSync(LOG, 'utf8').trim().
   });
   await page.mouse.click(box.x + box.w / 2, box.y + box.h / 2);
   await sleep(1500);
-  const tap = readLog().find((l) => l.startsWith('ui tap'));
+  const tap = readLog().find((l) => l.includes('ui tap'));
   const tp = tap ? tap.match(/ui tap (\d+) (\d+)/) : null;
   check('2 แตะกลางจอ → ui tap พิกัดกลางจอ (point)',
     !!tp && Math.abs(Number(tp[1]) - 201) <= 12 && Math.abs(Number(tp[2]) - 437) <= 14, tap || 'ไม่มี ui tap');
@@ -62,7 +62,7 @@ const readLog = () => (fs.existsSync(LOG) ? fs.readFileSync(LOG, 'utf8').trim().
   await page.mouse.move(box.x + box.w / 2, box.y + box.h * 0.3, { steps: 8 });
   await page.mouse.up();
   await sleep(1500);
-  const sw = readLog().find((l) => l.startsWith('ui swipe'));
+  const sw = readLog().find((l) => l.includes('ui swipe'));
   check('3 ลาก → ui swipe (จากล่างขึ้นบน)', !!sw && /ui swipe \d+ (\d+) \d+ (\d+)/.test(sw)
     && Number(sw.match(/ui swipe \d+ (\d+) \d+ (\d+)/)[1]) > Number(sw.match(/ui swipe \d+ (\d+) \d+ (\d+)/)[2]), sw || 'ไม่มี ui swipe');
 
@@ -70,7 +70,7 @@ const readLog = () => (fs.existsSync(LOG) ? fs.readFileSync(LOG, 'utf8').trim().
   await page.type('.mirror-text-input', 'hello ios');
   await page.click('.mirror-bottom .mirror-btn');
   await sleep(1500);
-  const tx = readLog().find((l) => l.startsWith('ui text'));
+  const tx = readLog().find((l) => l.includes('ui text'));
   check('4 ส่งข้อความ → ui text', !!tx && tx.includes('hello ios'), tx || 'ไม่มี ui text');
 
   // 5) ปุ่ม Home / Lock / Siri → ui button
@@ -78,7 +78,7 @@ const readLog = () => (fs.existsSync(LOG) ? fs.readFileSync(LOG, 'utf8').trim().
     await page.evaluate((t) => [...document.querySelectorAll('.mirror-toolbar .mirror-tool')].find((b) => b.title === t).click(), title);
     await sleep(900);
   }
-  const buttons = readLog().filter((l) => l.startsWith('ui button')).map((l) => l.split(' ')[2]);
+  const buttons = readLog().filter((l) => l.includes('ui button')).map((l) => l.split('ui button ')[1].split(' ')[0]);
   check('5 ปุ่ม Home/Lock/Siri → ui button', ['HOME', 'LOCK', 'SIRI'].every((b) => buttons.includes(b)), buttons.join(',') || 'ไม่มี ui button');
 
   check('6 ไม่มี page error', errs.length === 0, errs.join(' | '));

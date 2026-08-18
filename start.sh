@@ -231,6 +231,22 @@ if [ "$SKIP_SETUP" != yes ]; then
     echo "   📦 node_modules ยังไม่มี dependency ของ mirror — npm install เพิ่ม…"
     npm install && echo "   ✅ ติดตั้ง mirror deps สำเร็จ" || echo "   ⚠️ npm install ล้มเหลว — mirror อาจใช้ไม่ได้"
   fi
+  # iOS Simulator: ดูจอได้ด้วย simctl (มากับ Xcode) แต่ "แตะ/ปัด/พิมพ์" ต้องมี idb
+  # ไม่ลงให้อัตโนมัติ เพราะ companion ต้อง build ด้วย Xcode ~15 นาที (ดูขั้นตอนใน README)
+  if command -v xcrun >/dev/null 2>&1 && xcrun simctl help >/dev/null 2>&1; then
+    echo "   ✅ simctl — mirror จอ iOS Simulator ได้ (ดูภาพ)"
+    IDB_BIN="${IDB:-$HOME/.apitester/idb-venv/bin/idb}"
+    IDB_COMP="${IDB_COMPANION_BIN:-$HOME/.apitester/idb/idb_companion}"
+    if [ -x "$IDB_BIN" ] && [ -x "$IDB_COMP" ]; then
+      echo "   ✅ idb + companion — สั่งงาน sim ได้ (แตะ/ปัด/พิมพ์)"
+    else
+      [ -x "$IDB_BIN" ]  || echo "   ⚠️ ไม่มี idb client ที่ $IDB_BIN"
+      [ -x "$IDB_COMP" ] || echo "   ⚠️ ไม่มี idb_companion ที่ $IDB_COMP"
+      echo "      → mirror iOS จะเป็นแบบ 'ดูอย่างเดียว' · วิธีลง: หา \"Installing idb\" ใน README.md"
+    fi
+  else
+    echo "   ℹ️ ไม่มี Xcode/simctl — ข้ามส่วน iOS Simulator (Android ยังใช้ได้ปกติ)"
+  fi
 fi
 
 echo "==> ปิดของเก่า (ถ้ามี)"
