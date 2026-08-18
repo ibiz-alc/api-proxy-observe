@@ -3607,6 +3607,18 @@ function setupJsonViewer() {
   document.getElementById('jv-next-btn').addEventListener('click', () => jvGoto(hitIdx + 1));
   document.getElementById('jv-prev-btn').addEventListener('click', () => jvGoto(hitIdx - 1));
 
+  // Cmd/Ctrl+F ตอนอยู่แท็บ JSON → เข้าช่องค้นหาของเราแทน find bar ของเบราว์เซอร์
+  // (find bar ของเบราว์เซอร์หา tree ที่พับอยู่ไม่เจอ และไม่มีตัวนับ/ปุ่ม ▲▼ ให้ไล่ทีละ match)
+  // จับทั้ง meta และ ctrl — Mac ใช้ Cmd แต่คนที่ติดมือจาก Windows กด Ctrl
+  // กดซ้ำตอนอยู่ในช่องแล้ว = select ข้อความเดิมไว้ให้พิมพ์ทับได้เลย
+  window.addEventListener('keydown', (e) => {
+    if (!((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f')) return;
+    if (!document.getElementById('tab-jsonviewer').classList.contains('active')) return;
+    e.preventDefault();
+    searchInput.focus();
+    searchInput.select();
+  });
+
   parseNow(); // render ค่าที่จำไว้จาก localStorage ตอนเปิดหน้า
 }
 setupJsonViewer();

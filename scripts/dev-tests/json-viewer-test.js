@@ -156,6 +156,33 @@ async function setEditor(page, text) { // วางข้อความใน e
   }));
   check('9 ไม่ overflow แนวนอน + สองฝั่งครบ', !r9.overflowX && r9.paneCount === 2);
 
+  // 10) Cmd/Ctrl+F ในแท็บ JSON → โฟกัสช่องค้นหาของเรา (ไม่ใช่ find bar ของเบราว์เซอร์)
+  //     และต้องไม่ทำงานเวลาอยู่แท็บอื่น
+  const focusAfter = async (mod) => {
+    await page.evaluate(() => { document.getElementById('jv-search').blur(); document.body.focus(); });
+    await page.keyboard.down(mod);
+    await page.keyboard.press('f');
+    await page.keyboard.up(mod);
+    await sleep(150);
+    return page.evaluate(() => document.activeElement && document.activeElement.id);
+  };
+  check('10 Cmd+F → โฟกัสช่องค้นหา', (await focusAfter('Meta')) === 'jv-search');
+  check('10 Ctrl+F → โฟกัสช่องค้นหา', (await focusAfter('Control')) === 'jv-search');
+  // กดซ้ำตอนอยู่ในช่องแล้ว = select ข้อความไว้ให้พิมพ์ทับ
+  await page.evaluate(() => { const i = document.getElementById('jv-search'); i.value = 'price'; i.focus(); i.setSelectionRange(5, 5); });
+  await page.keyboard.down('Meta'); await page.keyboard.press('f'); await page.keyboard.up('Meta');
+  const sel = await page.evaluate(() => {
+    const i = document.getElementById('jv-search');
+    return { start: i.selectionStart, end: i.selectionEnd, len: i.value.length };
+  });
+  check('10 กดซ้ำแล้ว select ข้อความเดิมทั้งหมด', sel.start === 0 && sel.end === sel.len && sel.len > 0, JSON.stringify(sel));
+  // แท็บอื่นต้องไม่ถูกดัก (ปล่อยให้ find bar ของเบราว์เซอร์ทำงานตามปกติ)
+  await page.click('button[data-tab="proxy"]');
+  await sleep(200);
+  const other = await focusAfter('Meta');
+  check('10 แท็บอื่นไม่ถูกดัก', other !== 'jv-search', `activeElement = ${other || '(body)'}`);
+  await page.click('button[data-tab="jsonviewer"]');
+
   check('0 ไม่มี JS error บนหน้า', pageErrors.length === 0, pageErrors.join(' | ').slice(0, 120));
 
   await page.screenshot({ path: './json-viewer-test.png' });
