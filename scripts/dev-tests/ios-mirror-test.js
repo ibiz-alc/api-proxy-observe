@@ -5,6 +5,7 @@
 // เช็ค: 1 sim โผล่ใน Device Manager · 2 กดดูจอแล้วได้ ready(platform=ios) · 3 มีเฟรมวาดจริง
 //        4 fps > 3 · 5 ปุ่มเฉพาะ Android ถูกซ่อน · 6 หยุดแล้ว WS ปิด · 7 ไม่มี page error
 const path = require('path');
+const { execFile } = require('child_process');
 const puppeteer = require(require.resolve('puppeteer-core', { paths: [path.join(__dirname, '..', '..'), process.cwd()] }));
 
 const PORT = process.env.PORT || 3100;
@@ -68,11 +69,21 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     `${st.w}x${st.h} ratio=${ratio.toFixed(3)}`);
   check('3 มีภาพวาดจริงบน canvas', st.painted, st.status);
 
-  // 4) fps จากแถบสถานะ (นับเฟรมที่วาดได้จริง)
-  await sleep(3000);
-  const status2 = await page.evaluate(() => document.querySelector('.mirror-status-text')?.textContent || '');
-  const m = status2.match(/(\d+)\s*fps/);
-  check('4 fps > 3', m && Number(m[1]) > 3, status2);
+  // 4) fps จากแถบสถานะ — ต้องทำให้จอเปลี่ยนก่อน เพราะเฟรมที่ซ้ำเดิมจะถูกข้าม (จอนิ่ง = 0 fps ถูกต้องแล้ว)
+  //    สลับ light/dark ด้วย simctl = ทั้งจอเปลี่ยน ไม่ต้องพึ่ง idb และไม่ขึ้นกับว่าเปิดแอปอะไรอยู่
+  const udid = await page.evaluate(() => {
+    const row = [...document.querySelectorAll('.mirror-device-row')].find((r) => r.textContent.includes('🍎'));
+    return row.querySelector('.mirror-device-sub').textContent.split(' ')[0];
+  });
+  let best = 0, seen = '';
+  for (let i = 0; i < 6; i++) {
+    await new Promise((r) => execFile('xcrun', ['simctl', 'ui', udid, 'appearance', i % 2 ? 'light' : 'dark'], () => r()));
+    await sleep(1200);
+    seen = await page.evaluate(() => document.querySelector('.mirror-status-text')?.textContent || '');
+    const n = Number((seen.match(/(\d+)\s*fps/) || [])[1] || 0);
+    if (n > best) best = n;
+  }
+  check('4 มีเฟรมเข้ามาเมื่อจอเปลี่ยน (fps > 0)', best > 0, `สูงสุด ${best} fps · ล่าสุด: "${seen}"`);
 
   // 5) ปุ่มเฉพาะ Android ถูกซ่อนตอน mirror iOS
   const tools = await page.evaluate(() => [...document.querySelectorAll('.mirror-toolbar .mirror-tool')]

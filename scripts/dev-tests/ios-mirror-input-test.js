@@ -28,8 +28,11 @@ const readLog = () => (fs.existsSync(LOG) ? fs.readFileSync(LOG, 'utf8').trim().
   page.on('pageerror', (e) => errs.push(e.message));
   await page.goto(`http://localhost:${PORT}`, { waitUntil: 'networkidle2', timeout: 20000 });
   await page.click('#mirrorRailDevices');
+  // รอแถวของ sim จริง ๆ ไม่ใช่แถวแรกที่โผล่ — /api/devices (adb) มักตอบก่อน /api/devices/ios-sims (simctl)
   for (let i = 0; i < 20; i++) {
-    if (await page.evaluate(() => document.querySelectorAll('.mirror-device-row').length)) break;
+    const ok = await page.evaluate(() =>
+      [...document.querySelectorAll('.mirror-device-row')].some((r) => r.textContent.includes('🍎')));
+    if (ok) break;
     await sleep(1000);
   }
   await page.evaluate(() => {

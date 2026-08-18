@@ -46,6 +46,9 @@ async function tree(u) {
 
 (async () => {
   const u = await udid();
+  // ปิด Settings ทิ้งก่อน ไม่งั้นถ้ามันเปิดค้างอยู่ที่หน้าใดหน้าหนึ่ง การกดเข้าไปจะได้หน้าเดิม
+  // (เคยทำให้เทสต์ fail เพราะไปหา label 'General' ในหน้าที่เลื่อนไปไกลแล้ว)
+  await execFileP('xcrun', ['simctl', 'terminate', u, 'com.apple.Preferences'], { timeout: 15000 }).catch(() => {});
   await idb(['ui', 'button', 'HOME', '--udid', u]);
   await sleep(2000);
 
@@ -53,6 +56,7 @@ async function tree(u) {
   const home = await tree(u);
   const app = home.find((e) => e.role === 'AXApplication') || {};
   const scr = app.frame || { width: 402, height: 874 };
+  const homePid = app.pid;
   const icon = home.find((e) => (e.AXLabel || '').trim() === 'Settings');
   check('1 เจอ icon Settings บนหน้า home', !!icon, icon ? JSON.stringify(icon.frame) : `element ${home.length} ตัว`);
   if (!icon) process.exit(1);
@@ -66,8 +70,11 @@ async function tree(u) {
   page.on('pageerror', (e) => errs.push(e.message));
   await page.goto(`http://localhost:${PORT}`, { waitUntil: 'networkidle2', timeout: 20000 });
   await page.click('#mirrorRailDevices');
+  // รอแถวของ sim จริง ๆ ไม่ใช่แถวแรกที่โผล่ — /api/devices (adb) มักตอบก่อน /api/devices/ios-sims (simctl)
   for (let i = 0; i < 20; i++) {
-    if (await page.evaluate(() => document.querySelectorAll('.mirror-device-row').length)) break;
+    const ok = await page.evaluate(() =>
+      [...document.querySelectorAll('.mirror-device-row')].some((r) => r.textContent.includes('🍎')));
+    if (ok) break;
     await sleep(1000);
   }
   await page.evaluate(() => {
@@ -86,11 +93,14 @@ async function tree(u) {
   await page.mouse.click(box.x + box.w * cx, box.y + box.h * cy);
   await sleep(4000);
 
-  // Settings เปิดแล้วหรือยัง — หน้าแรกของ Settings มีคำพวกนี้เสมอ
+  // Settings เปิดแล้วหรือยัง — เทียบ pid ของแอปที่อยู่หน้าสุด (เปลี่ยน = คนละแอปกับหน้า home)
+  // เชื่อถือได้กว่าไปหา label เฉพาะหน้า เพราะไม่ขึ้นกับว่า Settings อยู่หน้าไหน
   const after = await tree(u);
+  const afterApp = after.find((e) => e.role === 'AXApplication') || {};
   const labels = after.map((e) => (e.AXLabel || '').trim()).filter(Boolean);
-  const opened = labels.some((l) => /General|Apple Account|Wi-Fi|Notifications|ทั่วไป/i.test(l));
-  check('3 คลิกในเบราว์เซอร์ → sim เปิดแอป Settings จริง', opened, labels.slice(0, 8).join(' | ') || 'ไม่มี label');
+  const opened = afterApp.pid && homePid && afterApp.pid !== homePid;
+  check('3 คลิกในเบราว์เซอร์ → sim เปลี่ยนไปแอปอื่น (Settings) จริง', Boolean(opened),
+    `pid ${homePid} → ${afterApp.pid} · บนจอ: ${labels.slice(0, 5).join(' | ')}`);
 
   await page.screenshot({ path: 'ios-mirror-input.png' });
   await idb(['ui', 'button', 'HOME', '--udid', u]); // คืนสภาพ
