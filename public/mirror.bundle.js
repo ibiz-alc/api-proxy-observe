@@ -29,9 +29,9 @@
     mod
   ));
 
-  // node_modules/yuv-buffer/yuv-buffer.js
+  // ../ApiTester/node_modules/yuv-buffer/yuv-buffer.js
   var require_yuv_buffer = __commonJS({
-    "node_modules/yuv-buffer/yuv-buffer.js"(exports, module) {
+    "../ApiTester/node_modules/yuv-buffer/yuv-buffer.js"(exports, module) {
       var YUVBuffer = {
         /**
          * Validate a plane dimension
@@ -222,9 +222,9 @@
     }
   });
 
-  // node_modules/yuv-canvas/src/FrameSink.js
+  // ../ApiTester/node_modules/yuv-canvas/src/FrameSink.js
   var require_FrameSink = __commonJS({
-    "node_modules/yuv-canvas/src/FrameSink.js"(exports, module) {
+    "../ApiTester/node_modules/yuv-canvas/src/FrameSink.js"(exports, module) {
       (function() {
         "use strict";
         function FrameSink(canvas, options) {
@@ -241,9 +241,9 @@
     }
   });
 
-  // node_modules/yuv-canvas/src/depower.js
+  // ../ApiTester/node_modules/yuv-canvas/src/depower.js
   var require_depower = __commonJS({
-    "node_modules/yuv-canvas/src/depower.js"(exports, module) {
+    "../ApiTester/node_modules/yuv-canvas/src/depower.js"(exports, module) {
       (function() {
         "use strict";
         function depower(ratio) {
@@ -262,9 +262,9 @@
     }
   });
 
-  // node_modules/yuv-canvas/src/YCbCr.js
+  // ../ApiTester/node_modules/yuv-canvas/src/YCbCr.js
   var require_YCbCr = __commonJS({
-    "node_modules/yuv-canvas/src/YCbCr.js"(exports, module) {
+    "../ApiTester/node_modules/yuv-canvas/src/YCbCr.js"(exports, module) {
       (function() {
         "use strict";
         var depower = require_depower();
@@ -341,9 +341,9 @@
     }
   });
 
-  // node_modules/yuv-canvas/src/SoftwareFrameSink.js
+  // ../ApiTester/node_modules/yuv-canvas/src/SoftwareFrameSink.js
   var require_SoftwareFrameSink = __commonJS({
-    "node_modules/yuv-canvas/src/SoftwareFrameSink.js"(exports, module) {
+    "../ApiTester/node_modules/yuv-canvas/src/SoftwareFrameSink.js"(exports, module) {
       (function() {
         "use strict";
         var FrameSink = require_FrameSink(), YCbCr = require_YCbCr();
@@ -407,9 +407,9 @@
     }
   });
 
-  // node_modules/yuv-canvas/build/shaders.js
+  // ../ApiTester/node_modules/yuv-canvas/build/shaders.js
   var require_shaders = __commonJS({
-    "node_modules/yuv-canvas/build/shaders.js"(exports, module) {
+    "../ApiTester/node_modules/yuv-canvas/build/shaders.js"(exports, module) {
       module.exports = {
         vertex: "precision mediump float;\n\nattribute vec2 aPosition;\nattribute vec2 aLumaPosition;\nattribute vec2 aChromaPosition;\nvarying vec2 vLumaPosition;\nvarying vec2 vChromaPosition;\nvoid main() {\n    gl_Position = vec4(aPosition, 0, 1);\n    vLumaPosition = aLumaPosition;\n    vChromaPosition = aChromaPosition;\n}\n",
         fragment: "// inspired by https://github.com/mbebenita/Broadway/blob/master/Player/canvas.js\n\nprecision mediump float;\n\nuniform sampler2D uTextureY;\nuniform sampler2D uTextureCb;\nuniform sampler2D uTextureCr;\nvarying vec2 vLumaPosition;\nvarying vec2 vChromaPosition;\nvoid main() {\n   // Y, Cb, and Cr planes are uploaded as ALPHA textures.\n   float fY = texture2D(uTextureY, vLumaPosition).w;\n   float fCb = texture2D(uTextureCb, vChromaPosition).w;\n   float fCr = texture2D(uTextureCr, vChromaPosition).w;\n\n   // Premultipy the Y...\n   float fYmul = fY * 1.1643828125;\n\n   // And convert that to RGB!\n   gl_FragColor = vec4(\n     fYmul + 1.59602734375 * fCr - 0.87078515625,\n     fYmul - 0.39176171875 * fCb - 0.81296875 * fCr + 0.52959375,\n     fYmul + 2.017234375   * fCb - 1.081390625,\n     1\n   );\n}\n",
@@ -419,9 +419,9 @@
     }
   });
 
-  // node_modules/yuv-canvas/src/WebGLFrameSink.js
+  // ../ApiTester/node_modules/yuv-canvas/src/WebGLFrameSink.js
   var require_WebGLFrameSink = __commonJS({
-    "node_modules/yuv-canvas/src/WebGLFrameSink.js"(exports, module) {
+    "../ApiTester/node_modules/yuv-canvas/src/WebGLFrameSink.js"(exports, module) {
       (function() {
         "use strict";
         var FrameSink = require_FrameSink(), shaders = require_shaders();
@@ -864,9 +864,9 @@
     }
   });
 
-  // node_modules/yuv-canvas/src/yuv-canvas.js
+  // ../ApiTester/node_modules/yuv-canvas/src/yuv-canvas.js
   var require_yuv_canvas = __commonJS({
-    "node_modules/yuv-canvas/src/yuv-canvas.js"(exports, module) {
+    "../ApiTester/node_modules/yuv-canvas/src/yuv-canvas.js"(exports, module) {
       (function() {
         "use strict";
         var FrameSink = require_FrameSink(), SoftwareFrameSink = require_SoftwareFrameSink(), WebGLFrameSink = require_WebGLFrameSink();
@@ -900,14 +900,14 @@
     }
   });
 
-  // node_modules/@yume-chan/scrcpy/esm/base/video.js
+  // ../ApiTester/node_modules/@yume-chan/scrcpy/esm/base/video.js
   var ScrcpyVideoCodecId = {
     H264: 1748121140,
     H265: 1748121141,
     AV1: 6387249
   };
 
-  // node_modules/@yume-chan/async/esm/promise-resolver.js
+  // ../ApiTester/node_modules/@yume-chan/async/esm/promise-resolver.js
   var PromiseResolver = class {
     #promise;
     get promise() {
@@ -935,17 +935,17 @@
     };
   };
 
-  // node_modules/@yume-chan/no-data-view/esm/uint32.js
+  // ../ApiTester/node_modules/@yume-chan/no-data-view/esm/uint32.js
   // @__NO_SIDE_EFFECTS__
   function getUint32LittleEndian(buffer, offset) {
     return (buffer[offset] | buffer[offset + 1] << 8 | buffer[offset + 2] << 16 | buffer[offset + 3] << 24) >>> 0;
   }
 
-  // node_modules/@yume-chan/stream-extra/esm/stream.js
+  // ../ApiTester/node_modules/@yume-chan/stream-extra/esm/stream.js
   var { AbortController } = globalThis;
   var { WritableStream, TransformStream } = globalThis;
 
-  // node_modules/@yume-chan/scrcpy/esm/codec/av1.js
+  // ../ApiTester/node_modules/@yume-chan/scrcpy/esm/codec/av1.js
   var AndroidAv1Profile = {
     Main8: 1 << 0,
     Main10: 1 << 1,
@@ -1536,7 +1536,7 @@
     }
   };
 
-  // node_modules/@yume-chan/scrcpy/esm/codec/nalu.js
+  // ../ApiTester/node_modules/@yume-chan/scrcpy/esm/codec/nalu.js
   function* annexBSplitNalu(buffer) {
     let start = -1;
     let zeroCount = 0;
@@ -1747,7 +1747,7 @@
     }
   };
 
-  // node_modules/@yume-chan/scrcpy/esm/codec/h264.js
+  // ../ApiTester/node_modules/@yume-chan/scrcpy/esm/codec/h264.js
   var AndroidAvcProfile = {
     Baseline: 1 << 0,
     Main: 1 << 1,
@@ -1948,7 +1948,7 @@
     };
   }
 
-  // node_modules/@yume-chan/scrcpy/esm/codec/h265.js
+  // ../ApiTester/node_modules/@yume-chan/scrcpy/esm/codec/h265.js
   var AndroidHevcProfile = {
     Main: 1 << 0,
     Main10: 1 << 1,
@@ -2944,7 +2944,7 @@
     };
   }
 
-  // node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/codec/utils.js
+  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/codec/utils.js
   function hexDigits(value) {
     return value.toString(16).toUpperCase();
   }
@@ -2955,7 +2955,7 @@
     return value.toString(10).padStart(2, "0");
   }
 
-  // node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/codec/av1.js
+  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/codec/av1.js
   var Av1Codec = class {
     #decoder;
     #updateSize;
@@ -3040,7 +3040,7 @@
     }
   };
 
-  // node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/codec/h26x.js
+  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/codec/h26x.js
   var H26xDecoder = class {
     #decoder;
     #config;
@@ -3100,7 +3100,7 @@
     }
   };
 
-  // node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/codec/h264.js
+  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/codec/h264.js
   var H264Decoder = class extends H26xDecoder {
     #updateSize;
     #options;
@@ -3121,7 +3121,7 @@
     }
   };
 
-  // node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/codec/h265.js
+  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/codec/h265.js
   var H265Decoder = class extends H26xDecoder {
     #updateSize;
     #options;
@@ -3151,7 +3151,7 @@
     }
   };
 
-  // node_modules/@yume-chan/event/esm/disposable.js
+  // ../ApiTester/node_modules/@yume-chan/event/esm/disposable.js
   var AutoDisposable = class {
     #disposables = [];
     constructor() {
@@ -3169,7 +3169,7 @@
     }
   };
 
-  // node_modules/@yume-chan/event/esm/event-emitter.js
+  // ../ApiTester/node_modules/@yume-chan/event/esm/event-emitter.js
   var EventEmitter = class {
     listeners = [];
     constructor() {
@@ -3204,7 +3204,7 @@
     }
   };
 
-  // node_modules/@yume-chan/event/esm/sticky-event-emitter.js
+  // ../ApiTester/node_modules/@yume-chan/event/esm/sticky-event-emitter.js
   var Undefined = /* @__PURE__ */ Symbol("undefined");
   var StickyEventEmitter = class extends EventEmitter {
     #value = Undefined;
@@ -3220,7 +3220,7 @@
     }
   };
 
-  // node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/pool.js
+  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/pool.js
   var Pool = class {
     #controller;
     #readable = new ReadableStream({
@@ -3251,7 +3251,7 @@
     }
   };
 
-  // node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/snapshot.js
+  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/snapshot.js
   var VideoFrameCapturer = class {
     #canvas;
     #context;
@@ -3290,7 +3290,7 @@
     }
   };
 
-  // node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/decoder.js
+  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/decoder.js
   var VideoFrameCapturerPool = /* @__PURE__ */ new Pool(() => new VideoFrameCapturer(), 4);
   var WebCodecsVideoDecoder = class {
     static get isSupported() {
@@ -3456,11 +3456,11 @@
     }
   };
 
-  // node_modules/@yume-chan/scrcpy-decoder-tinyh264/esm/decoder.js
+  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-tinyh264/esm/decoder.js
   var import_yuv_buffer = __toESM(require_yuv_buffer(), 1);
   var import_yuv_canvas = __toESM(require_yuv_canvas(), 1);
 
-  // node_modules/@yume-chan/scrcpy-decoder-tinyh264/esm/wrapper.js
+  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-tinyh264/esm/wrapper.js
   var import_meta = {};
   var worker;
   var workerReady = false;
@@ -3537,7 +3537,7 @@
     return Promise.resolve(decoder);
   }
 
-  // node_modules/@yume-chan/scrcpy-decoder-tinyh264/esm/decoder.js
+  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-tinyh264/esm/decoder.js
   var noop = () => {
   };
   function createCanvas() {
@@ -3664,7 +3664,7 @@
     }
   };
 
-  // node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/render/canvas.js
+  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/render/canvas.js
   var CanvasVideoFrameRenderer = class {
     #canvas;
     get canvas() {
@@ -3685,7 +3685,7 @@
     }
   };
 
-  // node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/render/bitmap.js
+  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/render/bitmap.js
   var BitmapVideoFrameRenderer = class extends CanvasVideoFrameRenderer {
     #context;
     constructor(canvas) {
@@ -3700,7 +3700,7 @@
     }
   };
 
-  // node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/render/webgl.js
+  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/render/webgl.js
   var Resolved = Promise.resolve();
   function createContext(canvas, enableCapture) {
     const attributes = {
@@ -3834,6 +3834,14 @@
       this.writer = null;
       this.rendererEl = null;
       this.serial = null;
+      this.platform = "android";
+      this.iosCanvas = null;
+      this.iosBusy = false;
+      this.iosPending = null;
+      this.iosInput = false;
+      this.fpsCount = 0;
+      this.fpsAt = 0;
+      this.fps = 0;
       this.userDisconnected = false;
       this.reconnectTimer = null;
       this.pendingMove = null;
@@ -3887,14 +3895,18 @@
         b.addEventListener("click", () => fn());
         return b;
       };
-      const toolbar = el("div", { class: "mirror-toolbar" }, [
-        mkTool("\u2B05", "\u0E22\u0E49\u0E2D\u0E19\u0E01\u0E25\u0E31\u0E1A", () => this.send({ type: "back" })),
-        mkTool("\u2B58", "\u0E2B\u0E19\u0E49\u0E32\u0E2B\u0E25\u0E31\u0E01", () => this.send({ type: "home" })),
-        mkTool("\u25A2", "\u0E41\u0E2D\u0E1B\u0E25\u0E48\u0E32\u0E2A\u0E38\u0E14", () => this.send({ type: "appswitch" })),
-        mkTool("\u{1F504}", "\u0E2B\u0E21\u0E38\u0E19\u0E08\u0E2D", () => this.send({ type: "rotate" })),
-        mkTool("\u23FB", "\u0E1B\u0E38\u0E48\u0E21 power", () => this.send({ type: "power" })),
-        mkTool("\u27F3", "\u0E02\u0E2D keyframe", () => this.send({ type: "keyframe" }))
-      ]);
+      this.toolButtons = [
+        [mkTool("\u2B05", "\u0E22\u0E49\u0E2D\u0E19\u0E01\u0E25\u0E31\u0E1A", () => this.send({ type: "back" })), false],
+        [mkTool("\u2B58", "\u0E2B\u0E19\u0E49\u0E32\u0E2B\u0E25\u0E31\u0E01", () => this.send({ type: "home" })), true],
+        [mkTool("\u25A2", "\u0E41\u0E2D\u0E1B\u0E25\u0E48\u0E32\u0E2A\u0E38\u0E14", () => this.send({ type: "appswitch" })), false],
+        [mkTool("\u{1F504}", "\u0E2B\u0E21\u0E38\u0E19\u0E08\u0E2D", () => this.send({ type: "rotate" })), false],
+        [mkTool("\u23FB", "\u0E1B\u0E38\u0E48\u0E21 power / \u0E25\u0E47\u0E2D\u0E01\u0E08\u0E2D", () => this.send({ type: "power" })), true],
+        [mkTool("\u{1F399}", "Siri", () => this.send({ type: "siri" })), true],
+        [mkTool("\u27F3", "\u0E02\u0E2D keyframe", () => this.send({ type: "keyframe" })), false]
+      ];
+      this.toolButtons[5][0].style.display = "none";
+      this.iosOnlyButtons = /* @__PURE__ */ new Set([this.toolButtons[5][0]]);
+      const toolbar = el("div", { class: "mirror-toolbar" }, this.toolButtons.map(([b]) => b));
       this.textInput = el("input", {
         class: "mirror-text-input",
         type: "text",
@@ -3934,13 +3946,36 @@
     }
     // ---------- โหลดรายชื่ออุปกรณ์ (Device Manager style) ----------
     async refreshDevices() {
-      try {
-        const r = await fetch("/api/devices");
-        const j = await r.json();
-        this.devices = j && j.devices || [];
-      } catch (e) {
+      const [aRes, iRes] = await Promise.allSettled([
+        fetch("/api/devices").then((r) => r.json()),
+        fetch("/api/devices/ios-sims").then((r) => r.json())
+      ]);
+      if (aRes.status === "rejected" && iRes.status === "rejected") {
         this.devices = null;
+        this._renderDevices();
+        return;
       }
+      const list = [];
+      const aj = aRes.status === "fulfilled" ? aRes.value : null;
+      for (const d of aj && aj.devices || []) {
+        list.push({
+          id: d.serial,
+          platform: "android",
+          name: `${d.model || d.serial}${d.emulator ? " (emulator)" : ""}`,
+          sub: `${d.serial} \xB7 ${d.transport || d.mode || ""}${d.connected ? " \xB7 proxy \u2713" : ""}`
+        });
+      }
+      const ij = iRes.status === "fulfilled" ? iRes.value : null;
+      const iosProxyOn = Boolean(ij && ij.proxy && ij.proxy.active);
+      for (const sim of ij && ij.sims || []) {
+        list.push({
+          id: sim.udid,
+          platform: "ios",
+          name: `\u{1F34E} ${sim.name}`,
+          sub: `${sim.runtime || "iOS"} \xB7 simulator${iosProxyOn ? " \xB7 proxy \u2713" : ""}`
+        });
+      }
+      this.devices = list;
       this._renderDevices();
     }
     _renderDevices() {
@@ -3954,13 +3989,10 @@
         return;
       }
       for (const d of this.devices) {
-        const isActive = Boolean(this.ws) && this.serial === d.serial;
+        const isActive = Boolean(this.ws) && this.serial === d.id;
         const dot = el("span", { class: "mirror-device-dot" });
-        const name = el("div", { class: "mirror-device-name", text: `${d.model || d.serial}${d.emulator ? " (emulator)" : ""}` });
-        const sub = el("div", {
-          class: "mirror-device-sub",
-          text: `${d.serial} \xB7 ${d.transport || d.mode || ""}${d.connected ? " \xB7 proxy \u2713" : ""}`
-        });
+        const name = el("div", { class: "mirror-device-name", text: d.name });
+        const sub = el("div", { class: "mirror-device-sub", text: d.sub });
         const btn = el("button", {
           class: "mirror-btn " + (isActive ? "danger" : "primary"),
           text: isActive ? "\u23F9 \u0E2B\u0E22\u0E38\u0E14" : "\u25B6 \u0E14\u0E39\u0E08\u0E2D",
@@ -3971,7 +4003,7 @@
             this.disconnect();
             return;
           }
-          this.connect(d.serial);
+          this.connect(d.id, d.platform);
           this.showPanel("running");
         });
         const row = el("div", { class: "mirror-device-row" + (isActive ? " active" : "") }, [
@@ -3992,15 +4024,17 @@
       this._renderDevices();
     }
     // ---------- WebSocket lifecycle ----------
-    connect(serial) {
+    connect(serial, platform = "android") {
       if (!serial) {
         this._setStatus("error", "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E40\u0E25\u0E37\u0E2D\u0E01\u0E2D\u0E38\u0E1B\u0E01\u0E23\u0E13\u0E4C");
         return;
       }
-      if (typeof VideoDecoder === "undefined") {
+      if (platform !== "ios" && typeof VideoDecoder === "undefined") {
         this._setStatus("error", "\u0E40\u0E1A\u0E23\u0E32\u0E27\u0E4C\u0E40\u0E0B\u0E2D\u0E23\u0E4C\u0E19\u0E35\u0E49\u0E44\u0E21\u0E48\u0E23\u0E2D\u0E07\u0E23\u0E31\u0E1A WebCodecs \u2014 \u0E43\u0E0A\u0E49 Chrome/Edge");
         return;
       }
+      this.platform = platform;
+      this._applyPlatformUi();
       if (this.ws) this.disconnect();
       this.serial = serial;
       this.userDisconnected = false;
@@ -4015,7 +4049,11 @@
       if (this._proxyEnsured) return;
       this._proxyEnsured = true;
       try {
-        const r = await fetch("/api/devices/connect", {
+        const r = this.platform === "ios" ? await fetch("/api/devices/ios-sim/connect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ udid: this.serial })
+        }) : await fetch("/api/devices/connect", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ serial: this.serial })
@@ -4043,7 +4081,8 @@
       ws.binaryType = "arraybuffer";
       this.ws = ws;
       ws.addEventListener("open", () => {
-        this.send({ type: "start", serial: this.serial, ...START_OPTS });
+        if (this.platform === "ios") this.send({ type: "start", platform: "ios", udid: this.serial, pipeline: 3 });
+        else this.send({ type: "start", serial: this.serial, ...START_OPTS });
       });
       ws.addEventListener("message", (ev) => this._onMessage(ev));
       ws.addEventListener("error", () => {
@@ -4118,7 +4157,8 @@
     _onControl(msg) {
       switch (msg && msg.type) {
         case "ready":
-          this._setupDecoder(msg);
+          if (msg.platform === "ios") this._setupIosView(msg);
+          else this._setupDecoder(msg);
           this._setStatus("connected", "\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D\u0E41\u0E25\u0E49\u0E27");
           this._setConnected(true);
           this.videoPlaceholder.style.display = "none";
@@ -4131,6 +4171,9 @@
           break;
         case "error":
           this._setStatus("error", msg.message || "\u0E40\u0E01\u0E34\u0E14\u0E02\u0E49\u0E2D\u0E1C\u0E34\u0E14\u0E1E\u0E25\u0E32\u0E14");
+          break;
+        case "ios-warn":
+          this._setStatus("connected", msg.message || "\u0E2A\u0E31\u0E48\u0E07\u0E07\u0E32\u0E19\u0E44\u0E21\u0E48\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08");
           break;
         case "stopped":
           this._setStatus("idle", "\u0E2A\u0E15\u0E23\u0E35\u0E21\u0E2B\u0E22\u0E38\u0E14" + (msg.reason ? ` \u2014 ${msg.reason}` : ""));
@@ -4170,6 +4213,80 @@
       }
       this.videoArea.appendChild(canvas);
     }
+    // ---------- iOS: รับ JPEG ทีละเฟรมมาวาดลง canvas ----------
+    _setupIosView(ready) {
+      this._teardownDecoder();
+      const canvas = el("canvas", { class: "mirror-canvas" });
+      canvas.width = ready.width || 390;
+      canvas.height = ready.height || 844;
+      canvas.style.aspectRatio = `${canvas.width} / ${canvas.height}`;
+      this.iosCanvas = canvas;
+      this.iosCtx = canvas.getContext("2d");
+      this.rendererEl = canvas;
+      this.iosInput = Boolean(ready.input);
+      this.videoArea.appendChild(canvas);
+      this._applyPlatformUi();
+      if (!this.iosInput) {
+        this._setStatus("connected", "\u0E14\u0E39\u0E20\u0E32\u0E1E\u0E44\u0E14\u0E49 \xB7 \u0E2A\u0E31\u0E48\u0E07\u0E07\u0E32\u0E19\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49 (\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E15\u0E34\u0E14\u0E15\u0E31\u0E49\u0E07 idb)");
+      }
+    }
+    // เก็บเฟรมล่าสุดไว้เสมอ แล้วค่อย decode ทีละเฟรม — "เอาอันใหม่สุด" ไม่ใช่ "เอาอันแรกแล้วทิ้งที่เหลือ"
+    // (ถ้าทิ้งแบบหลัง เวลาเฟรมมาติดกันเป็นชุด จะวาดได้แค่ชุดละเฟรมเดียว)
+    _onIosFrame(buf) {
+      this.iosPending = buf;
+      if (!this.iosBusy) this._drainIosFrame();
+    }
+    _drainIosFrame() {
+      const buf = this.iosPending;
+      this.iosPending = null;
+      if (!buf || !this.iosCtx) return;
+      this.iosBusy = true;
+      createImageBitmap(new Blob([buf], { type: "image/jpeg" })).then((bmp) => {
+        this.iosBusy = false;
+        if (!this.iosCtx || !this.iosCanvas) {
+          bmp.close();
+          return;
+        }
+        if (this.iosCanvas.width !== bmp.width || this.iosCanvas.height !== bmp.height) {
+          this.iosCanvas.width = bmp.width;
+          this.iosCanvas.height = bmp.height;
+          this.iosCanvas.style.aspectRatio = `${bmp.width} / ${bmp.height}`;
+        }
+        this.iosCtx.drawImage(bmp, 0, 0);
+        bmp.close();
+        this._tickFps();
+        if (this.iosPending) this._drainIosFrame();
+      }).catch(() => {
+        this.iosBusy = false;
+      });
+    }
+    // นับ fps จริงที่วาดได้ โชว์ที่แถบสถานะ (ลูป screenshot แรงไม่เท่า scrcpy — ให้เห็นตัวเลขจริง)
+    _tickFps() {
+      const now = performance.now();
+      if (!this.fpsAt) {
+        this.fpsAt = now;
+        this.fpsCount = 0;
+        return;
+      }
+      this.fpsCount++;
+      if (now - this.fpsAt >= 1e3) {
+        this.fps = Math.round(this.fpsCount * 1e3 / (now - this.fpsAt));
+        this.fpsAt = now;
+        this.fpsCount = 0;
+        if (this.ws && this.iosCanvas) {
+          this._setStatus("connected", `\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D\u0E41\u0E25\u0E49\u0E27 \xB7 ${this.fps} fps${this.iosInput ? "" : " \xB7 \u0E14\u0E39\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E40\u0E14\u0E35\u0E22\u0E27"}`);
+        }
+      }
+    }
+    // ปุ่มบน toolbar ที่ใช้ได้ต่างกันระหว่าง Android กับ iOS
+    _applyPlatformUi() {
+      const ios = this.platform === "ios";
+      for (const [btn, showOnIos] of this.toolButtons || []) {
+        const iosOnly = this.iosOnlyButtons && this.iosOnlyButtons.has(btn);
+        const show = ios ? showOnIos : !iosOnly;
+        btn.style.display = show ? "" : "none";
+      }
+    }
     _teardownDecoder() {
       if (this.writer) {
         try {
@@ -4189,9 +4306,19 @@
         this.rendererEl.parentNode.removeChild(this.rendererEl);
       }
       this.rendererEl = null;
+      this.iosCanvas = null;
+      this.iosCtx = null;
+      this.iosBusy = false;
+      this.iosPending = null;
+      this.fpsAt = 0;
+      this.fpsCount = 0;
       if (this.videoPlaceholder) this.videoPlaceholder.style.display = "";
     }
     _onBinary(buf) {
+      if (this.platform === "ios") {
+        this._onIosFrame(buf);
+        return;
+      }
       if (!this.writer) return;
       let packet;
       try {

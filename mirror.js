@@ -6,6 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const WebSocket = require('ws');
+const { IosMirrorSession } = require('./ios-mirror');
 
 // พาธ jar ของ scrcpy-server ที่ vendor ไว้ (เวอร์ชัน 3.3.3)
 const SERVER_JAR = path.join(__dirname, 'vendor', 'scrcpy-server-v3.3.3.bin');
@@ -116,6 +117,11 @@ async function handleConnection(ws) {
   let curWidth = 0;         // ขนาดวิดีโอปัจจุบัน (ใช้สเกล touch/scroll)
   let curHeight = 0;
   let libs = null;
+  let ios = null;          // เซสชัน iOS Simulator (ใช้แทน scrcpy เมื่อ platform=ios)
+  let iosDown = null;      // จุด+เวลาที่ pointer กดลง (iOS ไม่มี down/move/up ต้องรอ up แล้วสรุปเป็น tap/swipe)
+  let iosScrollAt = 0;     // กันสั่ง scroll รัว (idb 1 คำสั่ง ~300ms)
+  let iosSent = 0;         // นับเฟรม/วิ ที่ส่งจริง (เห็นเฉพาะตอน MIRROR_DEBUG=1)
+  let iosSentAt = 0;
 
   // ส่ง JSON ให้ client (เงียบถ้า WS ปิดไปแล้ว)
   function sendJson(obj) {
@@ -133,6 +139,7 @@ async function handleConnection(ws) {
   async function cleanup(reason) {
     if (closed) return;
     closed = true;
+    if (ios) { try { ios.stop(); } catch {} ios = null; }
     if (disposeSizeChanged) { try { disposeSizeChanged(); } catch {} disposeSizeChanged = null; }
     if (reader) { try { await reader.cancel(); } catch {} reader = null; }
     if (clipReader) { try { await clipReader.cancel(); } catch {} clipReader = null; }
@@ -192,6 +199,9 @@ async function handleConnection(ws) {
       try { ws.close(); } catch {}
       return;
     }
+    // iOS Simulator — คนละชุดคำสั่งกับ scrcpy (ผ่าน idb)
+    if (ios) { await onIosMessage(msg); return; }
+
     // ต้องมี controller ถึงจะส่ง control ได้
     if (!controller) return;
 
@@ -303,8 +313,83 @@ async function handleConnection(ws) {
     return Math.round(v);
   }
 
+  // ---- คำสั่งควบคุมฝั่ง iOS Simulator ----
+  // ต่างจาก Android ตรงที่ idb ไม่มี inject แบบ down/move/up ต่อเนื่อง มีแต่ tap/swipe ที่จบในคำสั่งเดียว
+  // → เก็บจุดที่กดลงไว้ก่อน แล้วตอนปล่อยค่อยตัดสินว่าเป็น "แตะ" หรือ "ปัด"
+  async function onIosMessage(msg) {
+    if (!ios.hasInput) {
+      // ไม่มี idb = ดูภาพได้อย่างเดียว บอก client ครั้งเดียวพอ (client ซ่อนปุ่มให้เอง)
+      return;
+    }
+    switch (msg.type) {
+      case 'touch': {
+        if (msg.action === 'down') { iosDown = { x: msg.x, y: msg.y, t: Date.now() }; break; }
+        if (msg.action === 'move') break; // ระหว่างลากทำอะไรไม่ได้ รอ up แล้วสรุปเป็น swipe
+        if (msg.action === 'up') {
+          const d = iosDown; iosDown = null;
+          if (!d) break;
+          const dx = (msg.x ?? d.x) - d.x;
+          const dy = (msg.y ?? d.y) - d.y;
+          const far = Math.hypot(dx, dy) > 0.02; // ขยับเกิน 2% ของจอ = ถือว่าปัด
+          if (far) await ios.swipe(d.x, d.y, msg.x ?? d.x, msg.y ?? d.y, (Date.now() - d.t) / 1000);
+          else await ios.tap(d.x, d.y);
+        }
+        break;
+      }
+      case 'scroll': {
+        const now = Date.now();
+        if (now - iosScrollAt < 350) break; // ล้อเมาส์ยิงรัวมาก — ปล่อยผ่านเป็นช่วงๆ
+        iosScrollAt = now;
+        const dy = Number(msg.vDelta ?? 0);
+        if (!dy) break;
+        // เลื่อนขึ้น = ปัดนิ้วขึ้น (เนื้อหาเลื่อนลง) — ระยะ 25% ของจอต่อครั้ง
+        const x = msg.x ?? 0.5;
+        const y = msg.y ?? 0.5;
+        const step = Math.max(-0.35, Math.min(0.35, dy * 0.25));
+        await ios.swipe(x, Math.min(0.9, Math.max(0.1, y)), x, Math.min(0.95, Math.max(0.05, y + step)), 0.1);
+        break;
+      }
+      case 'text': { await ios.text(msg.text); break; }
+      case 'home': { await ios.button('HOME'); break; }
+      case 'power': { await ios.button('LOCK'); break; }
+      case 'siri': { await ios.button('SIRI'); break; }
+      default: break; // back/appswitch/rotate/keyframe ไม่มีบน iOS — เมินเงียบๆ
+    }
+  }
+
+  // ---- เริ่ม session ของ iOS Simulator (ลูป screenshot + input ผ่าน idb) ----
+  async function startIosSession(msg) {
+    const udid = String(msg.udid || msg.serial || '');
+    if (!udid) { fail('ต้องระบุ udid ของ simulator'); return; }
+    ios = new IosMirrorSession({
+      udid,
+      pipeline: Number(msg.pipeline ?? 3),
+      maxWidth: Number(msg.maxWidth ?? 0),
+      shouldSend: () => ws.readyState === WebSocket.OPEN && ws.bufferedAmount < MAX_BUFFERED,
+      onFrame: (buf) => {
+        try { ws.send(buf); } catch {}
+        if (process.env.MIRROR_DEBUG) {
+          iosSent++;
+          const now = Date.now();
+          if (now - iosSentAt >= 1000) {
+            console.log(`[mirror] ios ส่ง ${iosSent} เฟรม/วิ · buffered=${Math.round(ws.bufferedAmount / 1024)}KB`);
+            iosSent = 0; iosSentAt = now;
+          }
+        }
+      },
+      onMeta: (m) => sendJson({ type: 'ready', platform: 'ios', ...m }),
+      onError: (m) => sendJson({ type: 'ios-warn', message: m }),
+    });
+    try {
+      await ios.start();
+    } catch (e) {
+      fail('เริ่ม mirror iOS ไม่สำเร็จ: ' + (e && e.message ? e.message : e));
+    }
+  }
+
   // ---- เริ่ม scrcpy session ----
   async function startSession(msg) {
+    if (msg && msg.platform === 'ios') { await startIosSession(msg); return; }
     libs = await loadLibs();
     const {
       AdbServerClient, Adb, AdbServerNodeTcpConnector,
