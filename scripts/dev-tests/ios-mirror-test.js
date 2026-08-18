@@ -18,6 +18,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new' });
   const page = await browser.newPage();
   await page.setViewport({ width: 1440, height: 950 });
+  // นับเฟรมวิดีโอที่เข้ามาจริงผ่าน CDP — เชื่อถือได้กว่าอ่านตัวเลข fps บนแถบสถานะ
+  // (ตัวเลขนั้นรีเซ็ตทุก 1 วิ ถ้าเฟรมมาใบเดียวต่อการเปลี่ยนจอ การ sample จะพลาดง่าย = flaky)
+  const cdp = await page.target().createCDPSession();
+  await cdp.send('Network.enable');
+  let wsFrames = 0;
+  cdp.on('Network.webSocketFrameReceived', (e) => { if (e.response && e.response.opcode === 2) wsFrames++; });
   const errs = [];
   page.on('pageerror', (e) => errs.push(e.message));
   await page.goto(`http://localhost:${PORT}`, { waitUntil: 'networkidle2', timeout: 20000 });
@@ -45,7 +51,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const row = [...document.querySelectorAll('.mirror-device-row')].find((r) => r.textContent.includes('🍎'));
     row.querySelector('button').click();
   });
-  await sleep(6000);
+  // รอให้ ready + วาดเฟรมแรก (เผื่อ sim/เครื่องช้า) — เช็คเป็นรอบ ๆ ไม่ sleep ทีเดียวยาว
+  for (let i = 0; i < 15; i++) {
+    const w = await page.evaluate(() => document.querySelector('.mirror-video canvas')?.width || 0);
+    if (w > 0) break;
+    await sleep(1000);
+  }
+  await sleep(1500);
 
   const st = await page.evaluate(() => ({
     hasCanvas: !!document.querySelector('.mirror-video canvas'),
@@ -71,19 +83,19 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   // 4) fps จากแถบสถานะ — ต้องทำให้จอเปลี่ยนก่อน เพราะเฟรมที่ซ้ำเดิมจะถูกข้าม (จอนิ่ง = 0 fps ถูกต้องแล้ว)
   //    สลับ light/dark ด้วย simctl = ทั้งจอเปลี่ยน ไม่ต้องพึ่ง idb และไม่ขึ้นกับว่าเปิดแอปอะไรอยู่
+  // อ่าน udid จาก data-device-id — ห้ามแกะจากข้อความ (ของ sim เป็น runtime ไม่ใช่ udid)
   const udid = await page.evaluate(() => {
     const row = [...document.querySelectorAll('.mirror-device-row')].find((r) => r.textContent.includes('🍎'));
-    return row.querySelector('.mirror-device-sub').textContent.split(' ')[0];
+    return row.dataset.deviceId;
   });
-  let best = 0, seen = '';
-  for (let i = 0; i < 6; i++) {
+  wsFrames = 0;
+  for (let i = 0; i < 4 && wsFrames === 0; i++) {
     await new Promise((r) => execFile('xcrun', ['simctl', 'ui', udid, 'appearance', i % 2 ? 'light' : 'dark'], () => r()));
-    await sleep(1200);
-    seen = await page.evaluate(() => document.querySelector('.mirror-status-text')?.textContent || '');
-    const n = Number((seen.match(/(\d+)\s*fps/) || [])[1] || 0);
-    if (n > best) best = n;
+    await sleep(2500); // เผื่อรอบถ่ายที่ผ่อนสปีดตอนจอนิ่ง (สูงสุด 500ms) + decode
   }
-  check('4 มีเฟรมเข้ามาเมื่อจอเปลี่ยน (fps > 0)', best > 0, `สูงสุด ${best} fps · ล่าสุด: "${seen}"`);
+  const seen = await page.evaluate(() => document.querySelector('.mirror-status-text')?.textContent || '');
+  check('4 จอเปลี่ยน → มีเฟรมใหม่ส่งมาจริง', wsFrames > 0, `ได้ ${wsFrames} เฟรม · แถบสถานะ: "${seen}"`);
+  await new Promise((r) => execFile('xcrun', ['simctl', 'ui', udid, 'appearance', 'light'], () => r())); // คืนค่าเดิม
 
   // 5) ปุ่มเฉพาะ Android ถูกซ่อนตอน mirror iOS
   const tools = await page.evaluate(() => [...document.querySelectorAll('.mirror-toolbar .mirror-tool')]

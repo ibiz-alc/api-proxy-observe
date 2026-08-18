@@ -69,16 +69,16 @@ function startMotion(kind, id) {
     const row = [...document.querySelectorAll('.mirror-device-row')].find((r) => r.textContent.includes(m));
     if (!row) return null;
     row.querySelector('button').click();
-    const sub = row.querySelector('.mirror-device-sub').textContent;
-    return { name: row.querySelector('.mirror-device-name').textContent, sub };
+    // id/platform เอาจาก dataset — แกะจากข้อความไม่ได้ (Android = serial แต่ iOS = runtime)
+    return { name: row.querySelector('.mirror-device-name').textContent, id: row.dataset.deviceId, platform: row.dataset.platform };
   }, MATCH);
   if (!found) {
     const rows = await page.evaluate(() => [...document.querySelectorAll('.mirror-device-row')].map((r) => r.textContent.slice(0, 50)));
     console.log(`ไม่เจอเครื่องที่ตรงกับ "${MATCH}" · ในรายการมี: ${rows.join(' / ') || '(ว่าง)'}`);
     await browser.close(); process.exit(1);
   }
-  const isIos = found.name.includes('🍎');
-  const id = found.sub.split(' ')[0]; // serial ของ Android / udid ของ sim
+  const isIos = found.platform === 'ios';
+  const id = found.id; // serial ของ Android / udid ของ sim
   await sleep(5000);           // รอ session นิ่งก่อนเริ่มนับ
   // NO_MOTION=1 = จอมีอะไรขยับเองอยู่แล้ว (เช่นเปิดหน้าเว็บอนิเมชันไว้) — ตัวกวนจอเองก็กิน CPU
   // (idb swipe = Python 1 process ต่อครั้ง) ทำให้เลขที่วัดเพี้ยน
@@ -90,6 +90,6 @@ function startMotion(kind, id) {
   if (motion) clearInterval(motion);
   const d = (Date.now() - t0) / 1000;
   const status = await page.evaluate(() => document.querySelector('.mirror-status-text')?.textContent || '');
-  console.log(`${found.name} → รับ ${(rx / d).toFixed(1)} เฟรม/วิ · ${(bytes / d / 1024 / 1024).toFixed(2)} MB/s · แถบสถานะ: "${status}"`);
+  console.log(`${found.name} (${id}) → รับ ${(rx / d).toFixed(1)} เฟรม/วิ · ${(bytes / d / 1024 / 1024).toFixed(2)} MB/s · แถบสถานะ: "${status}"`);
   await browser.close();
 })().catch((e) => { console.error('ERROR:', e.message); process.exit(1); });

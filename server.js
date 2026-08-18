@@ -1397,16 +1397,25 @@ async function listBootedIosSims() {
 
 // list booted sims — ให้ UI เช็คว่ามี sim เปิดอยู่ไหมก่อนโชว์ปุ่ม
 app.get('/api/devices/ios-sims', async (req, res) => {
-  // สถานะ proxy (macOS-wide) ผูกกับ Mac ไม่ใช่ราย sim → รายงานแยกให้ UI โชว์ปุ่ม Connect/Disconnect ถูกสถานะ
-  const proxy = { active: iosProxy.active, service: iosProxy.service, mitmAlive: await mitmAlive(), macCaTrusted: macCaTrusted() };
   // คำสั่ง trust CA บน Mac (ออปชัน) — ให้ UI คัดลอกไปรันเองในเทอร์มินัล ถ้าไม่อยากให้แอป Mac อื่นขึ้น cert error
   const trustCmd = `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ${mitmCaPath()}`;
+  let sims = [];
+  let unavailable = false;
+  let error;
   try {
-    res.json({ ok: true, sims: await listBootedIosSims(), proxy, trustCmd });
+    sims = await listBootedIosSims();
   } catch (e) {
     // xcrun ไม่มี/Xcode ไม่ได้ลง = ไม่มี sim ให้ทำ — ไม่ใช่ error ร้ายแรง
-    res.json({ ok: true, sims: [], unavailable: true, error: e.message, proxy, trustCmd });
+    unavailable = true;
+    error = e.message;
   }
+  // สถานะ proxy (macOS-wide) ผูกกับ Mac ไม่ใช่ราย sim → รายงานแยกให้ UI โชว์ปุ่ม Connect/Disconnect ถูกสถานะ
+  // ต้องอ่านของจริงจาก networksetup (เหมือน /api/status) ไม่ใช่ iosProxy ใน memory —
+  // server เพิ่ง restart แต่ proxy ของ Mac ยังเปิดค้างอยู่ = in-memory บอก false ทั้งที่ยังเปิด
+  // (อ่านเฉพาะตอนมี sim เพื่อไม่ต้อง spawn networksetup ทุกครั้งที่ UI poll)
+  const live = sims.length ? await macProxyState() : { active: iosProxy.active, service: iosProxy.service };
+  const proxy = { active: live.active, service: live.service, mitmAlive: await mitmAlive(), macCaTrusted: macCaTrusted() };
+  res.json({ ok: true, sims, ...(unavailable ? { unavailable, error } : {}), proxy, trustCmd });
 });
 
 // ติดตั้ง CA ลง iOS Simulator ที่ booted อยู่ทุกตัว (auto-trust) — ปุ่มเดียวจบ

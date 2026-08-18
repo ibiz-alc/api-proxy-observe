@@ -65,6 +65,9 @@ class MirrorPanel {
     this.serial = null;
     this.platform = 'android'; // 'android' (scrcpy) | 'ios' (simulator: ลูป JPEG + idb)
     this.iosCanvas = null;     // canvas สำหรับวาดเฟรม JPEG ของ iOS
+    this.iosCtx = null;
+    this.deviceWarn = '';      // ข้อความเตือนตอนโหลดรายชื่ออุปกรณ์ได้ไม่ครบ
+    this._note = null;         // ข้อความเตือนที่คาอยู่บนแถบสถานะ
     this.iosBusy = false;      // กำลัง decode เฟรมอยู่
     this.iosPending = null;    // เฟรมล่าสุดที่รอ decode (เก่ากว่านั้นทิ้งได้ ไม่ต้องวาดย้อนหลัง)
     this.iosInput = false;     // มี idb ไหม (ไม่มี = ดูได้อย่างเดียว)
@@ -131,19 +134,17 @@ class MirrorPanel {
     };
     // [ปุ่ม, ใช้ได้บน iOS ไหม] — iOS มีแค่ Home/Lock/Siri ที่ idb สั่งได้
     // (ปุ่ม back/แอปล่าสุด/หมุนจอ/keyframe เป็นของ Android → ซ่อนตอน mirror iOS)
+    // ระบุ platform ที่ปุ่มใช้ได้ตรง ๆ ไม่ใช้ index (เดิมเป็น toolButtons[5][0] — สลับลำดับปุ่มแล้วซ่อนผิดตัวเงียบ ๆ)
     this.toolButtons = [
-      [mkTool('⬅', 'ย้อนกลับ', () => this.send({ type: 'back' })), false],
-      [mkTool('⭘', 'หน้าหลัก', () => this.send({ type: 'home' })), true],
-      [mkTool('▢', 'แอปล่าสุด', () => this.send({ type: 'appswitch' })), false],
-      [mkTool('🔄', 'หมุนจอ', () => this.send({ type: 'rotate' })), false],
-      [mkTool('⏻', 'ปุ่ม power / ล็อกจอ', () => this.send({ type: 'power' })), true],
-      [mkTool('🎙', 'Siri', () => this.send({ type: 'siri' })), true],
-      [mkTool('⟳', 'ขอ keyframe', () => this.send({ type: 'keyframe' })), false],
+      { btn: mkTool('⬅', 'ย้อนกลับ', () => this.send({ type: 'back' })), on: ['android'] },
+      { btn: mkTool('⭘', 'หน้าหลัก', () => this.send({ type: 'home' })), on: ['android', 'ios'] },
+      { btn: mkTool('▢', 'แอปล่าสุด', () => this.send({ type: 'appswitch' })), on: ['android'] },
+      { btn: mkTool('🔄', 'หมุนจอ', () => this.send({ type: 'rotate' })), on: ['android'] },
+      { btn: mkTool('⏻', 'ปุ่ม power / ล็อกจอ', () => this.send({ type: 'power' })), on: ['android', 'ios'] },
+      { btn: mkTool('🎙', 'Siri', () => this.send({ type: 'siri' })), on: ['ios'] },
+      { btn: mkTool('⟳', 'ขอ keyframe', () => this.send({ type: 'keyframe' })), on: ['android'] },
     ];
-    // ปุ่ม Siri มีเฉพาะ iOS → ซ่อนไว้ก่อน (ค่าเริ่มต้นคือ Android)
-    this.toolButtons[5][0].style.display = 'none';
-    this.iosOnlyButtons = new Set([this.toolButtons[5][0]]);
-    const toolbar = el('div', { class: 'mirror-toolbar' }, this.toolButtons.map(([b]) => b));
+    const toolbar = el('div', { class: 'mirror-toolbar' }, this.toolButtons.map((t) => t.btn));
 
     // แถวล่าง: ส่งข้อความ (เส้นทางหลักของภาษาไทย)
     this.textInput = el('input', {
@@ -175,6 +176,7 @@ class MirrorPanel {
       this.devicesView,
       this.runningView,
     ]);
+    this._applyPlatformUi(); // ซ่อนปุ่มเฉพาะ iOS ไว้ก่อน (ค่าเริ่มต้นคือ android)
     this.drawer.style.display = 'none';
     this.activeView = null; // view ล่าสุดที่ผู้ใช้กดจาก rail (ใช้ตัดสิน toggle ปิด)
     // คืนค่าความกว้างที่ผู้ใช้เคยลากไว้
@@ -222,6 +224,10 @@ class MirrorPanel {
         sub: `${sim.runtime || 'iOS'} · simulator${iosProxyOn ? ' · proxy ✓' : ''}`,
       });
     }
+    // ฝั่งใดฝั่งหนึ่งพลาด → ยังโชว์ที่เหลือได้ แต่ต้องบอกด้วย ไม่งั้นดูเหมือน "เครื่องหาย"
+    // (เจอจริงตอนวัด perf: /api/devices ตอบช้าไปรอบเดียว รายการขึ้นแค่ sim แล้วงงว่ามือถือหายไปไหน)
+    this.deviceWarn = aRes.status === 'rejected' ? 'โหลดรายชื่อ Android (adb) ไม่ได้'
+      : iRes.status === 'rejected' ? 'โหลดรายชื่อ iOS Simulator (simctl) ไม่ได้' : '';
     this.devices = list;
     this._renderDevices();
   }
@@ -233,8 +239,14 @@ class MirrorPanel {
       return;
     }
     if (!this.devices.length) {
-      this.deviceList.appendChild(el('div', { class: 'mirror-device-empty', text: 'ไม่พบอุปกรณ์ที่ online' }));
+      this.deviceList.appendChild(el('div', {
+        class: 'mirror-device-empty',
+        text: this.deviceWarn ? `ไม่พบอุปกรณ์ — ${this.deviceWarn}` : 'ไม่พบอุปกรณ์ที่ online',
+      }));
       return;
+    }
+    if (this.deviceWarn) {
+      this.deviceList.appendChild(el('div', { class: 'mirror-device-empty', text: `⚠️ ${this.deviceWarn}` }));
     }
     for (const d of this.devices) {
       const isActive = Boolean(this.ws) && this.serial === d.id;
@@ -251,7 +263,13 @@ class MirrorPanel {
         this.connect(d.id, d.platform);
         this.showPanel('running'); // เริ่ม mirror แล้วสลับไป Running Devices (rail highlight ตาม)
       });
-      const row = el('div', { class: 'mirror-device-row' + (isActive ? ' active' : '') }, [
+      // ใส่ id/platform ไว้บนแถว — เดิมเทสต์ต้องแกะจากข้อความ sub ซึ่งของ Android เป็น serial
+      // แต่ของ iOS เป็น runtime ("iOS-26-5") → แกะได้ udid ผิด แล้วคำสั่ง simctl ทั้งชุดเงียบหาย
+      const row = el('div', {
+        class: 'mirror-device-row' + (isActive ? ' active' : ''),
+        'data-device-id': d.id,
+        'data-platform': d.platform,
+      }, [
         dot,
         el('div', { class: 'mirror-device-info' }, [name, sub]),
         btn,
@@ -283,6 +301,7 @@ class MirrorPanel {
     }
     this.platform = platform;
     this._applyPlatformUi();
+    this._setNote('');
     // ตัด session เดิมก่อนเสมอ — เรียก connect/open ซ้ำตอนต่ออยู่ จะได้ไม่ทิ้ง WS เก่า
     // เป็น zombie ฝั่ง server (ปุ่มใน UI toggle ให้อยู่แล้ว แต่ open(serial) เรียกตรงได้)
     if (this.ws) this.disconnect();
@@ -312,11 +331,10 @@ class MirrorPanel {
           body: JSON.stringify({ serial: this.serial }),
         });
       const j = await r.json().catch(() => null);
-      if (!j || j.ok === false) {
-        this._setStatus('connected', 'เชื่อมต่อแล้ว (ตั้ง proxy ไม่สำเร็จ)');
-      }
+      // ตั้ง proxy ไม่สำเร็จ = ดูจอได้แต่ traffic ไม่เข้า → คาไว้ไม่ให้หมดอายุ ผู้ใช้ต้องเห็น
+      if (!j || j.ok === false) this._setNote('ตั้ง proxy ไม่สำเร็จ — traffic จะไม่เข้า', 0);
     } catch (e) {
-      this._setStatus('connected', 'เชื่อมต่อแล้ว (ตั้ง proxy ไม่สำเร็จ)');
+      this._setNote('ตั้ง proxy ไม่สำเร็จ — traffic จะไม่เข้า', 0);
     }
     this.refreshDevices(); // อัปเดต badge "proxy ✓" ในรายการ
   }
@@ -427,8 +445,8 @@ class MirrorPanel {
         // server จะปิด WS ตามมา — close handler ตัดสินใจ retry เอง
         break;
       case 'ios-warn':
-        // idb สั่งงานไม่สำเร็จ — บอกที่แถบสถานะ แต่ไม่ตัดสตรีม
-        this._setStatus('connected', msg.message || 'สั่งงานไม่สำเร็จ');
+        // idb สั่งงานไม่สำเร็จ — คาไว้ 15 วิ แล้วหายเอง (ไม่ตัดสตรีม)
+        this._setNote(msg.message || 'สั่งงานไม่สำเร็จ');
         break;
       case 'stopped':
         // server หยุดสตรีม
@@ -520,7 +538,10 @@ class MirrorPanel {
       bmp.close();
       this._tickFps();
       if (this.iosPending) this._drainIosFrame(); // มีเฟรมใหม่รออยู่ ต่อเลย
-    }).catch(() => { this.iosBusy = false; });
+    }).catch(() => {
+      this.iosBusy = false;
+      if (this.iosPending) this._drainIosFrame(); // เฟรมเสียใบเดียวไม่ควรทำสตรีมค้าง
+    });
   }
 
   // นับเฟรมที่วาดได้ — แค่บวกตัวนับ ส่วนการโชว์ให้ตัวจับเวลาเป็นคนทำ
@@ -536,10 +557,23 @@ class MirrorPanel {
       if (!this.ws) return;
       this.fps = this.fpsCount;
       this.fpsCount = 0;
-      const note = this.platform === 'ios' && !this.iosInput ? ' · ดูอย่างเดียว' : '';
+      const viewOnly = this.platform === 'ios' && !this.iosInput ? ' · ดูอย่างเดียว' : '';
       const idle = this.fps === 0 ? ' (จอนิ่ง)' : '';
-      this._setStatus('connected', `เชื่อมต่อแล้ว · ${this.fps} fps${idle}${note}`);
+      this._setStatus('connected', `เชื่อมต่อแล้ว · ${this.fps} fps${idle}${viewOnly}${this._noteText()}`);
     }, 1000);
+  }
+
+  // ข้อความเตือนที่ต้อง "คา" อยู่กับแถบสถานะ — ไม่งั้นตัวเลข fps (เขียนทับทุกวินาที)
+  // จะกลบมันหายใน 1 วิ เช่น "ตั้ง proxy ไม่สำเร็จ" หรือ error จาก idb ที่ผู้ใช้ต้องเห็น
+  // ms = 0 คือคาไว้ตลอดจนกว่าจะต่อใหม่
+  _setNote(text, ms = 15000) {
+    this._note = text ? { text, until: ms ? Date.now() + ms : Infinity } : null;
+  }
+
+  _noteText() {
+    if (!this._note) return '';
+    if (Date.now() > this._note.until) { this._note = null; return ''; }
+    return ' · ⚠️ ' + this._note.text;
   }
 
   _stopFpsTimer() {
@@ -548,11 +582,8 @@ class MirrorPanel {
 
   // ปุ่มบน toolbar ที่ใช้ได้ต่างกันระหว่าง Android กับ iOS
   _applyPlatformUi() {
-    const ios = this.platform === 'ios';
-    for (const [btn, showOnIos] of this.toolButtons || []) {
-      const iosOnly = this.iosOnlyButtons && this.iosOnlyButtons.has(btn);
-      const show = ios ? showOnIos : !iosOnly;
-      btn.style.display = show ? '' : 'none';
+    for (const t of this.toolButtons || []) {
+      t.btn.style.display = t.on.includes(this.platform) ? '' : 'none';
     }
   }
 

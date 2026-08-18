@@ -29,9 +29,9 @@
     mod
   ));
 
-  // ../ApiTester/node_modules/yuv-buffer/yuv-buffer.js
+  // node_modules/yuv-buffer/yuv-buffer.js
   var require_yuv_buffer = __commonJS({
-    "../ApiTester/node_modules/yuv-buffer/yuv-buffer.js"(exports, module) {
+    "node_modules/yuv-buffer/yuv-buffer.js"(exports, module) {
       var YUVBuffer = {
         /**
          * Validate a plane dimension
@@ -222,9 +222,9 @@
     }
   });
 
-  // ../ApiTester/node_modules/yuv-canvas/src/FrameSink.js
+  // node_modules/yuv-canvas/src/FrameSink.js
   var require_FrameSink = __commonJS({
-    "../ApiTester/node_modules/yuv-canvas/src/FrameSink.js"(exports, module) {
+    "node_modules/yuv-canvas/src/FrameSink.js"(exports, module) {
       (function() {
         "use strict";
         function FrameSink(canvas, options) {
@@ -241,9 +241,9 @@
     }
   });
 
-  // ../ApiTester/node_modules/yuv-canvas/src/depower.js
+  // node_modules/yuv-canvas/src/depower.js
   var require_depower = __commonJS({
-    "../ApiTester/node_modules/yuv-canvas/src/depower.js"(exports, module) {
+    "node_modules/yuv-canvas/src/depower.js"(exports, module) {
       (function() {
         "use strict";
         function depower(ratio) {
@@ -262,9 +262,9 @@
     }
   });
 
-  // ../ApiTester/node_modules/yuv-canvas/src/YCbCr.js
+  // node_modules/yuv-canvas/src/YCbCr.js
   var require_YCbCr = __commonJS({
-    "../ApiTester/node_modules/yuv-canvas/src/YCbCr.js"(exports, module) {
+    "node_modules/yuv-canvas/src/YCbCr.js"(exports, module) {
       (function() {
         "use strict";
         var depower = require_depower();
@@ -341,9 +341,9 @@
     }
   });
 
-  // ../ApiTester/node_modules/yuv-canvas/src/SoftwareFrameSink.js
+  // node_modules/yuv-canvas/src/SoftwareFrameSink.js
   var require_SoftwareFrameSink = __commonJS({
-    "../ApiTester/node_modules/yuv-canvas/src/SoftwareFrameSink.js"(exports, module) {
+    "node_modules/yuv-canvas/src/SoftwareFrameSink.js"(exports, module) {
       (function() {
         "use strict";
         var FrameSink = require_FrameSink(), YCbCr = require_YCbCr();
@@ -407,9 +407,9 @@
     }
   });
 
-  // ../ApiTester/node_modules/yuv-canvas/build/shaders.js
+  // node_modules/yuv-canvas/build/shaders.js
   var require_shaders = __commonJS({
-    "../ApiTester/node_modules/yuv-canvas/build/shaders.js"(exports, module) {
+    "node_modules/yuv-canvas/build/shaders.js"(exports, module) {
       module.exports = {
         vertex: "precision mediump float;\n\nattribute vec2 aPosition;\nattribute vec2 aLumaPosition;\nattribute vec2 aChromaPosition;\nvarying vec2 vLumaPosition;\nvarying vec2 vChromaPosition;\nvoid main() {\n    gl_Position = vec4(aPosition, 0, 1);\n    vLumaPosition = aLumaPosition;\n    vChromaPosition = aChromaPosition;\n}\n",
         fragment: "// inspired by https://github.com/mbebenita/Broadway/blob/master/Player/canvas.js\n\nprecision mediump float;\n\nuniform sampler2D uTextureY;\nuniform sampler2D uTextureCb;\nuniform sampler2D uTextureCr;\nvarying vec2 vLumaPosition;\nvarying vec2 vChromaPosition;\nvoid main() {\n   // Y, Cb, and Cr planes are uploaded as ALPHA textures.\n   float fY = texture2D(uTextureY, vLumaPosition).w;\n   float fCb = texture2D(uTextureCb, vChromaPosition).w;\n   float fCr = texture2D(uTextureCr, vChromaPosition).w;\n\n   // Premultipy the Y...\n   float fYmul = fY * 1.1643828125;\n\n   // And convert that to RGB!\n   gl_FragColor = vec4(\n     fYmul + 1.59602734375 * fCr - 0.87078515625,\n     fYmul - 0.39176171875 * fCb - 0.81296875 * fCr + 0.52959375,\n     fYmul + 2.017234375   * fCb - 1.081390625,\n     1\n   );\n}\n",
@@ -419,9 +419,9 @@
     }
   });
 
-  // ../ApiTester/node_modules/yuv-canvas/src/WebGLFrameSink.js
+  // node_modules/yuv-canvas/src/WebGLFrameSink.js
   var require_WebGLFrameSink = __commonJS({
-    "../ApiTester/node_modules/yuv-canvas/src/WebGLFrameSink.js"(exports, module) {
+    "node_modules/yuv-canvas/src/WebGLFrameSink.js"(exports, module) {
       (function() {
         "use strict";
         var FrameSink = require_FrameSink(), shaders = require_shaders();
@@ -864,9 +864,9 @@
     }
   });
 
-  // ../ApiTester/node_modules/yuv-canvas/src/yuv-canvas.js
+  // node_modules/yuv-canvas/src/yuv-canvas.js
   var require_yuv_canvas = __commonJS({
-    "../ApiTester/node_modules/yuv-canvas/src/yuv-canvas.js"(exports, module) {
+    "node_modules/yuv-canvas/src/yuv-canvas.js"(exports, module) {
       (function() {
         "use strict";
         var FrameSink = require_FrameSink(), SoftwareFrameSink = require_SoftwareFrameSink(), WebGLFrameSink = require_WebGLFrameSink();
@@ -900,14 +900,14 @@
     }
   });
 
-  // ../ApiTester/node_modules/@yume-chan/scrcpy/esm/base/video.js
+  // node_modules/@yume-chan/scrcpy/esm/base/video.js
   var ScrcpyVideoCodecId = {
     H264: 1748121140,
     H265: 1748121141,
     AV1: 6387249
   };
 
-  // ../ApiTester/node_modules/@yume-chan/async/esm/promise-resolver.js
+  // node_modules/@yume-chan/async/esm/promise-resolver.js
   var PromiseResolver = class {
     #promise;
     get promise() {
@@ -935,17 +935,17 @@
     };
   };
 
-  // ../ApiTester/node_modules/@yume-chan/no-data-view/esm/uint32.js
+  // node_modules/@yume-chan/no-data-view/esm/uint32.js
   // @__NO_SIDE_EFFECTS__
   function getUint32LittleEndian(buffer, offset) {
     return (buffer[offset] | buffer[offset + 1] << 8 | buffer[offset + 2] << 16 | buffer[offset + 3] << 24) >>> 0;
   }
 
-  // ../ApiTester/node_modules/@yume-chan/stream-extra/esm/stream.js
+  // node_modules/@yume-chan/stream-extra/esm/stream.js
   var { AbortController } = globalThis;
   var { WritableStream, TransformStream } = globalThis;
 
-  // ../ApiTester/node_modules/@yume-chan/scrcpy/esm/codec/av1.js
+  // node_modules/@yume-chan/scrcpy/esm/codec/av1.js
   var AndroidAv1Profile = {
     Main8: 1 << 0,
     Main10: 1 << 1,
@@ -1536,7 +1536,7 @@
     }
   };
 
-  // ../ApiTester/node_modules/@yume-chan/scrcpy/esm/codec/nalu.js
+  // node_modules/@yume-chan/scrcpy/esm/codec/nalu.js
   function* annexBSplitNalu(buffer) {
     let start = -1;
     let zeroCount = 0;
@@ -1747,7 +1747,7 @@
     }
   };
 
-  // ../ApiTester/node_modules/@yume-chan/scrcpy/esm/codec/h264.js
+  // node_modules/@yume-chan/scrcpy/esm/codec/h264.js
   var AndroidAvcProfile = {
     Baseline: 1 << 0,
     Main: 1 << 1,
@@ -1948,7 +1948,7 @@
     };
   }
 
-  // ../ApiTester/node_modules/@yume-chan/scrcpy/esm/codec/h265.js
+  // node_modules/@yume-chan/scrcpy/esm/codec/h265.js
   var AndroidHevcProfile = {
     Main: 1 << 0,
     Main10: 1 << 1,
@@ -2944,7 +2944,7 @@
     };
   }
 
-  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/codec/utils.js
+  // node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/codec/utils.js
   function hexDigits(value) {
     return value.toString(16).toUpperCase();
   }
@@ -2955,7 +2955,7 @@
     return value.toString(10).padStart(2, "0");
   }
 
-  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/codec/av1.js
+  // node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/codec/av1.js
   var Av1Codec = class {
     #decoder;
     #updateSize;
@@ -3040,7 +3040,7 @@
     }
   };
 
-  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/codec/h26x.js
+  // node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/codec/h26x.js
   var H26xDecoder = class {
     #decoder;
     #config;
@@ -3100,7 +3100,7 @@
     }
   };
 
-  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/codec/h264.js
+  // node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/codec/h264.js
   var H264Decoder = class extends H26xDecoder {
     #updateSize;
     #options;
@@ -3121,7 +3121,7 @@
     }
   };
 
-  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/codec/h265.js
+  // node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/codec/h265.js
   var H265Decoder = class extends H26xDecoder {
     #updateSize;
     #options;
@@ -3151,7 +3151,7 @@
     }
   };
 
-  // ../ApiTester/node_modules/@yume-chan/event/esm/disposable.js
+  // node_modules/@yume-chan/event/esm/disposable.js
   var AutoDisposable = class {
     #disposables = [];
     constructor() {
@@ -3169,7 +3169,7 @@
     }
   };
 
-  // ../ApiTester/node_modules/@yume-chan/event/esm/event-emitter.js
+  // node_modules/@yume-chan/event/esm/event-emitter.js
   var EventEmitter = class {
     listeners = [];
     constructor() {
@@ -3204,7 +3204,7 @@
     }
   };
 
-  // ../ApiTester/node_modules/@yume-chan/event/esm/sticky-event-emitter.js
+  // node_modules/@yume-chan/event/esm/sticky-event-emitter.js
   var Undefined = /* @__PURE__ */ Symbol("undefined");
   var StickyEventEmitter = class extends EventEmitter {
     #value = Undefined;
@@ -3220,7 +3220,7 @@
     }
   };
 
-  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/pool.js
+  // node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/pool.js
   var Pool = class {
     #controller;
     #readable = new ReadableStream({
@@ -3251,7 +3251,7 @@
     }
   };
 
-  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/snapshot.js
+  // node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/snapshot.js
   var VideoFrameCapturer = class {
     #canvas;
     #context;
@@ -3290,7 +3290,7 @@
     }
   };
 
-  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/decoder.js
+  // node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/decoder.js
   var VideoFrameCapturerPool = /* @__PURE__ */ new Pool(() => new VideoFrameCapturer(), 4);
   var WebCodecsVideoDecoder = class {
     static get isSupported() {
@@ -3456,11 +3456,11 @@
     }
   };
 
-  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-tinyh264/esm/decoder.js
+  // node_modules/@yume-chan/scrcpy-decoder-tinyh264/esm/decoder.js
   var import_yuv_buffer = __toESM(require_yuv_buffer(), 1);
   var import_yuv_canvas = __toESM(require_yuv_canvas(), 1);
 
-  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-tinyh264/esm/wrapper.js
+  // node_modules/@yume-chan/scrcpy-decoder-tinyh264/esm/wrapper.js
   var import_meta = {};
   var worker;
   var workerReady = false;
@@ -3537,7 +3537,7 @@
     return Promise.resolve(decoder);
   }
 
-  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-tinyh264/esm/decoder.js
+  // node_modules/@yume-chan/scrcpy-decoder-tinyh264/esm/decoder.js
   var noop = () => {
   };
   function createCanvas() {
@@ -3664,7 +3664,7 @@
     }
   };
 
-  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/render/canvas.js
+  // node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/render/canvas.js
   var CanvasVideoFrameRenderer = class {
     #canvas;
     get canvas() {
@@ -3685,7 +3685,7 @@
     }
   };
 
-  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/render/bitmap.js
+  // node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/render/bitmap.js
   var BitmapVideoFrameRenderer = class extends CanvasVideoFrameRenderer {
     #context;
     constructor(canvas) {
@@ -3700,7 +3700,7 @@
     }
   };
 
-  // ../ApiTester/node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/render/webgl.js
+  // node_modules/@yume-chan/scrcpy-decoder-webcodecs/esm/video/render/webgl.js
   var Resolved = Promise.resolve();
   function createContext(canvas, enableCapture) {
     const attributes = {
@@ -3837,6 +3837,9 @@
       this.serial = null;
       this.platform = "android";
       this.iosCanvas = null;
+      this.iosCtx = null;
+      this.deviceWarn = "";
+      this._note = null;
       this.iosBusy = false;
       this.iosPending = null;
       this.iosInput = false;
@@ -3897,17 +3900,15 @@
         return b;
       };
       this.toolButtons = [
-        [mkTool("\u2B05", "\u0E22\u0E49\u0E2D\u0E19\u0E01\u0E25\u0E31\u0E1A", () => this.send({ type: "back" })), false],
-        [mkTool("\u2B58", "\u0E2B\u0E19\u0E49\u0E32\u0E2B\u0E25\u0E31\u0E01", () => this.send({ type: "home" })), true],
-        [mkTool("\u25A2", "\u0E41\u0E2D\u0E1B\u0E25\u0E48\u0E32\u0E2A\u0E38\u0E14", () => this.send({ type: "appswitch" })), false],
-        [mkTool("\u{1F504}", "\u0E2B\u0E21\u0E38\u0E19\u0E08\u0E2D", () => this.send({ type: "rotate" })), false],
-        [mkTool("\u23FB", "\u0E1B\u0E38\u0E48\u0E21 power / \u0E25\u0E47\u0E2D\u0E01\u0E08\u0E2D", () => this.send({ type: "power" })), true],
-        [mkTool("\u{1F399}", "Siri", () => this.send({ type: "siri" })), true],
-        [mkTool("\u27F3", "\u0E02\u0E2D keyframe", () => this.send({ type: "keyframe" })), false]
+        { btn: mkTool("\u2B05", "\u0E22\u0E49\u0E2D\u0E19\u0E01\u0E25\u0E31\u0E1A", () => this.send({ type: "back" })), on: ["android"] },
+        { btn: mkTool("\u2B58", "\u0E2B\u0E19\u0E49\u0E32\u0E2B\u0E25\u0E31\u0E01", () => this.send({ type: "home" })), on: ["android", "ios"] },
+        { btn: mkTool("\u25A2", "\u0E41\u0E2D\u0E1B\u0E25\u0E48\u0E32\u0E2A\u0E38\u0E14", () => this.send({ type: "appswitch" })), on: ["android"] },
+        { btn: mkTool("\u{1F504}", "\u0E2B\u0E21\u0E38\u0E19\u0E08\u0E2D", () => this.send({ type: "rotate" })), on: ["android"] },
+        { btn: mkTool("\u23FB", "\u0E1B\u0E38\u0E48\u0E21 power / \u0E25\u0E47\u0E2D\u0E01\u0E08\u0E2D", () => this.send({ type: "power" })), on: ["android", "ios"] },
+        { btn: mkTool("\u{1F399}", "Siri", () => this.send({ type: "siri" })), on: ["ios"] },
+        { btn: mkTool("\u27F3", "\u0E02\u0E2D keyframe", () => this.send({ type: "keyframe" })), on: ["android"] }
       ];
-      this.toolButtons[5][0].style.display = "none";
-      this.iosOnlyButtons = /* @__PURE__ */ new Set([this.toolButtons[5][0]]);
-      const toolbar = el("div", { class: "mirror-toolbar" }, this.toolButtons.map(([b]) => b));
+      const toolbar = el("div", { class: "mirror-toolbar" }, this.toolButtons.map((t) => t.btn));
       this.textInput = el("input", {
         class: "mirror-text-input",
         type: "text",
@@ -3935,6 +3936,7 @@
         this.devicesView,
         this.runningView
       ]);
+      this._applyPlatformUi();
       this.drawer.style.display = "none";
       this.activeView = null;
       const savedW = Number(localStorage.getItem("mirrorPanelW"));
@@ -3976,6 +3978,7 @@
           sub: `${sim.runtime || "iOS"} \xB7 simulator${iosProxyOn ? " \xB7 proxy \u2713" : ""}`
         });
       }
+      this.deviceWarn = aRes.status === "rejected" ? "\u0E42\u0E2B\u0E25\u0E14\u0E23\u0E32\u0E22\u0E0A\u0E37\u0E48\u0E2D Android (adb) \u0E44\u0E21\u0E48\u0E44\u0E14\u0E49" : iRes.status === "rejected" ? "\u0E42\u0E2B\u0E25\u0E14\u0E23\u0E32\u0E22\u0E0A\u0E37\u0E48\u0E2D iOS Simulator (simctl) \u0E44\u0E21\u0E48\u0E44\u0E14\u0E49" : "";
       this.devices = list;
       this._renderDevices();
     }
@@ -3986,8 +3989,14 @@
         return;
       }
       if (!this.devices.length) {
-        this.deviceList.appendChild(el("div", { class: "mirror-device-empty", text: "\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E2D\u0E38\u0E1B\u0E01\u0E23\u0E13\u0E4C\u0E17\u0E35\u0E48 online" }));
+        this.deviceList.appendChild(el("div", {
+          class: "mirror-device-empty",
+          text: this.deviceWarn ? `\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E2D\u0E38\u0E1B\u0E01\u0E23\u0E13\u0E4C \u2014 ${this.deviceWarn}` : "\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E2D\u0E38\u0E1B\u0E01\u0E23\u0E13\u0E4C\u0E17\u0E35\u0E48 online"
+        }));
         return;
+      }
+      if (this.deviceWarn) {
+        this.deviceList.appendChild(el("div", { class: "mirror-device-empty", text: `\u26A0\uFE0F ${this.deviceWarn}` }));
       }
       for (const d of this.devices) {
         const isActive = Boolean(this.ws) && this.serial === d.id;
@@ -4007,7 +4016,11 @@
           this.connect(d.id, d.platform);
           this.showPanel("running");
         });
-        const row = el("div", { class: "mirror-device-row" + (isActive ? " active" : "") }, [
+        const row = el("div", {
+          class: "mirror-device-row" + (isActive ? " active" : ""),
+          "data-device-id": d.id,
+          "data-platform": d.platform
+        }, [
           dot,
           el("div", { class: "mirror-device-info" }, [name, sub]),
           btn
@@ -4036,6 +4049,7 @@
       }
       this.platform = platform;
       this._applyPlatformUi();
+      this._setNote("");
       if (this.ws) this.disconnect();
       this.serial = serial;
       this.userDisconnected = false;
@@ -4060,11 +4074,9 @@
           body: JSON.stringify({ serial: this.serial })
         });
         const j = await r.json().catch(() => null);
-        if (!j || j.ok === false) {
-          this._setStatus("connected", "\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D\u0E41\u0E25\u0E49\u0E27 (\u0E15\u0E31\u0E49\u0E07 proxy \u0E44\u0E21\u0E48\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08)");
-        }
+        if (!j || j.ok === false) this._setNote("\u0E15\u0E31\u0E49\u0E07 proxy \u0E44\u0E21\u0E48\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08 \u2014 traffic \u0E08\u0E30\u0E44\u0E21\u0E48\u0E40\u0E02\u0E49\u0E32", 0);
       } catch (e) {
-        this._setStatus("connected", "\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D\u0E41\u0E25\u0E49\u0E27 (\u0E15\u0E31\u0E49\u0E07 proxy \u0E44\u0E21\u0E48\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08)");
+        this._setNote("\u0E15\u0E31\u0E49\u0E07 proxy \u0E44\u0E21\u0E48\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08 \u2014 traffic \u0E08\u0E30\u0E44\u0E21\u0E48\u0E40\u0E02\u0E49\u0E32", 0);
       }
       this.refreshDevices();
     }
@@ -4175,7 +4187,7 @@
           this._setStatus("error", msg.message || "\u0E40\u0E01\u0E34\u0E14\u0E02\u0E49\u0E2D\u0E1C\u0E34\u0E14\u0E1E\u0E25\u0E32\u0E14");
           break;
         case "ios-warn":
-          this._setStatus("connected", msg.message || "\u0E2A\u0E31\u0E48\u0E07\u0E07\u0E32\u0E19\u0E44\u0E21\u0E48\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08");
+          this._setNote(msg.message || "\u0E2A\u0E31\u0E48\u0E07\u0E07\u0E32\u0E19\u0E44\u0E21\u0E48\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08");
           break;
         case "stopped":
           this._setStatus("idle", "\u0E2A\u0E15\u0E23\u0E35\u0E21\u0E2B\u0E22\u0E38\u0E14" + (msg.reason ? ` \u2014 ${msg.reason}` : ""));
@@ -4260,6 +4272,7 @@
         if (this.iosPending) this._drainIosFrame();
       }).catch(() => {
         this.iosBusy = false;
+        if (this.iosPending) this._drainIosFrame();
       });
     }
     // นับเฟรมที่วาดได้ — แค่บวกตัวนับ ส่วนการโชว์ให้ตัวจับเวลาเป็นคนทำ
@@ -4276,10 +4289,24 @@
         if (!this.ws) return;
         this.fps = this.fpsCount;
         this.fpsCount = 0;
-        const note = this.platform === "ios" && !this.iosInput ? " \xB7 \u0E14\u0E39\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E40\u0E14\u0E35\u0E22\u0E27" : "";
+        const viewOnly = this.platform === "ios" && !this.iosInput ? " \xB7 \u0E14\u0E39\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E40\u0E14\u0E35\u0E22\u0E27" : "";
         const idle = this.fps === 0 ? " (\u0E08\u0E2D\u0E19\u0E34\u0E48\u0E07)" : "";
-        this._setStatus("connected", `\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D\u0E41\u0E25\u0E49\u0E27 \xB7 ${this.fps} fps${idle}${note}`);
+        this._setStatus("connected", `\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D\u0E41\u0E25\u0E49\u0E27 \xB7 ${this.fps} fps${idle}${viewOnly}${this._noteText()}`);
       }, 1e3);
+    }
+    // ข้อความเตือนที่ต้อง "คา" อยู่กับแถบสถานะ — ไม่งั้นตัวเลข fps (เขียนทับทุกวินาที)
+    // จะกลบมันหายใน 1 วิ เช่น "ตั้ง proxy ไม่สำเร็จ" หรือ error จาก idb ที่ผู้ใช้ต้องเห็น
+    // ms = 0 คือคาไว้ตลอดจนกว่าจะต่อใหม่
+    _setNote(text, ms = 15e3) {
+      this._note = text ? { text, until: ms ? Date.now() + ms : Infinity } : null;
+    }
+    _noteText() {
+      if (!this._note) return "";
+      if (Date.now() > this._note.until) {
+        this._note = null;
+        return "";
+      }
+      return " \xB7 \u26A0\uFE0F " + this._note.text;
     }
     _stopFpsTimer() {
       if (this._fpsTimer) {
@@ -4289,11 +4316,8 @@
     }
     // ปุ่มบน toolbar ที่ใช้ได้ต่างกันระหว่าง Android กับ iOS
     _applyPlatformUi() {
-      const ios = this.platform === "ios";
-      for (const [btn, showOnIos] of this.toolButtons || []) {
-        const iosOnly = this.iosOnlyButtons && this.iosOnlyButtons.has(btn);
-        const show = ios ? showOnIos : !iosOnly;
-        btn.style.display = show ? "" : "none";
+      for (const t of this.toolButtons || []) {
+        t.btn.style.display = t.on.includes(this.platform) ? "" : "none";
       }
     }
     _teardownDecoder() {

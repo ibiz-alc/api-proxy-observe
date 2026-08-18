@@ -110,6 +110,7 @@ class IosMirrorSession {
     this.ptW = 0;                 // ขนาดเชิง point ของ iOS (ใช้คุมพิกัดตอนสั่ง idb)
     this.ptH = 0;
     this.idb = null;
+    this.ptReady = Promise.resolve();  // รอให้รู้ขนาดเชิง point ก่อนแปลงพิกัด input
     this.frameMs = 0;             // เวลาถ่าย 1 เฟรม (วัดจากเฟรมแรก)
     this.lastEmitAt = 0;          // เวลาเริ่มถ่ายของเฟรมล่าสุดที่ส่งออกไป (กันส่งเฟรมเก่าย้อนหลัง)
     this.lastBuf = null;          // เฟรมล่าสุดที่ส่งไป (ใช้เทียบว่าจอเปลี่ยนไหม)
@@ -165,15 +166,15 @@ class IosMirrorSession {
     this.pxW = (size && size.width) || 0;
     this.pxH = (size && size.height) || 0;
 
-    // ขนาดเชิง point + สถานะ idb (ไม่มี idb = ดูได้อย่างเดียว)
+    // มี idb ไหม (เช็คเร็ว ~200ms) — ตัวที่ช้าคือ `idb describe` เพราะอาจต้องปลุก companion
+    // ขึ้นมาก่อน (หลายวินาที) → **ห้ามรอ** ไม่งั้นพาเนลค้าง "กำลังเชื่อมต่อ…" ทั้งที่ภาพพร้อมแล้ว
+    // โหลดขนาด point ไว้เบื้องหลัง แล้วให้ทาง input รอ this.ptReady เอาเอง (พิกัดต้องใช้ค่านี้)
     this.idb = await idbPath();
-    if (this.idb) await this._loadPointSize();
+    this.ptReady = this.idb ? this._loadPointSize().catch(() => {}) : Promise.resolve();
 
     this.onMeta({
       width: this.pxW,
       height: this.pxH,
-      pointWidth: this.ptW,
-      pointHeight: this.ptH,
       input: Boolean(this.idb),
     });
     if (this.shouldSend()) this.onFrame(first.buf);
@@ -334,6 +335,7 @@ class IosMirrorSession {
 
   async tap(xN, yN) {
     this._wake();
+    await this.ptReady;
     const p = this._pt(xN, yN);
     return this._idbRun(['ui', 'tap', String(p.x), String(p.y)]);
   }
@@ -341,6 +343,7 @@ class IosMirrorSession {
   // ลาก/ปัด — idb ทำเป็นคำสั่งเดียว (ไม่มี down/move/up แยก) จึงต้องรอ pointerup แล้วค่อยส่ง
   async swipe(x1N, y1N, x2N, y2N, durationSec) {
     this._wake();
+    await this.ptReady;
     const a = this._pt(x1N, y1N);
     const b = this._pt(x2N, y2N);
     const args = ['ui', 'swipe', String(a.x), String(a.y), String(b.x), String(b.y)];
