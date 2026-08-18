@@ -54,6 +54,14 @@ class MirrorPanel {
     this.writer = null;
     this.rendererEl = null;
     this.serial = null;
+    this.platform = 'android'; // 'android' (scrcpy) | 'ios' (simulator: ลูป JPEG + idb)
+    this.iosCanvas = null;     // canvas สำหรับวาดเฟรม JPEG ของ iOS
+    this.iosBusy = false;      // กำลัง decode เฟรมอยู่
+    this.iosPending = null;    // เฟรมล่าสุดที่รอ decode (เก่ากว่านั้นทิ้งได้ ไม่ต้องวาดย้อนหลัง)
+    this.iosInput = false;     // มี idb ไหม (ไม่มี = ดูได้อย่างเดียว)
+    this.fpsCount = 0;
+    this.fpsAt = 0;
+    this.fps = 0;
     this.userDisconnected = false; // true = ผู้ใช้กด disconnect เอง → ห้าม auto-reconnect
     this.reconnectTimer = null;
     this.pendingMove = null; // touch move ล่าสุดที่รอส่ง (throttle ด้วย rAF)
@@ -112,14 +120,21 @@ class MirrorPanel {
       b.addEventListener('click', () => fn());
       return b;
     };
-    const toolbar = el('div', { class: 'mirror-toolbar' }, [
-      mkTool('⬅', 'ย้อนกลับ', () => this.send({ type: 'back' })),
-      mkTool('⭘', 'หน้าหลัก', () => this.send({ type: 'home' })),
-      mkTool('▢', 'แอปล่าสุด', () => this.send({ type: 'appswitch' })),
-      mkTool('🔄', 'หมุนจอ', () => this.send({ type: 'rotate' })),
-      mkTool('⏻', 'ปุ่ม power', () => this.send({ type: 'power' })),
-      mkTool('⟳', 'ขอ keyframe', () => this.send({ type: 'keyframe' })),
-    ]);
+    // [ปุ่ม, ใช้ได้บน iOS ไหม] — iOS มีแค่ Home/Lock/Siri ที่ idb สั่งได้
+    // (ปุ่ม back/แอปล่าสุด/หมุนจอ/keyframe เป็นของ Android → ซ่อนตอน mirror iOS)
+    this.toolButtons = [
+      [mkTool('⬅', 'ย้อนกลับ', () => this.send({ type: 'back' })), false],
+      [mkTool('⭘', 'หน้าหลัก', () => this.send({ type: 'home' })), true],
+      [mkTool('▢', 'แอปล่าสุด', () => this.send({ type: 'appswitch' })), false],
+      [mkTool('🔄', 'หมุนจอ', () => this.send({ type: 'rotate' })), false],
+      [mkTool('⏻', 'ปุ่ม power / ล็อกจอ', () => this.send({ type: 'power' })), true],
+      [mkTool('🎙', 'Siri', () => this.send({ type: 'siri' })), true],
+      [mkTool('⟳', 'ขอ keyframe', () => this.send({ type: 'keyframe' })), false],
+    ];
+    // ปุ่ม Siri มีเฉพาะ iOS → ซ่อนไว้ก่อน (ค่าเริ่มต้นคือ Android)
+    this.toolButtons[5][0].style.display = 'none';
+    this.iosOnlyButtons = new Set([this.toolButtons[5][0]]);
+    const toolbar = el('div', { class: 'mirror-toolbar' }, this.toolButtons.map(([b]) => b));
 
     // แถวล่าง: ส่งข้อความ (เส้นทางหลักของภาษาไทย)
     this.textInput = el('input', {
@@ -168,13 +183,37 @@ class MirrorPanel {
 
   // ---------- โหลดรายชื่ออุปกรณ์ (Device Manager style) ----------
   async refreshDevices() {
-    try {
-      const r = await fetch('/api/devices');
-      const j = await r.json();
-      this.devices = (j && j.devices) || [];
-    } catch (e) {
-      this.devices = null; // โหลดไม่ได้
+    // Android (adb) กับ iOS Simulator (simctl) มาคนละ endpoint — ดึงคู่กันแล้วรวมเป็นรายการเดียว
+    const [aRes, iRes] = await Promise.allSettled([
+      fetch('/api/devices').then((r) => r.json()),
+      fetch('/api/devices/ios-sims').then((r) => r.json()),
+    ]);
+    if (aRes.status === 'rejected' && iRes.status === 'rejected') {
+      this.devices = null; // โหลดไม่ได้ทั้งคู่
+      this._renderDevices();
+      return;
     }
+    const list = [];
+    const aj = aRes.status === 'fulfilled' ? aRes.value : null;
+    for (const d of (aj && aj.devices) || []) {
+      list.push({
+        id: d.serial,
+        platform: 'android',
+        name: `${d.model || d.serial}${d.emulator ? ' (emulator)' : ''}`,
+        sub: `${d.serial} · ${d.transport || d.mode || ''}${d.connected ? ' · proxy ✓' : ''}`,
+      });
+    }
+    const ij = iRes.status === 'fulfilled' ? iRes.value : null;
+    const iosProxyOn = Boolean(ij && ij.proxy && ij.proxy.active);
+    for (const sim of (ij && ij.sims) || []) {
+      list.push({
+        id: sim.udid,
+        platform: 'ios',
+        name: `🍎 ${sim.name}`,
+        sub: `${sim.runtime || 'iOS'} · simulator${iosProxyOn ? ' · proxy ✓' : ''}`,
+      });
+    }
+    this.devices = list;
     this._renderDevices();
   }
 
@@ -189,13 +228,10 @@ class MirrorPanel {
       return;
     }
     for (const d of this.devices) {
-      const isActive = Boolean(this.ws) && this.serial === d.serial;
+      const isActive = Boolean(this.ws) && this.serial === d.id;
       const dot = el('span', { class: 'mirror-device-dot' });
-      const name = el('div', { class: 'mirror-device-name', text: `${d.model || d.serial}${d.emulator ? ' (emulator)' : ''}` });
-      const sub = el('div', {
-        class: 'mirror-device-sub',
-        text: `${d.serial} · ${d.transport || d.mode || ''}${d.connected ? ' · proxy ✓' : ''}`,
-      });
+      const name = el('div', { class: 'mirror-device-name', text: d.name });
+      const sub = el('div', { class: 'mirror-device-sub', text: d.sub });
       const btn = el('button', {
         class: 'mirror-btn ' + (isActive ? 'danger' : 'primary'),
         text: isActive ? '⏹ หยุด' : '▶ ดูจอ',
@@ -203,7 +239,7 @@ class MirrorPanel {
       });
       btn.addEventListener('click', () => {
         if (isActive) { this.disconnect(); return; }
-        this.connect(d.serial);
+        this.connect(d.id, d.platform);
         this.showPanel('running'); // เริ่ม mirror แล้วสลับไป Running Devices (rail highlight ตาม)
       });
       const row = el('div', { class: 'mirror-device-row' + (isActive ? ' active' : '') }, [
@@ -229,12 +265,15 @@ class MirrorPanel {
   }
 
   // ---------- WebSocket lifecycle ----------
-  connect(serial) {
+  connect(serial, platform = 'android') {
     if (!serial) { this._setStatus('error', 'ยังไม่ได้เลือกอุปกรณ์'); return; }
-    if (typeof VideoDecoder === 'undefined') {
+    // iOS ส่งมาเป็น JPEG ทีละเฟรม ไม่ต้องใช้ WebCodecs (เช็คเฉพาะทาง scrcpy)
+    if (platform !== 'ios' && typeof VideoDecoder === 'undefined') {
       this._setStatus('error', 'เบราว์เซอร์นี้ไม่รองรับ WebCodecs — ใช้ Chrome/Edge');
       return;
     }
+    this.platform = platform;
+    this._applyPlatformUi();
     // ตัด session เดิมก่อนเสมอ — เรียก connect/open ซ้ำตอนต่ออยู่ จะได้ไม่ทิ้ง WS เก่า
     // เป็น zombie ฝั่ง server (ปุ่มใน UI toggle ให้อยู่แล้ว แต่ open(serial) เรียกตรงได้)
     if (this.ws) this.disconnect();
@@ -252,11 +291,17 @@ class MirrorPanel {
     if (this._proxyEnsured) return;
     this._proxyEnsured = true;
     try {
-      const r = await fetch('/api/devices/connect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serial: this.serial }),
-      });
+      const r = this.platform === 'ios'
+        ? await fetch('/api/devices/ios-sim/connect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ udid: this.serial }),
+        })
+        : await fetch('/api/devices/connect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ serial: this.serial }),
+        });
       const j = await r.json().catch(() => null);
       if (!j || j.ok === false) {
         this._setStatus('connected', 'เชื่อมต่อแล้ว (ตั้ง proxy ไม่สำเร็จ)');
@@ -283,7 +328,8 @@ class MirrorPanel {
 
     ws.addEventListener('open', () => {
       // start ต้องเป็นข้อความแรกเสมอ
-      this.send({ type: 'start', serial: this.serial, ...START_OPTS });
+      if (this.platform === 'ios') this.send({ type: 'start', platform: 'ios', udid: this.serial, pipeline: 3 });
+      else this.send({ type: 'start', serial: this.serial, ...START_OPTS });
     });
     ws.addEventListener('message', (ev) => this._onMessage(ev));
     ws.addEventListener('error', () => { /* close event จะตามมา จัดการที่ close */ });
@@ -353,7 +399,8 @@ class MirrorPanel {
   _onControl(msg) {
     switch (msg && msg.type) {
       case 'ready':
-        this._setupDecoder(msg);
+        if (msg.platform === 'ios') this._setupIosView(msg);
+        else this._setupDecoder(msg);
         this._setStatus('connected', 'เชื่อมต่อแล้ว');
         this._setConnected(true);
         this.videoPlaceholder.style.display = 'none';
@@ -368,6 +415,10 @@ class MirrorPanel {
       case 'error':
         this._setStatus('error', msg.message || 'เกิดข้อผิดพลาด');
         // server จะปิด WS ตามมา — close handler ตัดสินใจ retry เอง
+        break;
+      case 'ios-warn':
+        // idb สั่งงานไม่สำเร็จ — บอกที่แถบสถานะ แต่ไม่ตัดสตรีม
+        this._setStatus('connected', msg.message || 'สั่งงานไม่สำเร็จ');
         break;
       case 'stopped':
         // server หยุดสตรีม
@@ -417,6 +468,76 @@ class MirrorPanel {
     this.videoArea.appendChild(canvas);
   }
 
+  // ---------- iOS: รับ JPEG ทีละเฟรมมาวาดลง canvas ----------
+  _setupIosView(ready) {
+    this._teardownDecoder();
+    const canvas = el('canvas', { class: 'mirror-canvas' });
+    canvas.width = ready.width || 390;
+    canvas.height = ready.height || 844;
+    canvas.style.aspectRatio = `${canvas.width} / ${canvas.height}`;
+    this.iosCanvas = canvas;
+    this.iosCtx = canvas.getContext('2d');
+    this.rendererEl = canvas;
+    this.iosInput = Boolean(ready.input);
+    this.videoArea.appendChild(canvas);
+    this._applyPlatformUi();
+    if (!this.iosInput) {
+      this._setStatus('connected', 'ดูภาพได้ · สั่งงานไม่ได้ (ยังไม่ได้ติดตั้ง idb)');
+    }
+  }
+
+  // เก็บเฟรมล่าสุดไว้เสมอ แล้วค่อย decode ทีละเฟรม — "เอาอันใหม่สุด" ไม่ใช่ "เอาอันแรกแล้วทิ้งที่เหลือ"
+  // (ถ้าทิ้งแบบหลัง เวลาเฟรมมาติดกันเป็นชุด จะวาดได้แค่ชุดละเฟรมเดียว)
+  _onIosFrame(buf) {
+    this.iosPending = buf;
+    if (!this.iosBusy) this._drainIosFrame();
+  }
+
+  _drainIosFrame() {
+    const buf = this.iosPending;
+    this.iosPending = null;
+    if (!buf || !this.iosCtx) return;
+    this.iosBusy = true;
+    createImageBitmap(new Blob([buf], { type: 'image/jpeg' })).then((bmp) => {
+      this.iosBusy = false;
+      if (!this.iosCtx || !this.iosCanvas) { bmp.close(); return; }
+      if (this.iosCanvas.width !== bmp.width || this.iosCanvas.height !== bmp.height) {
+        this.iosCanvas.width = bmp.width;
+        this.iosCanvas.height = bmp.height;
+        this.iosCanvas.style.aspectRatio = `${bmp.width} / ${bmp.height}`;
+      }
+      this.iosCtx.drawImage(bmp, 0, 0);
+      bmp.close();
+      this._tickFps();
+      if (this.iosPending) this._drainIosFrame(); // มีเฟรมใหม่รออยู่ ต่อเลย
+    }).catch(() => { this.iosBusy = false; });
+  }
+
+  // นับ fps จริงที่วาดได้ โชว์ที่แถบสถานะ (ลูป screenshot แรงไม่เท่า scrcpy — ให้เห็นตัวเลขจริง)
+  _tickFps() {
+    const now = performance.now();
+    if (!this.fpsAt) { this.fpsAt = now; this.fpsCount = 0; return; }
+    this.fpsCount++;
+    if (now - this.fpsAt >= 1000) {
+      this.fps = Math.round((this.fpsCount * 1000) / (now - this.fpsAt));
+      this.fpsAt = now;
+      this.fpsCount = 0;
+      if (this.ws && this.iosCanvas) {
+        this._setStatus('connected', `เชื่อมต่อแล้ว · ${this.fps} fps${this.iosInput ? '' : ' · ดูอย่างเดียว'}`);
+      }
+    }
+  }
+
+  // ปุ่มบน toolbar ที่ใช้ได้ต่างกันระหว่าง Android กับ iOS
+  _applyPlatformUi() {
+    const ios = this.platform === 'ios';
+    for (const [btn, showOnIos] of this.toolButtons || []) {
+      const iosOnly = this.iosOnlyButtons && this.iosOnlyButtons.has(btn);
+      const show = ios ? showOnIos : !iosOnly;
+      btn.style.display = show ? '' : 'none';
+    }
+  }
+
   _teardownDecoder() {
     if (this.writer) {
       try { this.writer.releaseLock(); } catch (e) { /* ignore */ }
@@ -430,10 +551,17 @@ class MirrorPanel {
       this.rendererEl.parentNode.removeChild(this.rendererEl);
     }
     this.rendererEl = null;
+    this.iosCanvas = null;
+    this.iosCtx = null;
+    this.iosBusy = false;
+    this.iosPending = null;
+    this.fpsAt = 0;
+    this.fpsCount = 0;
     if (this.videoPlaceholder) this.videoPlaceholder.style.display = '';
   }
 
   _onBinary(buf) {
+    if (this.platform === 'ios') { this._onIosFrame(buf); return; }
     if (!this.writer) return;
     let packet;
     try {
