@@ -145,28 +145,36 @@ How it works, and why it differs from Android:
   text box uses `idb ui text`, and the toolbar exposes Home / Lock / Siri
   (`idb ui button`).
 
-Installing idb (as of Aug 2026 this is bumpier than the official docs suggest):
+Installing idb (as of Aug 2026 this is bumpier than the official docs suggest —
+the companion has no bottle and the pip client has not been released since 2022).
+ApiTester auto-detects both under `~/.apitester`, so install them there:
 
 ```bash
-# 1) companion — no bottle, builds from source; brew refuses if your Command Line
-#    Tools are older than Xcode (check: brew install facebook/fb/idb-companion)
-brew trust --formula facebook/fb/idb-companion
-brew install facebook/fb/idb-companion
-#    ...or build it yourself with Xcode only (no sudo, no CLT update):
-#    git clone https://github.com/facebook/idb && cd idb
-#    brew install xcodegen protobuf swift-protobuf
-#    XCODEGEN_STRIP_XATTRS=false ./build.sh build idb_companion
+# 1) companion — build it with Xcode only (no sudo, no Command Line Tools update).
+#    `brew install facebook/fb/idb-companion` builds from source too, and refuses
+#    to start if your CLT is older than Xcode ("Command Line Tools are too outdated").
+brew install xcodegen protobuf swift-protobuf
+git clone --depth 1 https://github.com/facebook/idb /tmp/idb-src && cd /tmp/idb-src
+XCODEGEN_STRIP_XATTRS=false ./build.sh build idb_companion   # ~15 min
+#    ^ without XCODEGEN_STRIP_XATTRS=false the script mangles paths and the build fails
+mkdir -p ~/.apitester/idb && cp Build/Products/Release/idb_companion ~/.apitester/idb/
 
-# 2) client — the pip package is from 2022 and breaks on Python 3.12+,
-#    so pin it to Python 3.11 in a venv
-/opt/homebrew/bin/python3.11 -m venv ~/.idb-venv
-~/.idb-venv/bin/pip install fb-idb
-
-# 3) point ApiTester at them (env, read before PATH)
-export IDB=~/.idb-venv/bin/idb
-export IDB_COMPANION=/path/to/idb_companion   # only if not on PATH
-npm start
+# 2) client — pin to Python 3.11; on 3.12+ it dies in asyncio.get_event_loop()
+/opt/homebrew/bin/python3.11 -m venv ~/.apitester/idb-venv
+~/.apitester/idb-venv/bin/pip install fb-idb
 ```
+
+Restart the server and the sim's mirror gains tap / swipe / type. Overrides, if
+you keep them elsewhere: `IDB=/path/to/idb` and `IDB_COMPANION_BIN=/path/to/idb_companion`
+(**not** `IDB_COMPANION` — that is idb's own variable for an existing companion
+socket, and pointing it at the binary fails with "AF_UNIX path too long").
+
+Coordinates go over the wire normalized 0..1 and are converted to iOS **points**
+using `width_points`/`height_points` from `idb describe --json` (a 1206x2622 @3x
+screen is 402x874 points). `scripts/dev-tests/ios-mirror-input-real-test.js`
+proves the whole chain: it reads the sim's accessibility tree to locate the
+Settings icon, clicks that spot on the canvas in a real browser, then asserts the
+Settings app actually opened.
 
 ### Media detection & preview
 
