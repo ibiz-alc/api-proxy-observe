@@ -856,6 +856,7 @@ function makeDetailResizer() {
   rz.addEventListener('mousedown', (e) => {
     e.preventDefault();
     const split = rz.parentElement;
+    if (!split) return; // ถูกถอดออกจาก DOM ไปแล้ว (detail render ใหม่)
     const rect = split.getBoundingClientRect();
     const min = Math.min(DETAIL_MIN_PX, rect.width / 3); // จอแคบ ๆ ก็ยังลากได้
     rz.classList.add('dragging');
@@ -883,6 +884,7 @@ function makeDetailResizer() {
   });
   rz.addEventListener('dblclick', () => {
     detailSplitPct = 50;
+    if (!rz.parentElement) return;
     rz.parentElement.style.setProperty('--detail-l', detailLeftCss(50));
     localStorage.setItem('proxyDetailSplit', '50');
   });

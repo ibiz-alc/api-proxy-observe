@@ -21,6 +21,9 @@ const { promisify } = require('util');
 
 const execFileP = promisify(execFile);
 
+const MAX_PIPELINE = 6;   // จำนวนสายถ่ายภาพสูงสุด (มากกว่านี้ CPU แย่งกันเองไม่ได้ fps เพิ่ม)
+const IDLE_MAX_MS = 500;  // พักได้นานสุดตอนจอนิ่ง — ปลอดภัยเพราะ input ปลุกให้เต็มสปีดทันที
+
 // ---------- หา binary ----------
 let _simctl; // path ของ simctl (resolve ครั้งเดียว — เรียก xcrun ทุกเฟรมเสียเวลา spawn ฟรีๆ)
 async function simctlPath() {
@@ -88,9 +91,9 @@ function jpegSize(buf) {
  * @param {() => boolean} [o.shouldSend]  false = ข้ามเฟรมนี้ (client ตามไม่ทัน)
  */
 class IosMirrorSession {
-  constructor({ udid, pipeline = 3, maxWidth = 0, onFrame, onMeta, onError, shouldSend }) {
+  constructor({ udid, pipeline = 4, maxWidth = 0, onFrame, onMeta, onError, shouldSend }) {
     this.udid = String(udid);
-    this.pipeline = Math.max(1, Math.min(4, Number(pipeline) || 3));
+    this.pipeline = Math.max(1, Math.min(MAX_PIPELINE, Number(pipeline) || 4));
     // maxWidth = ย่อภาพด้วย sips ก่อนส่ง (0 = ไม่ย่อ = ค่าเริ่มต้น)
     // วัดจริง pipeline=3: ไม่ย่อ 17.1 fps @113KB · ย่อ 700px 10.6 fps @14KB
     // → sips กิน ~35ms/เฟรม แพงกว่าที่ประหยัดได้ เพราะ client ย่อตอน decode ได้ฟรีอยู่แล้ว
@@ -174,7 +177,12 @@ class IosMirrorSession {
       input: Boolean(this.idb),
     });
     if (this.shouldSend()) this.onFrame(first.buf);
-    this._loop();
+    // ลูปนี้ลอยอยู่ (ไม่ await) — ห้ามให้ rejection หลุด เพราะ Node ถือว่า unhandled rejection
+    // = fatal แล้วดับ server ทั้งตัว (เคยเจอแนวเดียวกันกับ spawn ที่ไม่มี on('error'))
+    this._loop().catch((e) => {
+      this.onError('ลูปถ่ายจอหยุด: ' + (e && e.message ? e.message : e));
+      this.stop();
+    });
   }
 
   // idb describe บอก screen_dimensions มาให้ (pixel + density) → ได้ scale ไว้แปลงพิกัด
@@ -186,7 +194,7 @@ class IosMirrorSession {
           { timeout: 30000, env: this._idbEnv() }));
       } catch (e) {
         // state ค้าง → ล้างแล้วลองใหม่ครั้งเดียว (เหมือน _idbRun)
-        try { fs.rmSync('/tmp/idb', { recursive: true, force: true }); } catch {}
+        this._clearIdbState();
         ({ stdout } = await execFileP(this.idb, ['describe', '--udid', this.udid, '--json'],
           { timeout: 30000, env: this._idbEnv() }));
       }
@@ -219,34 +227,50 @@ class IosMirrorSession {
   async _chain(slot, delay) {
     if (delay) await new Promise((r) => setTimeout(r, delay));
     while (!this.stopped) {
-      if (this.idleDelay) await new Promise((r) => setTimeout(r, this.idleDelay));
-      if (this.stopped) break;
-      const startedAt = Date.now();
-      const { buf } = await this._shot(this.sc, slot);
-      if (this.stopped) break;
-      if (!buf) {
-        // ถ่ายไม่ได้ (sim ปิด/ค้าง) — หน่วงหน่อยกัน spawn รัวเปล่าๆ
+      try {
+        await this._chainStep(slot);
+      } catch (e) {
+        // สายเดียวพลาดไม่ควรทำสายอื่นหรือ server ล้ม — พักแล้วไปต่อ
+        this.onError('ถ่ายจอพลาด: ' + (e && e.message ? e.message : e));
         await new Promise((r) => setTimeout(r, 400));
-        continue;
       }
-      // สายอื่นอาจแซงไปแล้ว — เฟรมที่เริ่มถ่ายก่อนเฟรมล่าสุดที่ส่งไป = ของเก่า ทิ้ง
-      if (startedAt < this.lastEmitAt) continue;
-      this.lastEmitAt = startedAt;
-      // จอนิ่ง = JPEG ออกมาไบต์ตรงกันเป๊ะ → ไม่ต้องส่งซ้ำ ประหยัดทั้งสายส่งและ decode ฝั่ง client
-      // (Android ผ่าน scrcpy ส่งเฉพาะตอนภาพเปลี่ยนอยู่แล้ว ฝั่ง iOS ต้องทำเอง)
-      if (this.lastBuf && this.lastBuf.length === buf.length && this.lastBuf.equals(buf)) {
-        // จอนิ่งติดกันหลายเฟรม → ผ่อนสปีดถ่าย ไม่ต้องเผา CPU กับภาพเดิม
-        // (ขยับขึ้นทีละ 40ms ถึงเพดาน 240ms · มีอะไรเปลี่ยนก็กลับเต็มสปีดทันที
-        //  เสียเวลาตื่นแค่รอบเดียว ~1 เฟรม)
-        this.idleHits++;
-        if (this.idleHits >= 4) this.idleDelay = Math.min(240, this.idleDelay + 40);
-        continue;
-      }
-      this.idleHits = 0;
-      this.idleDelay = 0;
-      this.lastBuf = buf;
-      if (this.shouldSend()) this.onFrame(buf);
     }
+  }
+
+  // 1 รอบของสายถ่ายภาพ (แยกออกมาให้ครอบ try ได้ทั้งก้อน)
+  async _chainStep(slot) {
+    if (this.idleDelay) await new Promise((r) => setTimeout(r, this.idleDelay));
+    if (this.stopped) return;
+    const startedAt = Date.now();
+    const { buf } = await this._shot(this.sc, slot);
+    if (this.stopped) return;
+    if (!buf) {
+      // ถ่ายไม่ได้ (sim ปิด/ค้าง) — หน่วงหน่อยกัน spawn รัวเปล่าๆ
+      await new Promise((r) => setTimeout(r, 400));
+      return;
+    }
+    // สายอื่นอาจแซงไปแล้ว — เฟรมที่เริ่มถ่ายก่อนเฟรมล่าสุดที่ส่งไป = ของเก่า ทิ้ง
+    if (startedAt < this.lastEmitAt) return;
+    this.lastEmitAt = startedAt;
+    // จอนิ่ง = JPEG ออกมาไบต์ตรงกันเป๊ะ → ไม่ต้องส่งซ้ำ ประหยัดทั้งสายส่งและ decode ฝั่ง client
+    // (Android ผ่าน scrcpy ส่งเฉพาะตอนภาพเปลี่ยนอยู่แล้ว ฝั่ง iOS ต้องทำเอง)
+    if (this.lastBuf && this.lastBuf.length === buf.length && this.lastBuf.equals(buf)) {
+      // จอนิ่งติดกันหลายเฟรม → ผ่อนสปีดถ่าย ไม่ต้องเผา CPU กับภาพเดิม
+      // (ขยับขึ้นทีละ 60ms ถึงเพดาน IDLE_MAX_MS · ภาพเปลี่ยนเองหรือเราสั่ง input ก็ปลุกเต็มสปีดทันที)
+      this.idleHits++;
+      if (this.idleHits >= 4) this.idleDelay = Math.min(IDLE_MAX_MS, this.idleDelay + 60);
+      return;
+    }
+    this._wake();
+    this.lastBuf = buf;
+    if (this.shouldSend()) this.onFrame(buf);
+  }
+
+  // กลับมาถ่ายเต็มสปีดทันที — เรียกทั้งตอนภาพเปลี่ยนเอง และตอนเราสั่ง input เข้าไป
+  // (ไม่งั้นแตะแล้วต้องรอ idleDelay หมดก่อนจะเห็นผล = รู้สึกหนืด)
+  _wake() {
+    this.idleHits = 0;
+    this.idleDelay = 0;
   }
 
   stop() {
@@ -282,6 +306,14 @@ class IosMirrorSession {
     return env;
   }
 
+  // ลบเฉพาะ socket ของ udid นี้ + ไฟล์ state ที่ทำให้ idb ดื้อไปต่อ socket เดิม
+  // (ห้าม rm -rf /tmp/idb ทั้งก้อน — ในนั้นมี logs และ companion ของ udid อื่นที่คนอื่นอาจใช้อยู่)
+  _clearIdbState() {
+    for (const f of [`/tmp/idb/${this.udid}_companion.sock`, '/tmp/idb/state']) {
+      try { fs.rmSync(f, { force: true }); } catch {}
+    }
+  }
+
   async _idbRun(args, timeout = 15000, retried = false) {
     if (!this.idb) return false;
     try {
@@ -292,7 +324,7 @@ class IosMirrorSession {
       // companion ตายแต่ socket/state ยังค้างใน /tmp/idb → idb จะพยายามต่อ socket เดิมแล้วพังทุกครั้ง
       // (ไม่ยอม spawn ตัวใหม่เอง) ล้าง state ทิ้งแล้วลองอีกครั้ง = กลับมาใช้ได้เลย
       if (!retried && /Failed to connect to companion|Connection refused|No such file or directory/i.test(msg)) {
-        try { fs.rmSync('/tmp/idb', { recursive: true, force: true }); } catch {}
+        this._clearIdbState();
         return this._idbRun(args, timeout, true);
       }
       this.onError('idb: ' + (msg ? msg.split('\n')[0] : 'สั่งงานไม่สำเร็จ'));
@@ -301,12 +333,14 @@ class IosMirrorSession {
   }
 
   async tap(xN, yN) {
+    this._wake();
     const p = this._pt(xN, yN);
     return this._idbRun(['ui', 'tap', String(p.x), String(p.y)]);
   }
 
   // ลาก/ปัด — idb ทำเป็นคำสั่งเดียว (ไม่มี down/move/up แยก) จึงต้องรอ pointerup แล้วค่อยส่ง
   async swipe(x1N, y1N, x2N, y2N, durationSec) {
+    this._wake();
     const a = this._pt(x1N, y1N);
     const b = this._pt(x2N, y2N);
     const args = ['ui', 'swipe', String(a.x), String(a.y), String(b.x), String(b.y)];
@@ -315,6 +349,7 @@ class IosMirrorSession {
   }
 
   async text(s) {
+    this._wake();
     const t = String(s || '');
     if (!t) return false;
     return this._idbRun(['ui', 'text', t]);
@@ -322,6 +357,7 @@ class IosMirrorSession {
 
   // HOME / LOCK / SIRI / APPLE_PAY
   async button(name) {
+    this._wake();
     return this._idbRun(['ui', 'button', String(name || 'HOME').toUpperCase()]);
   }
 }

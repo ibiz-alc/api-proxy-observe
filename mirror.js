@@ -363,7 +363,7 @@ async function handleConnection(ws) {
     if (!udid) { fail('ต้องระบุ udid ของ simulator'); return; }
     ios = new IosMirrorSession({
       udid,
-      pipeline: Number(msg.pipeline ?? 3),
+      pipeline: Number(msg.pipeline ?? 4),
       maxWidth: Number(msg.maxWidth ?? 0),
       shouldSend: () => ws.readyState === WebSocket.OPEN && ws.bufferedAmount < MAX_BUFFERED,
       onFrame: (buf) => {

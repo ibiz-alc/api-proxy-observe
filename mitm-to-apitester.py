@@ -44,7 +44,6 @@ _dropped = 0
 
 
 def _ingest_worker():
-    global _dropped
     while True:
         data = _INGEST_Q.get()
         try:

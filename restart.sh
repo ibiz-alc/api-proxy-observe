@@ -27,9 +27,19 @@ done
 
 pid_on_port() { lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | head -1; }
 
-stop_port() { # stop_port <port> <ชื่อ>
+stop_port() { # stop_port <port> <ชื่อ> <คำที่ต้องอยู่ในชื่อ process>
   local pid; pid=$(pid_on_port "$1")
   if [ -z "$pid" ]; then echo "   – $2 ไม่ได้รันอยู่"; return 0; fi
+  # เช็คก่อนว่าเป็นของเราจริง — พอร์ตเดียวกัน Docker (docker-proxy) ก็ bind ได้
+  # native bind IPv4 / Docker bind IPv6 ซ้อนกันได้เงียบๆ ถ้าฆ่ามั่วจะไปดับ container ของคนอื่น
+  local comm; comm=$(ps -o comm= -p "$pid" 2>/dev/null)
+  if [ -z "$comm" ]; then echo "   – $2 หลุดไปเองแล้ว (pid $pid ไม่มีอยู่)"; return 0; fi
+  case "$comm" in
+    *"$3"*) : ;;
+    *) echo "   ⚠️ พอร์ต $1 ถูกใช้โดย '$comm' (pid $pid) ไม่ใช่ $3 — ไม่แตะ"
+       echo "      ถ้าเป็น container: docker compose stop"
+       return 1 ;;
+  esac
   echo "   ⏹ ปิด $2 (pid $pid)"
   kill "$pid" 2>/dev/null
   for _ in 1 2 3 4 5 6 7 8 9 10; do
@@ -53,8 +63,8 @@ wait_port() { # wait_port <port> [วินาที]
 echo "==> restart: $WHAT"
 
 # ---- ปิด ----
-if [ "$WHAT" = all ] || [ "$WHAT" = server ]; then stop_port 3000 "ApiTester server"; fi
-if [ "$WHAT" = all ] || [ "$WHAT" = mitm ]; then stop_port 8888 "mitmproxy"; fi
+if [ "$WHAT" = all ] || [ "$WHAT" = server ]; then stop_port 3000 "ApiTester server" node; fi
+if [ "$WHAT" = all ] || [ "$WHAT" = mitm ]; then stop_port 8888 "mitmproxy" mitmdump; fi
 
 # ---- เปิด ----
 if [ "$WHAT" = all ] || [ "$WHAT" = server ]; then
