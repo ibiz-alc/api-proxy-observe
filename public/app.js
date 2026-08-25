@@ -3051,8 +3051,9 @@ function stBadge(up, textUp = 'พร้อมใช้งาน', textDown = '�
   return el('span', { class: 'st-badge ' + (up ? 'up' : 'down'), text: up ? '✅ ' + textUp : '❌ ' + textDown });
 }
 
-function stBtn(label, onClick, kind = '') {
+function stBtn(label, onClick, kind = '', title = '') {
   const b = el('button', { class: 'st-action' + (kind ? ' ' + kind : ''), text: label });
+  if (title) b.title = title;
   b.addEventListener('click', async () => {
     b.disabled = true;
     const old = b.textContent;
@@ -3105,6 +3106,15 @@ async function stUnmute() {
   })).json();
   if (!r.ok) throw new Error(r.error || 'ปลด mute ไม่สำเร็จ');
   renderStatus();
+}
+
+// แชร์เน็ตจาก Mac ให้มือถือผ่านสาย USB — กลไกเดียวกับ "เชื่อม USB" ทุกประการ
+// (adb reverse tcp:8888 + global http_proxy=127.0.0.1:8888) เพราะ loopback บนมือถือ up เสมอ
+// แม้ไม่มีเน็ต → แอปต่อ 127.0.0.1:8888 ทะลุสาย USB มาที่ mitmproxy แล้วออกเน็ตของ Mac
+// แยกปุ่มไว้ต่างหากเพราะเป็นคนละเจตนา (ให้เน็ต vs ดัก traffic) แต่เปิดอันเดียวได้ทั้งสองอย่าง
+async function stShareNet(serial, on) {
+  if (on) return stConnectDevice(serial, 'usb');
+  return stDisconnectDevice(serial);
 }
 
 async function stConnectDevice(serial, mode) {
@@ -3449,6 +3459,16 @@ async function renderStatus() {
     } else if (dev.emulator && dev.systemCa === true) {
       details.push('🔐 system CA ติดตั้งแล้ว — HTTPS ถอดรหัสได้ (ติดตั้งใหม่ถ้า reboot emulator)');
     }
+    // --- แชร์เน็ตจาก Mac (USB): สถานะแยกรายเครื่อง ---
+    // sharing = โหมด USB ที่ท่อยังอยู่ → traffic ของมือถือวิ่งออกเน็ตของ Mac จริง
+    const sharing = !!dev.connected && dev.mode === 'usb' && dev.reverse !== false;
+    if (dev.ownNet === false) {
+      details.push(sharing
+        ? '🌍 มือถือไม่มีเน็ตของตัวเอง — ตอนนี้ใช้เน็ตของ Mac ผ่านสาย USB อยู่'
+        : '⚠️ มือถือไม่มีเน็ตของตัวเอง — กด “🌍 แชร์เน็ต USB” เพื่อยืมเน็ตของ Mac');
+    } else if (dev.ownNet === true && sharing) {
+      details.push('🌍 HTTP/HTTPS ของแอปวิ่งออกเน็ตผ่าน Mac (เครื่องนี้มีเน็ตของตัวเองด้วย)');
+    }
     const acts = [];
     if (!okDev) {
       acts.push(stBtn('🔌 เชื่อม USB', () => stConnectDevice(dev.serial, 'usb')));
@@ -3457,6 +3477,18 @@ async function renderStatus() {
       // กดตัดเอง = ตั้งใจปลด → ฝั่ง server ปิด auto-reconnect ของเครื่องนี้ให้ด้วย (ใน endpoint disconnect)
       // ไม่งั้น watcher จะเชื่อมกลับทันทีจนปลดไม่ได้
       acts.push(stBtn('⛔ ตัดการเชื่อมต่อ', () => stDisconnectDevice(dev.serial), 'stop'));
+    }
+    // ปุ่มแชร์เน็ตของเครื่องนี้ (แยกรายเครื่อง) — emulator ไม่ต้องมี เพราะใช้เน็ตของ Mac อยู่แล้ว
+    if (!dev.emulator) {
+      const shareTip = sharing
+        ? 'หยุดแชร์: ล้าง http_proxy บนมือถือ + ถอด adb reverse (การบันทึก traffic จะหยุดด้วย เพราะใช้ท่อเดียวกัน)'
+        : 'ให้มือถือใช้เน็ตของ Mac ผ่านสาย USB (adb reverse + system proxy)\n'
+          + '• ได้เฉพาะ HTTP/HTTPS ของแอปที่เคารพ system proxy — Play Store/push/DNS/UDP ไม่ได้\n'
+          + '• Android จะยังขึ้นว่า “ไม่มีอินเทอร์เน็ต” แม้ใช้งานได้จริง\n'
+          + '• HTTPS ต้องติดตั้ง CA ของ mitmproxy บนมือถือก่อน\n'
+          + '• เป็นปุ่มเดียวกับ “🔌 เชื่อม USB” — เปิดแล้วได้ทั้งเน็ตและการบันทึก traffic';
+      acts.push(stBtn(sharing ? '🌍 หยุดแชร์เน็ต' : '🌍 แชร์เน็ต USB',
+        () => stShareNet(dev.serial, !sharing), sharing ? 'stop' : '', shareTip));
     }
     // toggle auto-reconnect (เฉพาะ device จริงที่มี serial ต่อผ่าน adb) — โชว์ได้ทุกสถานะเพื่อ pre-arm ไว้ก่อน
     if (dev.serial) acts.push(stAutoToggle(dev.serial, dev));

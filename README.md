@@ -112,6 +112,44 @@ and disabling each mode)? See the step-by-step guide in
 connections must un-mute the recorder themselves via
 `POST /api/proxy/mute {"muted":false}` — the guide covers this.
 
+### Sharing the Mac's internet over USB (per device)
+
+A phone with **no internet at all** (no SIM, no Wi-Fi it can join) can borrow the
+Mac's connection over the USB cable — each device card in the **Status** tab has
+its own **🌍 แชร์เน็ต USB** button.
+
+It is the same mechanism as *Connect (USB)*: `adb reverse tcp:8888 tcp:8888` plus
+the Android global HTTP proxy pointing at `127.0.0.1:8888`. Loopback is up even
+with no network, so the app's connection travels down the cable to mitmproxy on
+the Mac, which makes the upstream request over the Mac's connection — and
+resolves DNS on the Mac's side too. Turning it on therefore gives you traffic
+capture *and* connectivity in one step; the button just makes the second purpose
+discoverable.
+
+Verified on a Galaxy A21s with `Active default network: none` (`ping 8.8.8.8` →
+*Network is unreachable*): the phone loaded `example.com` and `ifconfig.me/ip`
+reported the Mac's public IP.
+
+The device card also states whether the phone has a connection of its own —
+`ip route get 8.8.8.8` on the device decides it — so *"borrowing the Mac's
+internet"* is distinguishable from *"routing its own traffic through the Mac"*.
+
+**Limits — this is a proxy, not an IP tunnel:**
+
+- HTTP/HTTPS only, and only for apps that honor the system proxy (OkHttp,
+  Retrofit, WebView, Chrome do).
+- HTTPS needs mitmproxy's CA installed on the device, otherwise apps see
+  certificate errors.
+- Android still reports *"no internet"*: the connectivity check fails, so apps
+  that consult `ConnectivityManager` before firing may refuse to try.
+- No Play Store, no FCM push, no DNS/UDP/raw sockets.
+- The tunnel needs USB + adb to stay up (`adb reverse` dies when the cable is
+  unplugged or the adb server restarts — Auto-reconnect restores it).
+
+For full IP-level reverse tethering (DNS, UDP, every app),
+[gnirehtet](https://github.com/Genymobile/gnirehtet) is the option that works on
+macOS; RNDIS-based reverse tethering does not, since macOS has no RNDIS driver.
+
 ### Connecting iOS (iPhone / iPad)
 
 adb/USB automation is Android-only, so iOS is connected **manually over Wi-Fi**.
