@@ -1855,6 +1855,17 @@ async function hasReverseTunnel(serial) {
   } catch { return false; }
 }
 
+// มือถือมีเน็ตของตัวเองไหม (Wi-Fi / มือถือ) — ใช้แยกระหว่าง "ยืมเน็ตจาก Mac อยู่" กับ "มีเน็ตเองอยู่แล้ว"
+// `ip route get 8.8.8.8` เร็ว (~80ms) พอสำหรับ poll ของแท็บ Status · ไม่มีเน็ต kernel ตอบ
+// "Network is unreachable" ทาง stderr + exit 2 → ต้อง 2>&1 || true ไม่งั้น execFile จะ throw
+async function deviceOwnNet(serial) {
+  try {
+    const out = await adb(['-s', serial, 'shell', 'ip route get 8.8.8.8 2>&1 || true'], 6000);
+    if (/unreachable|network is down/i.test(out)) return false;
+    return /\bdev\s+\S+/.test(out) ? true : null; // มี route ออก interface = มีเน็ตของตัวเอง
+  } catch { return null; } // adb ล่ม/timeout → ไม่รู้ (UI จะไม่โชว์อะไร)
+}
+
 app.get('/api/status', async (req, res) => {
   try {
     const [mitmUp, mcpUp, devices] = await Promise.all([
@@ -1865,6 +1876,7 @@ app.get('/api/status', async (req, res) => {
     await Promise.all(devices.map(async (d) => {
       d.reverse = d.mode === 'usb' ? await hasReverseTunnel(d.serial) : null;
       d.systemCa = d.emulator ? await hasSystemCa(d.serial) : null;
+      d.ownNet = d.emulator ? null : await deviceOwnNet(d.serial); // emulator ใช้เน็ตของ Mac อยู่แล้วโดยธรรมชาติ
     }));
     let lastFlowAt = null;
     for (const f of proxyStore.flows) if (!lastFlowAt || f.time > lastFlowAt) lastFlowAt = f.time;
