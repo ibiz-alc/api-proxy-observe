@@ -1687,3 +1687,37 @@ body.mirror-open { padding-right: calc(44px + var(--mirror-w)); transition: none
 #jv-tree.jv-stale { opacity: 0.45; } /* JSON พัง — โชว์ tree เก่าแบบจาง */
 .jt-hit { background: rgba(250, 204, 21, 0.16); border-radius: 4px; }
 .jt-hit-cur { background: rgba(250, 204, 21, 0.36); outline: 1px solid #facc15; }
+
+/* ---------- แท็บ Auth (ถอด JWT จาก header ของ request) ---------- */
+.auth-tab { font-size: 0.88rem; }
+/* หัวข้อกลุ่ม (Bearer Authentication / JWT Token) — กินเต็มแถว */
+.auth-kv tr.auth-sec td {
+  background: var(--panel-2);
+  color: var(--text);
+  font-family: ui-monospace, Menlo, Monaco, monospace;
+  font-weight: 600;
+  padding: 6px 10px;
+}
+/* token/signature ดิบ — mono ตัดคำได้ทุกตำแหน่ง + สูงไม่เกินนี้แล้วเลื่อนในตัวเอง */
+.auth-token {
+  font-family: ui-monospace, Menlo, Monaco, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--muted);
+  word-break: break-all;
+  max-height: 150px;   /* token ยาวมาก — จำกัดความสูงแล้วเลื่อนในตัวเอง ไม่ให้ดัน JWT ที่ถอดแล้วตกจอ */
+  overflow: auto;
+}
+.auth-time { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.auth-time-rel { color: var(--muted); }
+.auth-badge {
+  font-size: 0.72rem;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid;
+  white-space: nowrap;
+}
+.auth-badge.ok { color: var(--green); border-color: rgba(74, 222, 128, 0.4); background: rgba(74, 222, 128, 0.1); }
+.auth-badge.bad { color: var(--red); border-color: rgba(248, 113, 113, 0.4); background: rgba(248, 113, 113, 0.1); }
+.auth-err { color: var(--yellow); }
+.auth-foot { margin-top: 10px; }

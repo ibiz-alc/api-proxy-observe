@@ -194,6 +194,24 @@ proves the whole chain: it reads the sim's accessibility tree to locate the
 Settings icon, clicks that spot on the canvas in a real browser, then asserts the
 Settings app actually opened.
 
+### Auth tab (JWT / Basic decoding)
+
+When a request carries credentials, the Request pane grows an extra **Auth** tab
+(between *Header* and *Body*) that decodes them locally:
+
+- `Authorization: Bearer <jwt>` — the raw token plus the JWT **Header** and
+  **Payload** as collapsible JSON trees, and the **Signature**.
+- Time claims (`iat`, `nbf`, `exp`, `auth_time`) as readable local time with a
+  green/red badge — including *"expired before this request was sent"*, which is
+  what you want to know when an API answers 401.
+- `Authorization: Basic <b64>` — split into username / password.
+- JWTs sent in other headers (`X-Auth-Token`, `X-Access-Token`, …) or in a
+  cookie value are found and decoded too.
+
+Everything is base64url-decoded **in the browser**; the signature is *not*
+verified (that needs the issuer's public key) and the token is never sent
+anywhere.
+
 ### Media detection & preview
 
 Responses are classified by **magic bytes / URL extension / content-type** (not

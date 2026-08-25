@@ -1742,16 +1742,175 @@ function pdfTab(f, side) {
   return wrap;
 }
 
+// ================= Auth (แท็บ Auth ของ Request — ถอด JWT ที่ส่งมาใน header) =================
+
+// base64url → ข้อความ UTF-8 (JWT ใช้ -_ แทน +/ และตัด padding '=' ออก)
+function b64urlDecode(seg) {
+  let s = String(seg).replace(/-/g, '+').replace(/_/g, '/');
+  while (s.length % 4) s += '=';
+  const bin = atob(s); // throw ถ้ามีอักขระที่ไม่ใช่ base64
+  return new TextDecoder('utf-8').decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+}
+
+// ค่านี้หน้าตาเป็น JWS (JWT 3 ส่วน) ไหม — ดูแค่รูปแบบ ไม่ได้ตรวจลายเซ็น (เราไม่มี public key)
+function looksLikeJwt(v) {
+  return typeof v === 'string' && /^[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*$/.test(v.trim());
+}
+
+// แตก JWT → header / payload (object ถ้า parse JSON ได้) + signature ดิบ · error = บอกสาเหตุถ้าถอดไม่ได้
+function decodeJwt(token) {
+  const parts = String(token).trim().split('.');
+  const out = { header: null, payload: null, headerText: null, payloadText: null, signature: parts[2] || '', error: null };
+  if (parts.length !== 3) {
+    out.error = parts.length === 5
+      ? 'token นี้เป็น JWE (5 ส่วน) — เนื้อในถูกเข้ารหัสไว้ ถอดดูไม่ได้'
+      : `ไม่ใช่ JWT: ต้องมี 3 ส่วนคั่นด้วยจุด แต่เจอ ${parts.length} ส่วน`;
+    return out;
+  }
+  for (const [i, key] of [[0, 'header'], [1, 'payload']]) {
+    let text;
+    try { text = b64urlDecode(parts[i]); }
+    catch { out.error = out.error || `ถอด base64url ส่วน ${key} ไม่ได้`; continue; }
+    out[`${key}Text`] = text;
+    try { out[key] = JSON.parse(text); }
+    catch { out.error = out.error || `ส่วน ${key} ถอดออกมาแล้วไม่ใช่ JSON`; }
+  }
+  return out;
+}
+
+// รวบรวมข้อมูล auth ที่ส่งมาใน header ของ request:
+//   1) Authorization / Proxy-Authorization (ทุก scheme — Bearer ถอด JWT, Basic ถอด user:pass)
+//   2) header อื่นที่ค่าหน้าตาเป็น JWT เอง (x-auth-token, x-access-token, id-token, ...)
+//   3) cookie ที่ค่าหน้าตาเป็น JWT
+function findAuthEntries(headers) {
+  const out = [];
+  const cap = (s) => s.replace(/^./, (c) => c.toUpperCase());
+  const push = (label, source, credentials, scheme) => {
+    const e = { label, source, scheme: scheme || '', credentials, jwt: null, basic: null, opaque: false };
+    // ถอดเฉพาะค่าที่ "รูปทรงเป็น JWT/JWE" (3 หรือ 5 ส่วนคั่นจุด) — Bearer แบบ opaque ของ OAuth
+    // (เช่น 2YotnFZFEjr1zCsicMWpAA) ไม่ใช่ token พัง ห้ามขึ้นเออเรอร์แดงใต้หัวข้อ JWT Token
+    const nParts = String(credentials).trim().split('.').length;
+    if (looksLikeJwt(credentials) || nParts === 3 || nParts === 5) e.jwt = decodeJwt(credentials);
+    else if (/^bearer$/i.test(e.scheme)) e.opaque = true;
+    if (/^basic$/i.test(e.scheme)) {
+      try {
+        const dec = b64urlDecode(credentials);
+        const i = dec.indexOf(':');
+        e.basic = i >= 0 ? { user: dec.slice(0, i), pass: dec.slice(i + 1) } : { user: dec, pass: '' };
+      } catch { /* ถอดไม่ได้ก็โชว์แค่ค่าดิบ */ }
+    }
+    out.push(e);
+  };
+  for (const [name, rawVal] of Object.entries(headers || {})) {
+    const value = typeof rawVal === 'string' ? rawVal : String(rawVal ?? '');
+    const lower = name.toLowerCase();
+    const m = /^(\S+)[ \t]+([\s\S]+)$/.exec(value.trim()); // "<scheme> <credentials>"
+    if (lower === 'authorization' || lower === 'proxy-authorization') {
+      const scheme = m ? m[1] : '';
+      const cred = (m ? m[2] : value).trim();
+      push(scheme ? `${cap(scheme)} Authentication` : cap(lower), name, cred, scheme);
+      continue;
+    }
+    if (lower === 'cookie') {
+      for (const kv of value.split(';')) {
+        const i = kv.indexOf('=');
+        if (i < 0) continue;
+        const ck = kv.slice(0, i).trim(); const cv = kv.slice(i + 1).trim();
+        if (looksLikeJwt(cv)) push(`Cookie · ${ck}`, `${name} → ${ck}`, cv, '');
+      }
+      continue;
+    }
+    if (looksLikeJwt(value.trim())) { push(name, name, value.trim(), ''); continue; }
+    if (m && /^bearer$/i.test(m[1]) && looksLikeJwt(m[2].trim())) push(name, name, m[2].trim(), m[1]);
+  }
+  return out;
+}
+
+function jwtDurText(ms) {
+  const s = Math.round(Math.abs(ms) / 1000);
+  if (s < 60) return `${s} วิ`;
+  const m = Math.floor(s / 60); if (m < 60) return `${m} นาที`;
+  const h = Math.floor(m / 60); const mm = m % 60; if (h < 24) return `${h} ชม.${mm ? ` ${mm} นาที` : ''}`;
+  const d = Math.floor(h / 24); const hh = h % 24; return `${d} วัน${hh ? ` ${hh} ชม.` : ''}`;
+}
+
+// claim เวลาใน JWT เป็น epoch วินาที → โชว์เป็นเวลาอ่านง่าย + สถานะหมดอายุ (เทียบทั้ง "ตอนนี้" และ "ตอนยิง request")
+function jwtTimeRows(payload, reqTimeIso) {
+  const rows = [];
+  if (!payload || typeof payload !== 'object') return rows;
+  const LABEL = { iat: 'ออก token เมื่อ (iat)', nbf: 'เริ่มใช้ได้ (nbf)', exp: 'หมดอายุ (exp)', auth_time: 'ล็อกอินเมื่อ (auth_time)' };
+  const now = Date.now();
+  const reqAt = reqTimeIso ? new Date(reqTimeIso).getTime() : NaN;
+  for (const k of ['iat', 'nbf', 'exp', 'auth_time']) {
+    const v = payload[k];
+    if (typeof v !== 'number' || !isFinite(v)) continue;
+    const ms = v * 1000;
+    const cell = el('div', { class: 'auth-time' }, [
+      el('span', { text: new Date(ms).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'medium' }) }),
+      el('span', { class: 'auth-time-rel', text: ms >= now ? `อีก ${jwtDurText(ms - now)}` : `${jwtDurText(now - ms)}ที่แล้ว` }),
+    ]);
+    if (k === 'exp') {
+      const dead = ms <= now;
+      cell.appendChild(el('span', { class: `auth-badge ${dead ? 'bad' : 'ok'}`, text: dead ? 'หมดอายุแล้ว' : 'ยังไม่หมดอายุ' }));
+      if (!isNaN(reqAt) && ms <= reqAt) cell.appendChild(el('span', { class: 'auth-badge bad', text: 'หมดอายุก่อนยิง request นี้' }));
+    }
+    if (k === 'nbf' && ms > now) cell.appendChild(el('span', { class: 'auth-badge bad', text: 'ยังใช้ไม่ได้' }));
+    rows.push([LABEL[k], cell]);
+  }
+  if (typeof payload.exp === 'number' && typeof payload.iat === 'number' && payload.exp > payload.iat) {
+    rows.push(['อายุรวมของ token', el('span', { text: jwtDurText((payload.exp - payload.iat) * 1000) })]);
+  }
+  return rows;
+}
+
+// แท็บ Auth: ตาราง Key/Value — ต่อ 1 credential = section หัวข้อ + Data (token ดิบ) + JWT ที่ถอดแล้ว
+function authTab(f, entries) {
+  const wrap = el('div', { class: 'auth-tab' });
+  if (!entries.length) {
+    wrap.appendChild(el('p', { class: 'hint', text: 'request นี้ไม่มี header ที่เป็นข้อมูล auth (Authorization / token / cookie ที่เป็น JWT)' }));
+    return wrap;
+  }
+  const table = el('table', { class: 'kv auth-kv' });
+  const section = (text) => table.appendChild(el('tr', { class: 'auth-sec' }, [el('td', { colspan: '2', text })]));
+  const row = (k, node, cls) => {
+    const td = el('td', cls ? { class: cls } : {});
+    if (typeof node === 'string') td.textContent = node; else td.appendChild(node);
+    table.appendChild(el('tr', {}, [el('td', { text: k }), td]));
+  };
+  const tokenCell = (text) => el('div', { class: 'code-wrap' }, [copyButton(() => text), el('div', { class: 'auth-token', text })]);
+
+  for (const e of entries) {
+    section(e.label);
+    if (e.source.toLowerCase() !== 'authorization') row('มาจาก header', e.source); // บอกที่มาเมื่อไม่ใช่ Authorization ตรง ๆ
+    row('Data', tokenCell(e.credentials));
+    if (e.basic) { row('Username', e.basic.user); row('Password', e.basic.pass || '(ว่าง)'); }
+    if (e.opaque) row('รูปแบบ', 'opaque token (ไม่ใช่ JWT) — ข้างในไม่มีข้อมูลให้ถอด ต้องถามฝั่ง server ว่าหมายถึงอะไร');
+    if (!e.jwt) continue;
+    section('JWT Token');
+    if (e.jwt.error) row('⚠️ ถอดไม่สำเร็จ', e.jwt.error, 'auth-err');
+    for (const part of ['header', 'payload']) {
+      const label = part === 'header' ? 'Header' : 'Payload';
+      if (e.jwt[part]) row(label, bodyBlock(e.jwt[part]));                          // JSON → tree พับได้ + ปุ่ม copy
+      else if (e.jwt[`${part}Text`]) row(label, tokenCell(e.jwt[`${part}Text`]));    // ถอดได้แต่ไม่ใช่ JSON
+    }
+    for (const [k, cell] of jwtTimeRows(e.jwt.payload, f.time)) row(k, cell);
+    if (e.jwt.signature) row('Signature', tokenCell(e.jwt.signature));
+  }
+  wrap.appendChild(table);
+  wrap.appendChild(el('p', { class: 'hint auth-foot', text: 'ℹ️ ถอด base64url ในเครื่องเท่านั้น — ไม่ได้ตรวจลายเซ็น (ต้องมี public key ของผู้ออก) และไม่ได้ส่ง token ออกไปไหน' }));
+  return wrap;
+}
+
 function renderFlowDetail(f) {
   flowDetailEl.innerHTML = '';
 
   // ----- Request pane -----
   const reqRawText = `${f.method} ${f.path} HTTP/1.1\n${headersToRaw(f.reqHeaders)}${f.reqBody ? '\n\n' + prettyBody(f.reqBody) : ''}`;
-  const reqTabs = {
-    Header: kvTable(f.reqHeaders || {}),
-    Body: bodyBlock(f.reqBody),
-    Raw: el('pre', { class: 'code-block', text: reqRawText }),
-  };
+  const authEntries = findAuthEntries(f.reqHeaders); // Authorization/token/cookie ที่เป็น JWT
+  const reqTabs = { Header: kvTable(f.reqHeaders || {}) };
+  if (authEntries.length) reqTabs.Auth = authTab(f, authEntries); // มี auth ส่งมาเท่านั้นถึงมีแท็บนี้
+  reqTabs.Body = bodyBlock(f.reqBody);
+  reqTabs.Raw = el('pre', { class: 'code-block', text: reqRawText });
   if (f.reqMultipart) reqTabs['Form Data'] = multipartTab(f); // multipart → แกะ parts + preview รูป
   if (f.reqIsImage) reqTabs['🖼️ Image'] = imageTab(f, 'req');
   if (f.reqIsVideo) reqTabs['🎬 Video'] = videoTab(f, 'req');
