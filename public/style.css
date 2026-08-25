@@ -1675,8 +1675,24 @@ body.mirror-open { padding-right: calc(44px + var(--mirror-w)); transition: none
 .jv-toolbar button { padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); cursor: pointer; font-size: 0.82rem; }
 .jv-toolbar button:hover:not(:disabled) { border-color: var(--accent); }
 .jv-toolbar button:disabled { opacity: 0.45; cursor: default; }
-.jv-layout { display: flex; gap: 10px; height: calc(100vh - 150px); min-height: 320px; }
-.jv-pane { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+/* grid 3 คอลัมน์: pane ซ้าย | ตัวลาก 10px | pane ขวา — ช่องว่างระหว่าง pane คือตัวคอลัมน์ตัวลากเอง
+   (ไม่ใช้ gap ไม่งั้นระยะจะบวกซ้ำและตำแหน่งตัวลากไม่ตรงกับที่คำนวณ) */
+.jv-layout {
+  display: grid;
+  grid-template-columns: var(--jv-l, calc(50% - 5px)) 10px minmax(0, 1fr);
+  height: calc(100vh - 150px);
+  min-height: 320px;
+}
+.jv-pane { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+/* ตัวลากคั่นซ้าย/ขวาของแท็บ JSON — เส้นเต็มความสูง + ขีดจับตรงกลาง (ชุดเดียวกับ .detail-hresizer) */
+.jv-resizer {
+  cursor: col-resize;
+  background:
+    linear-gradient(var(--border), var(--border)) center / 1px 100% no-repeat,
+    linear-gradient(var(--border), var(--border)) center / 3px 40px no-repeat;
+  transition: background-color 0.15s;
+}
+.jv-resizer:hover, .jv-resizer.dragging { background-color: var(--panel-2); }
 .jv-editor-host { flex: 1; min-height: 0; display: flex; }
 .jv-error { background: rgba(239, 68, 68, 0.12); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 8px; padding: 6px 10px; font-size: 0.8rem; white-space: pre-wrap; flex-shrink: 0; }
 .jv-searchbar { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }

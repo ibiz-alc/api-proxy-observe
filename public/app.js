@@ -838,37 +838,38 @@ let resTab = 'Body';
   });
 })();
 
-// ตัวลากปรับความกว้าง Request | Response ใน detail — เก็บเป็น % ใน localStorage
-// (detail ถูก render ใหม่ทุกครั้งที่สลับ subtab จึงเก็บค่าไว้นอก DOM แล้ว apply ตอนสร้าง split)
-const DETAIL_RZ_W = 10;      // ต้องเท่ากับความกว้างคอลัมน์ตัวลากใน .detail-split
+// ---- ตัวลากปรับความกว้างซ้าย/ขวา (คอลัมน์กลางของ grid 3 ช่อง) — ใช้ร่วมกันทุกจุดในแอป ----
+// เก็บค่าเป็น % ของตำแหน่งกึ่งกลางตัวลาก วัดจากขอบซ้ายของ split แล้วจำใน localStorage
+// state อยู่นอก DOM (ผ่าน get/set ของผู้เรียก) เพราะบาง split ถูกสร้างใหม่ทุกครั้งที่ re-render
+const RZ_W = 10;             // ต้องเท่ากับความกว้างคอลัมน์ตัวลากใน CSS
 const DETAIL_MIN_PX = 180;   // พื้นที่ขั้นต่ำของแต่ละฝั่ง
-let detailSplitPct = (() => {  // % = ตำแหน่งกึ่งกลางตัวลาก วัดจากขอบซ้ายของ split
-  const v = parseFloat(localStorage.getItem('proxyDetailSplit') || '');
-  return v >= 5 && v <= 95 ? v : 50;
-})();
 // คอลัมน์ซ้าย = ตำแหน่งตัวลาก ลบครึ่งความกว้างตัวลาก → 50% แล้วสองฝั่งกว้างเท่ากันพอดี
-const detailLeftCss = (pct) => `calc(${pct}% - ${DETAIL_RZ_W / 2}px)`;
-function makeDetailResizer() {
-  const rz = el('div', {
-    class: 'detail-hresizer',
-    title: 'ลากเพื่อปรับความกว้าง Request/Response · ดับเบิลคลิก = 50/50',
-  });
+const colLeftCss = (pct) => `calc(${pct}% - ${RZ_W / 2}px)`;
+// อ่าน % ที่จำไว้ (กันค่าเพี้ยน/ค่าที่ทำให้ pane หายไปข้างหนึ่ง)
+const readSplitPct = (key) => {
+  const v = parseFloat(localStorage.getItem(key) || '');
+  return v >= 5 && v <= 95 ? v : 50;
+};
+// ผูกพฤติกรรมลาก/ดับเบิลคลิกให้ element ที่เป็นคอลัมน์ตัวลาก (rz.parentElement = ตัว split)
+function bindColResizer(rz, { cssVar, storeKey, minPx = DETAIL_MIN_PX, get, set }) {
+  const apply = (split, pct) => split.style.setProperty(cssVar, colLeftCss(pct));
   rz.addEventListener('mousedown', (e) => {
     e.preventDefault();
     const split = rz.parentElement;
     if (!split) return; // ถูกถอดออกจาก DOM ไปแล้ว (detail render ใหม่)
     const rect = split.getBoundingClientRect();
-    const min = Math.min(DETAIL_MIN_PX, rect.width / 3); // จอแคบ ๆ ก็ยังลากได้
+    const min = Math.min(minPx, rect.width / 3); // จอแคบ ๆ ก็ยังลากได้
     rz.classList.add('dragging');
     document.body.classList.add('col-dragging');
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
     const onMove = (ev) => {
       // clamp ที่กึ่งกลางตัวลาก: เผื่อครึ่งตัวลากทั้งสองข้าง ทั้งสอง pane จึงไม่แคบกว่า min
-      const half = DETAIL_RZ_W / 2;
+      const half = RZ_W / 2;
       const pos = Math.max(min + half, Math.min(rect.width - min - half, ev.clientX - rect.left));
-      detailSplitPct = (pos / rect.width) * 100;
-      split.style.setProperty('--detail-l', detailLeftCss(detailSplitPct));
+      const pct = (pos / rect.width) * 100;
+      set(pct);
+      apply(split, pct);
     };
     const onUp = () => {
       window.removeEventListener('mousemove', onMove);
@@ -877,18 +878,27 @@ function makeDetailResizer() {
       document.body.classList.remove('col-dragging');
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
-      localStorage.setItem('proxyDetailSplit', detailSplitPct.toFixed(2));
+      localStorage.setItem(storeKey, get().toFixed(2));
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
   });
   rz.addEventListener('dblclick', () => {
-    detailSplitPct = 50;
+    set(50);
     if (!rz.parentElement) return;
-    rz.parentElement.style.setProperty('--detail-l', detailLeftCss(50));
-    localStorage.setItem('proxyDetailSplit', '50');
+    apply(rz.parentElement, 50);
+    localStorage.setItem(storeKey, '50');
   });
   return rz;
+}
+
+// ตัวลาก Request | Response ใน detail (สร้างใหม่ทุกครั้งที่ render detail)
+let detailSplitPct = readSplitPct('proxyDetailSplit');
+function makeDetailResizer() {
+  return bindColResizer(
+    el('div', { class: 'detail-hresizer', title: 'ลากเพื่อปรับความกว้าง Request/Response · ดับเบิลคลิก = 50/50' }),
+    { cssVar: '--detail-l', storeKey: 'proxyDetailSplit', get: () => detailSplitPct, set: (p) => { detailSplitPct = p; } },
+  );
 }
 document.getElementById('clear-flows').addEventListener('click', async () => {
   await fetch('/api/proxy/flows', { method: 'DELETE' });
@@ -1971,7 +1981,7 @@ function renderFlowDetail(f) {
   const resPane = buildDetailPane('Response', resHeadline, resTabs, resTab, (name) => { resTab = name; renderFlowDetail(f); });
 
   const split = el('div', { class: 'detail-split' }, [reqPane, makeDetailResizer(), resPane]);
-  split.style.setProperty('--detail-l', detailLeftCss(detailSplitPct));
+  split.style.setProperty('--detail-l', colLeftCss(detailSplitPct));
   flowDetailEl.appendChild(split);
 }
 
@@ -3679,6 +3689,14 @@ function jvErrorPos(msg, text) { // หา line/col ของจุดพัง 
 function setupJsonViewer() {
   const host = document.getElementById('jv-editor-host');
   if (!host) return;
+  // ตัวลากปรับความกว้าง editor | tree — layout ตัวนี้อยู่ถาวรใน DOM จึง apply ค่าที่จำไว้ครั้งเดียวพอ
+  const jvLayout = document.querySelector('.jv-layout');
+  const jvRz = jvLayout && jvLayout.querySelector('.jv-resizer');
+  if (jvRz) {
+    let jvPct = readSplitPct('jsonViewerSplit');
+    jvLayout.style.setProperty('--jv-l', colLeftCss(jvPct));
+    bindColResizer(jvRz, { cssVar: '--jv-l', storeKey: 'jsonViewerSplit', get: () => jvPct, set: (p) => { jvPct = p; } });
+  }
   const ed = makeJsonEditor(localStorage.getItem(JV_TEXT_KEY) || '');
   host.appendChild(ed.wrap);
   const ta = ed.textarea;
