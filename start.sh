@@ -9,6 +9,8 @@
 # สลับโหมดได้เลย — สคริปต์จะปิดอีกโหมดให้ก่อน (native กับ Docker bind พอร์ตซ้อนกันได้เงียบๆ)
 cd "$(dirname "$0")" || exit 1
 ADDON="$(pwd)/mitm-to-apitester.py"
+# start_mitmdump() + รายชื่อ host ที่ปล่อยผ่านไม่ดัก TLS (GMS/FCM จะพังถ้าดัก — ดูคอมเมนต์ในไฟล์)
+. "$(pwd)/mitm-bypass.sh"
 
 NGROK=no SKIP_SETUP=no DOCKER=no BUILD=no
 for arg in "$@"; do
@@ -273,8 +275,8 @@ fi
 env -u NODE_OPTIONS node server.js > /tmp/apitester.log 2>&1 &
 
 echo "==> 2) mitmproxy + addon (พอร์ต 8888)"
-# ใช้ $MITMDUMP ไม่ใช่ bare mitmdump — ตัว venv ไม่อยู่ใน PATH
-PYTHONUNBUFFERED=1 "${MITMDUMP:-mitmdump}" --listen-host 0.0.0.0 --listen-port 8888 -s "$ADDON" > /tmp/mitmdump.log 2>&1 &
+# ใช้ $MITMDUMP ไม่ใช่ bare mitmdump — ตัว venv ไม่อยู่ใน PATH (start_mitmdump ใช้ให้แล้ว)
+start_mitmdump "$ADDON"
 
 if [ "$NGROK" = yes ]; then
   echo "==> 3) ngrok (proxy tcp 8888 + web 3000)"

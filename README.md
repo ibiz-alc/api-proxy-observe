@@ -91,6 +91,42 @@ The Proxy tab shows live device traffic, including decrypted HTTPS, backed by
 forwards each decrypted flow to the web UI over Server-Sent Events and enforces
 Map Local rules.
 
+### Google / Play Services traffic is not intercepted (and why FCM would break)
+
+Google Play Services (GMS) does **not** trust user-installed CAs and pins Google's
+certificates. Because the Android global HTTP proxy is device-wide, GMS traffic goes
+through mitmproxy too — and every handshake fails:
+
+```
+Client TLS handshake failed. The client does not trust the proxy's certificate
+for android.apis.google.com (ssl/tls alert certificate unknown)
+```
+
+`android.apis.google.com` is the channel GMS uses to check in and register for FCM.
+When it is blocked, GMS cannot register, and any app calling
+`FirebaseMessaging.getToken()` fails with:
+
+```
+java.util.concurrent.ExecutionException: java.io.IOException: SERVICE_NOT_AVAILABLE
+```
+
+Note that only the **GMS** side breaks. Endpoints the app itself calls (for example
+`firebaseinstallations.googleapis.com`) still return `200 OK`, because a debug build
+trusts the user CA — which makes the failure look unrelated to the proxy.
+
+`mitm-bypass.sh` therefore starts mitmdump with `--ignore-hosts`, tunnelling
+Google/Play-Services hosts through untouched (`*.google.com`, `*.gstatic.com`,
+`*.googleusercontent.com`, `*.android.com`, `app-measurement.com`,
+`play.googleapis.com`, `digitalassetlinks.googleapis.com`, `*-pa.googleapis.com`).
+Those hosts are no longer decrypted or recorded; the app under test is unaffected.
+
+```bash
+MITM_IGNORE_HOSTS='<your regex>' ./start.sh   # override the list
+MITM_IGNORE_HOSTS= ./start.sh                 # disable — intercept everything again
+```
+
+The same list is used by `start.sh`, `restart.sh` and `docker-entrypoint.sh`.
+
 ### Connecting a device (driven from the web, over adb)
 
 Enable USB debugging, then use the **How to connect** panel in the Proxy tab:
