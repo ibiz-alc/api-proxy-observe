@@ -118,13 +118,24 @@ A phone with **no internet at all** (no SIM, no Wi-Fi it can join) can borrow th
 Mac's connection over the USB cable — each device card in the **Status** tab has
 its own **🌍 แชร์เน็ต USB** button.
 
-It is the same mechanism as *Connect (USB)*: `adb reverse tcp:8888 tcp:8888` plus
-the Android global HTTP proxy pointing at `127.0.0.1:8888`. Loopback is up even
-with no network, so the app's connection travels down the cable to mitmproxy on
-the Mac, which makes the upstream request over the Mac's connection — and
-resolves DNS on the Mac's side too. Turning it on therefore gives you traffic
-capture *and* connectivity in one step; the button just makes the second purpose
-discoverable.
+Sharing is **independent of traffic capture** — two separate switches per device:
+
+| device state | phone's `http_proxy` | what happens |
+|---|---|---|
+| capture connected | `127.0.0.1:8888` (mitmproxy) | traffic is decrypted and recorded; internet comes along for the ride |
+| capture off, sharing on | `127.0.0.1:8899` (pass-through) | internet only — nothing is decrypted, nothing is recorded, no CA needed |
+| both off | cleared | phone is on its own |
+
+Android allows exactly one global proxy, so a second, plain forward proxy
+(`net-share.js`, CONNECT tunneling, bound to `127.0.0.1`) provides the
+sharing-only path. **Disconnecting capture no longer kills the phone's internet**
+— if sharing is on, the server flips the phone over to the pass-through proxy;
+and turning sharing off never touches an active capture session. The state is
+remembered in `data/net-share.json` and restored after a server restart.
+
+Either way the trick is the same: loopback is up even with no network, so the
+app's connection travels down the cable to the Mac, which makes the upstream
+request over its own connection — and resolves DNS on the Mac's side too.
 
 Verified on a Galaxy A21s with `Active default network: none` (`ping 8.8.8.8` →
 *Network is unreachable*): the phone loaded `example.com` and `ifconfig.me/ip`
@@ -138,8 +149,9 @@ internet"* is distinguishable from *"routing its own traffic through the Mac"*.
 
 - HTTP/HTTPS only, and only for apps that honor the system proxy (OkHttp,
   Retrofit, WebView, Chrome do).
-- HTTPS needs mitmproxy's CA installed on the device, otherwise apps see
-  certificate errors.
+- HTTPS through *capture* needs mitmproxy's CA installed on the device,
+  otherwise apps see certificate errors. The pass-through path does not touch
+  TLS, so it needs no CA and works with certificate-pinned apps.
 - Android still reports *"no internet"*: the connectivity check fails, so apps
   that consult `ConnectivityManager` before firing may refuse to try.
 - No Play Store, no FCM push, no DNS/UDP/raw sockets.
