@@ -3118,13 +3118,16 @@ async function stUnmute() {
   renderStatus();
 }
 
-// แชร์เน็ตจาก Mac ให้มือถือผ่านสาย USB — กลไกเดียวกับ "เชื่อม USB" ทุกประการ
-// (adb reverse tcp:8888 + global http_proxy=127.0.0.1:8888) เพราะ loopback บนมือถือ up เสมอ
-// แม้ไม่มีเน็ต → แอปต่อ 127.0.0.1:8888 ทะลุสาย USB มาที่ mitmproxy แล้วออกเน็ตของ Mac
-// แยกปุ่มไว้ต่างหากเพราะเป็นคนละเจตนา (ให้เน็ต vs ดัก traffic) แต่เปิดอันเดียวได้ทั้งสองอย่าง
+// เปิด/ปิดแชร์เน็ตจาก Mac ให้มือถือผ่านสาย USB — แยกขาดจากการเชื่อม proxy ที่บันทึก traffic
+// ฝั่ง server จะเลือกทางให้เอง: เชื่อม capture อยู่ → ใช้ mitmproxy (ได้เน็ตอยู่ในตัว) ·
+// capture ปิด → สลับไปพร็อกซีส่งต่อที่ไม่ดัก/ไม่บันทึก เน็ตบนมือถือจึงไม่ดับตอนกดตัดการเชื่อมต่อ
 async function stShareNet(serial, on) {
-  if (on) return stConnectDevice(serial, 'usb');
-  return stDisconnectDevice(serial);
+  const r = await (await fetch('/api/devices/share-net', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ serial, on }),
+  })).json();
+  if (!r.ok) throw new Error(r.error || 'สั่งแชร์เน็ตไม่สำเร็จ');
 }
 
 async function stConnectDevice(serial, mode) {
@@ -3469,15 +3472,17 @@ async function renderStatus() {
     } else if (dev.emulator && dev.systemCa === true) {
       details.push('🔐 system CA ติดตั้งแล้ว — HTTPS ถอดรหัสได้ (ติดตั้งใหม่ถ้า reboot emulator)');
     }
-    // --- แชร์เน็ตจาก Mac (USB): สถานะแยกรายเครื่อง ---
-    // sharing = โหมด USB ที่ท่อยังอยู่ → traffic ของมือถือวิ่งออกเน็ตของ Mac จริง
-    const sharing = !!dev.connected && dev.mode === 'usb' && dev.reverse !== false;
+    // --- แชร์เน็ตจาก Mac: สถานะของตัวเอง ไม่ผูกกับการเชื่อม proxy ที่บันทึก traffic ---
+    const sharing = !!dev.netShare;
+    if (sharing) {
+      details.push(dev.shareVia === 'plain'
+        ? '🌍 แชร์เน็ตอยู่ — วิ่งผ่านทางส่งต่อ (ไม่ดัก ไม่บันทึก ไม่ต้องมี CA)'
+        : '🌍 แชร์เน็ตอยู่ — ตอนนี้ใช้ทางเดียวกับ proxy ที่บันทึก traffic · กดตัดการเชื่อมต่อแล้วจะสลับไปทางส่งต่อให้เอง เน็ตไม่ดับ');
+    }
     if (dev.ownNet === false) {
-      details.push(sharing
-        ? '🌍 มือถือไม่มีเน็ตของตัวเอง — ตอนนี้ใช้เน็ตของ Mac ผ่านสาย USB อยู่'
-        : '⚠️ มือถือไม่มีเน็ตของตัวเอง — กด “🌍 แชร์เน็ต USB” เพื่อยืมเน็ตของ Mac');
-    } else if (dev.ownNet === true && sharing) {
-      details.push('🌍 HTTP/HTTPS ของแอปวิ่งออกเน็ตผ่าน Mac (เครื่องนี้มีเน็ตของตัวเองด้วย)');
+      if (sharing) details.push('📴 มือถือไม่มีเน็ตของตัวเอง — ที่ใช้อยู่คือเน็ตของ Mac ผ่านสาย USB');
+      else if (dev.connected) details.push('⚠️ มือถือไม่มีเน็ตของตัวเอง — ตอนนี้ได้เน็ตจาก proxy ที่บันทึก traffic · กดตัดการเชื่อมต่อเมื่อไหร่เน็ตดับทันที (เปิดแชร์เน็ตไว้ = ไม่ดับ)');
+      else details.push('⚠️ มือถือไม่มีเน็ตของตัวเอง — กด “🌍 แชร์เน็ต USB” ถ้าอยากให้ยืมเน็ตของ Mac');
     }
     const acts = [];
     if (!okDev) {
@@ -3491,12 +3496,13 @@ async function renderStatus() {
     // ปุ่มแชร์เน็ตของเครื่องนี้ (แยกรายเครื่อง) — emulator ไม่ต้องมี เพราะใช้เน็ตของ Mac อยู่แล้ว
     if (!dev.emulator) {
       const shareTip = sharing
-        ? 'หยุดแชร์: ล้าง http_proxy บนมือถือ + ถอด adb reverse (การบันทึก traffic จะหยุดด้วย เพราะใช้ท่อเดียวกัน)'
+        ? 'หยุดแชร์เน็ตของเครื่องนี้ — ไม่กระทบการเชื่อม proxy/การบันทึก traffic\n'
+          + '(ถ้ากำลังเชื่อม capture อยู่ มือถือจะยังมีเน็ตผ่านทางนั้นต่อไป)'
         : 'ให้มือถือใช้เน็ตของ Mac ผ่านสาย USB (adb reverse + system proxy)\n'
+          + '• แยกจากปุ่มเชื่อม proxy: ตัดการเชื่อมต่อแล้วเน็ตยังอยู่ (สลับไปทางส่งต่อที่ไม่บันทึก traffic)\n'
+          + '• ทางส่งต่อไม่แตะ TLS → ไม่ต้องมี CA และแอปที่ทำ cert pinning ก็ใช้เน็ตได้\n'
           + '• ได้เฉพาะ HTTP/HTTPS ของแอปที่เคารพ system proxy — Play Store/push/DNS/UDP ไม่ได้\n'
-          + '• Android จะยังขึ้นว่า “ไม่มีอินเทอร์เน็ต” แม้ใช้งานได้จริง\n'
-          + '• HTTPS ต้องติดตั้ง CA ของ mitmproxy บนมือถือก่อน\n'
-          + '• เป็นปุ่มเดียวกับ “🔌 เชื่อม USB” — เปิดแล้วได้ทั้งเน็ตและการบันทึก traffic';
+          + '• Android จะยังขึ้นว่า “ไม่มีอินเทอร์เน็ต” แม้ใช้งานได้จริง';
       acts.push(stBtn(sharing ? '🌍 หยุดแชร์เน็ต' : '🌍 แชร์เน็ต USB',
         () => stShareNet(dev.serial, !sharing), sharing ? 'stop' : '', shareTip));
     }

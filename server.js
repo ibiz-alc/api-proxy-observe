@@ -12,7 +12,11 @@ const { startProxy } = require('./proxy');
 
 const execFileP = promisify(execFile);
 const ADB = process.env.ADB || 'adb';
+const { createShareProxy } = require('./net-share');
 const MITM_PORT = 8888;
+// พร็อกซีส่งต่อสำหรับ "แชร์เน็ต" ล้วน ๆ (ไม่ดัก/ไม่บันทึก) — คนละตัวกับ mitmproxy เพื่อให้ปุ่มแชร์เน็ต
+// กับปุ่มเชื่อม proxy (บันทึก traffic) เปิด/ปิดแยกกันได้ · ตั้ง SHARE_PORT ได้เผื่อรันหลาย instance
+const SHARE_PORT = Number(process.env.SHARE_PORT || 8899);
 const POSTERN_PKG = 'com.thaivivat.proxy.postern';
 
 // safety net: อย่าให้ error ลอยๆ (เช่น spawn ล้ม) ทำให้เว็บล่มทั้ง process — log ไว้แล้วรันต่อ
@@ -998,6 +1002,110 @@ function getLanIp() {
   return null;
 }
 
+// ================= แชร์เน็ตจาก Mac ให้มือถือ (แยกจากการเชื่อม proxy ที่บันทึก traffic) =================
+// Android ตั้ง global http_proxy ได้ค่าเดียว → ถ้าใช้ mitmproxy ตัวเดียวกันทั้งสองงาน
+// "หยุดแชร์เน็ต" จะกลายเป็นการตัด capture ไปด้วย · แยกพอร์ตแล้วสองปุ่มเป็นอิสระต่อกัน:
+//   เชื่อม capture อยู่           → proxy = 127.0.0.1:8888 (ได้เน็ตอยู่ในตัว)
+//   capture ปิด + แชร์เน็ตเปิด    → proxy = 127.0.0.1:SHARE_PORT (ส่งต่อเฉย ๆ ไม่บันทึก ไม่ต้องมี CA)
+const NET_SHARE_FILE = path.join(__dirname, 'data', 'net-share.json');
+let netShareMap = {}; // serial → true (จำข้าม restart เหมือน auto-reconnect)
+try {
+  if (fs.existsSync(NET_SHARE_FILE)) netShareMap = JSON.parse(fs.readFileSync(NET_SHARE_FILE, 'utf8')) || {};
+} catch { netShareMap = {}; }
+function saveNetShare() {
+  try {
+    fs.mkdirSync(path.dirname(NET_SHARE_FILE), { recursive: true });
+    fs.writeFileSync(NET_SHARE_FILE, JSON.stringify(netShareMap, null, 2));
+  } catch (e) { console.error('[net-share] เขียนไฟล์สถานะไม่ได้:', e.message); }
+}
+
+let shareProxy = null; // สตาร์ทเมื่อมีเครื่องเปิดแชร์เน็ตเท่านั้น (ไม่งั้นกินพอร์ตเปล่า ๆ ชนกับ dev instance)
+function ensureShareProxy() {
+  if (shareProxy && shareProxy.listening) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const srv = createShareProxy();
+    srv.once('error', (e) => {
+      shareProxy = null;
+      reject(new Error(e.code === 'EADDRINUSE'
+        ? `พอร์ต ${SHARE_PORT} ถูกใช้อยู่ (มี ApiTester อีกตัวรันอยู่?) — ปิดตัวนั้นหรือรันด้วย SHARE_PORT อื่น`
+        : `เปิดพร็อกซีแชร์เน็ตไม่ได้: ${e.message}`));
+    });
+    srv.listen(SHARE_PORT, '127.0.0.1', () => {
+      srv.on('error', (e) => console.error('[net-share] proxy error:', e.message)); // error ทีหลังต้องไม่ล้ม process
+      shareProxy = srv;
+      console.log(`แชร์เน็ต: พร็อกซีส่งต่อพร้อมที่ 127.0.0.1:${SHARE_PORT} (ไม่ดัก ไม่บันทึก)`);
+      resolve();
+    });
+  });
+}
+function maybeStopShareProxy() { // ไม่เหลือใครใช้ → คืนพอร์ต
+  if (shareProxy && !Object.keys(netShareMap).length) { shareProxy.close(); shareProxy = null; }
+}
+
+// อ่าน proxy ปัจจุบันบนมือถือแล้วบอกว่าเป็นทางไหน (capture / แชร์เน็ต / ไม่ได้ตั้ง)
+async function currentProxy(serial) {
+  let v = '';
+  try { v = (await adb(['-s', serial, 'shell', 'settings', 'get', 'global', 'http_proxy'])).trim(); } catch { /* adb ล่ม */ }
+  const set = !!v && v !== ':0' && v !== 'null';
+  const share = set && v === `127.0.0.1:${SHARE_PORT}`;
+  return { value: set ? v : null, set, share, capture: set && !share };
+}
+async function setDeviceProxy(serial, target) {
+  await adb(['-s', serial, 'shell', 'settings', 'put', 'global', 'http_proxy', target]);
+  // แจ้งแอปให้รับรู้ทันที ไม่ต้องรอ network reconfigure
+  await adb(['-s', serial, 'shell', 'am', 'broadcast', '-a', 'android.intent.action.PROXY_CHANGE']).catch(() => {});
+}
+// ล้าง proxy บนเครื่องให้เกลี้ยง (ทุก key เผื่อบางรุ่นค้างที่ split key)
+async function clearDeviceProxy(serial) {
+  const S = ['-s', serial];
+  await adb([...S, 'shell', 'settings', 'put', 'global', 'http_proxy', ':0']);
+  for (const k of ['http_proxy', 'global_http_proxy_host', 'global_http_proxy_port',
+    'global_http_proxy_exclusion_list', 'global_proxy_pac_url']) {
+    await adb([...S, 'shell', 'settings', 'delete', 'global', k]).catch(() => {});
+  }
+  await adb([...S, 'shell', 'am', 'broadcast', '-a', 'android.intent.action.PROXY_CHANGE']).catch(() => {});
+}
+
+// เปิด/ปิดแชร์เน็ตของเครื่องหนึ่ง — ไม่แตะสถานะ capture เลย
+async function setNetShare(serial, on) {
+  const S = ['-s', serial];
+  const cur = await currentProxy(serial);
+  if (on) {
+    await ensureShareProxy();
+    await adb([...S, 'reverse', `tcp:${SHARE_PORT}`, `tcp:${SHARE_PORT}`]);
+    netShareMap[serial] = true;
+    saveNetShare();
+    // เชื่อม capture อยู่ = มีเน็ตผ่าน mitmproxy อยู่แล้ว ไม่ต้องเปลี่ยน proxy (เปลี่ยนไปจะทำให้ capture ขาด)
+    if (!cur.capture) await setDeviceProxy(serial, `127.0.0.1:${SHARE_PORT}`);
+    return { via: cur.capture ? 'mitm' : 'plain' };
+  }
+  delete netShareMap[serial];
+  saveNetShare();
+  // ล้างเฉพาะตอนที่มือถือใช้ "ทางแชร์เน็ต" อยู่ — ถ้าเป็น proxy ของ capture ห้ามแตะ
+  if (cur.share) await clearDeviceProxy(serial);
+  await adb([...S, 'reverse', '--remove', `tcp:${SHARE_PORT}`]).catch(() => { /* ไม่มีอยู่แล้วก็ได้ */ });
+  maybeStopShareProxy();
+  return { via: null };
+}
+
+// เครื่องที่เปิดแชร์เน็ตค้างไว้ก่อน server restart → ตั้งท่อกลับให้เอง (เหมือน auto-reconnect)
+async function restoreNetShare() {
+  const serials = Object.keys(netShareMap);
+  if (!serials.length) return;
+  let live = [];
+  try { live = (await adb(['devices'])).split('\n').slice(1).map((l) => l.split(/\s+/)[0]).filter(Boolean); } catch { return; }
+  for (const serial of serials) {
+    if (!live.includes(serial)) continue; // ถอดสายอยู่ — รอเสียบกลับค่อยกดใหม่
+    try {
+      await ensureShareProxy();
+      await adb(['-s', serial, 'reverse', `tcp:${SHARE_PORT}`, `tcp:${SHARE_PORT}`]);
+      const cur = await currentProxy(serial);
+      if (!cur.capture && !cur.share) await setDeviceProxy(serial, `127.0.0.1:${SHARE_PORT}`);
+      console.log(`[net-share] คืนท่อแชร์เน็ตให้ ${serial}`);
+    } catch (e) { console.error(`[net-share] คืนท่อให้ ${serial} ไม่สำเร็จ: ${e.message}`); }
+  }
+}
+
 // อ่านรายการ device + สถานะ proxy (global http_proxy ตั้งอยู่ไหม)
 async function listDevices() {
   let out = '';
@@ -1010,7 +1118,10 @@ async function listDevices() {
     const model = (m[2].match(/model:(\S+)/) || [])[1] || serial;
     let proxy = '';
     try { proxy = (await adb(['-s', serial, 'shell', 'settings', 'get', 'global', 'http_proxy'])).trim(); } catch { /* ignore */ }
-    const connected = !!proxy && proxy !== ':0' && proxy !== 'null';
+    // proxy ที่ชี้ไปพอร์ตแชร์เน็ต = ได้เน็ตจาก Mac แต่ไม่ได้บันทึก traffic → ไม่ถือว่า "เชื่อม" capture
+    const proxySet = !!proxy && proxy !== ':0' && proxy !== 'null';
+    const viaShare = proxySet && proxy === `127.0.0.1:${SHARE_PORT}`;
+    const connected = proxySet && !viaShare;
     let mode = null;
     if (connected) mode = proxy.startsWith('127.0.0.1') ? 'usb' : 'wifi';
     // แอป Proxy Postern (VPN) กำลังทำงานไหม — จับเฉพาะ record ที่ยัง active
@@ -1023,7 +1134,12 @@ async function listDevices() {
     // adb-over-wifi serial จะเป็น ip:port → เลือกเงื่อนไข Wi-Fi ให้อัตโนมัติ
     const transport = /^\d+\.\d+\.\d+\.\d+:\d+$/.test(serial) ? 'wifi' : 'usb';
     const emulator = /^emulator-/.test(serial); // emulator → รองรับติดตั้ง CA เข้า system store อัตโนมัติ
-    devices.push({ serial, model: model.replace(/_/g, ' '), connected, proxy: connected ? proxy : null, mode, posternRunning, transport, emulator });
+    devices.push({
+      serial, model: model.replace(/_/g, ' '), connected, proxy: proxySet ? proxy : null, mode,
+      posternRunning, transport, emulator,
+      netShare: !!netShareMap[serial],                        // ผู้ใช้เปิดแชร์เน็ตไว้ให้เครื่องนี้ไหม
+      shareVia: netShareMap[serial] ? (connected ? 'mitm' : (viaShare ? 'plain' : null)) : null,
+    });
   }
   return devices;
 }
@@ -1130,17 +1246,18 @@ app.post('/api/devices/disconnect', express.json(), async (req, res) => {
         '--ez', 'apitester_disconnect', 'true']);
     } else {
       // ตัด proxy จริงบนเครื่อง — เคลียร์ทุก key (global + split host/port + pac/exclusion) ให้เกลี้ยง
-      // (ทั้ง USB และ Wi-Fi ใช้ global http_proxy เหมือนกัน; delete http_proxy ปกติล้าง split key ให้ด้วย
-      //  แต่ลบตรงๆ ทุกตัวกันเหนียว เผื่อบางรุ่นค้าง)
-      await adb([...S, 'shell', 'settings', 'put', 'global', 'http_proxy', ':0']);
-      for (const k of ['http_proxy', 'global_http_proxy_host', 'global_http_proxy_port',
-        'global_http_proxy_exclusion_list', 'global_proxy_pac_url']) {
-        await adb([...S, 'shell', 'settings', 'delete', 'global', k]).catch(() => {});
-      }
-      // แจ้งแอปให้รับรู้ทันที ไม่ต้องรอ network reconfigure (Wi-Fi ที่ยัง cache proxy อยู่)
-      await adb([...S, 'shell', 'am', 'broadcast', '-a', 'android.intent.action.PROXY_CHANGE']).catch(() => {});
+      await clearDeviceProxy(serial);
       // ตัด reverse tunnel (USB/emulator) — path ไปหา mitmproxy ขาดทันที
       await adb([...S, 'reverse', '--remove', `tcp:${MITM_PORT}`]).catch(() => {});
+      // เปิด "แชร์เน็ต" ไว้ → ตัด capture ต้องไม่ทำให้มือถือเน็ตดับ: สลับไปใช้พร็อกซีส่งต่อแทน
+      // (นี่คือเหตุผลที่แยกสองพอร์ต — ปุ่มคนละปุ่ม สถานะคนละอัน)
+      if (netShareMap[serial]) {
+        try {
+          await ensureShareProxy();
+          await adb([...S, 'reverse', `tcp:${SHARE_PORT}`, `tcp:${SHARE_PORT}`]);
+          await setDeviceProxy(serial, `127.0.0.1:${SHARE_PORT}`);
+        } catch (e) { console.error('[net-share] สลับไปพร็อกซีแชร์เน็ตหลังตัด capture ไม่สำเร็จ:', e.message); }
+      }
     }
     // ตัดเอง = ตั้งใจปลด → ปิด auto-reconnect ของเครื่องนี้ด้วย
     // ไม่งั้น watcher ฝั่ง server จะเห็นว่า "หลุด" แล้วเชื่อมกลับให้ทันที กลายเป็นปลดไม่ได้
@@ -1177,6 +1294,18 @@ function setAutoReconnect(serial, on, mode) {
     fs.writeFileSync(AUTO_RECONNECT_FILE, JSON.stringify(autoReconnectMap, null, 2));
   } catch (e) { console.error('บันทึก auto-reconnect prefs ไม่สำเร็จ:', e.message); }
 }
+
+// เปิด/ปิดแชร์เน็ตจาก Mac ให้เครื่องนี้ — แยกขาดจาก /connect /disconnect (ซึ่งเป็นเรื่องบันทึก traffic)
+app.post('/api/devices/share-net', express.json(), async (req, res) => {
+  const { serial, on } = req.body || {};
+  if (!serial) return res.status(400).json({ ok: false, error: 'ต้องระบุ serial' });
+  try {
+    const r = await setNetShare(serial, !!on);
+    res.json({ ok: true, netShare: !!netShareMap[serial], via: r.via, port: SHARE_PORT });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
 
 app.get('/api/devices/auto-reconnect', (req, res) => res.json({ ok: true, map: autoReconnectMap }));
 app.post('/api/devices/auto-reconnect', express.json(), (req, res) => {
@@ -2252,6 +2381,8 @@ app.post('/api/send-form', upload.any(), async (req, res) => {
 const httpServer = app.listen(PORT, '0.0.0.0', () => {
   console.log(`API Tester รันอยู่ที่ http://localhost:${PORT}`);
   console.log(`Hook endpoint: http://localhost:${PORT}/hook (รับทุก method ทุก path ย่อย)`);
+  // เครื่องที่เปิดแชร์เน็ตค้างไว้ก่อน restart → คืนท่อให้เอง (มือถือจะได้ไม่เน็ตดับเพราะเรารีสตาร์ท)
+  restoreNetShare().catch((e) => console.error('[net-share] restore ไม่สำเร็จ:', e.message));
 });
 
 // scrcpy web mirror — ผูก WS /api/mirror เข้ากับ http server ตัวเดียวกัน
