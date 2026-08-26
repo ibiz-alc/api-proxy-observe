@@ -5,8 +5,9 @@ set -e
 cd /app
 
 echo "==> mitmproxy (พอร์ต 8888)"
-PYTHONUNBUFFERED=1 "$MITMDUMP" --listen-host 0.0.0.0 --listen-port 8888 \
-  -s /app/mitm-to-apitester.py > /tmp/mitmdump.log 2>&1 &
+# start_mitmdump() + host ที่ปล่อยผ่านไม่ดัก TLS (ดักแล้ว GMS/FCM พัง — ดูคอมเมนต์ใน mitm-bypass.sh)
+. /app/mitm-bypass.sh
+start_mitmdump /app/mitm-to-apitester.py
 
 echo "==> MCP server (พอร์ต ${MCP_PORT})"
 MCP_PORT="$MCP_PORT" node /app/mcp/index.js > /tmp/apitester-mcp.log 2>&1 &

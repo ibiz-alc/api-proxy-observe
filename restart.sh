@@ -13,6 +13,8 @@
 set -u
 cd "$(dirname "$0")" || exit 1
 ADDON="$(pwd)/mitm-to-apitester.py"
+# start_mitmdump() + รายชื่อ host ที่ปล่อยผ่านไม่ดัก TLS (GMS/FCM จะพังถ้าดัก — ดูคอมเมนต์ในไฟล์)
+. "$(pwd)/mitm-bypass.sh"
 
 WHAT=all
 KEEP_DEVICES=no
@@ -86,8 +88,7 @@ if [ "$WHAT" = all ] || [ "$WHAT" = mitm ]; then
     MITMDUMP="$(command -v mitmdump)"
   fi
   echo "   ▶ mitmproxy :8888 + addon (log: /tmp/mitmdump.log)"
-  PYTHONUNBUFFERED=1 "${MITMDUMP:-mitmdump}" --listen-host 0.0.0.0 --listen-port 8888 -s "$ADDON" \
-    > /tmp/mitmdump.log 2>&1 &
+  start_mitmdump "$ADDON"
 fi
 
 # ---- เช็คว่าขึ้นจริง ----
