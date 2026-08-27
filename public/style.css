@@ -833,7 +833,13 @@ body.col-dragging iframe { pointer-events: none; }
 .detail-pane-title { font-weight: 600; color: var(--accent); font-size: 0.85rem; }
 .detail-url { color: var(--text); font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .detail-meta { color: var(--muted); font-size: 0.8rem; }
-.detail-subtabs { display: flex; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+.detail-subtabs {
+  display: flex; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--border);
+  flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; /* ช่องแคบ → เลื่อนแนวนอนเห็นปุ่มหลัง (Copy ฯลฯ) */
+}
+.detail-subtabs::-webkit-scrollbar { height: 6px; }
+.detail-subtabs::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.detail-subtabs > button { flex-shrink: 0; }      /* ปุ่มทั้งหมด (subtab + Copy) ไม่ถูกบีบจนหาย */
 .subtab-btn {
   background: transparent;
   border: 1px solid var(--border);
@@ -841,6 +847,7 @@ body.col-dragging iframe { pointer-events: none; }
   padding: 3px 12px;
   border-radius: 6px;
   font-size: 0.8rem;
+  white-space: nowrap;
 }
 .subtab-btn.active { background: var(--accent); color: #0f172a; border-color: var(--accent); font-weight: 600; }
 /* live JSON path: ชิดขวาของแถบ subtabs, โชว์ path ของบรรทัดที่ hover อยู่ */
