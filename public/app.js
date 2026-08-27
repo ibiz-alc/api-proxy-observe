@@ -712,6 +712,9 @@ const flowDetailEl = document.getElementById('flow-detail');
 const deviceTreeBody = document.getElementById('device-tree-body');
 let allFlows = [];
 let selectedFlowId = null;
+// multi-select สำหรับ bulk Map Local (checkbox + Shift/Cmd-click) — คนละตัวกับ selectedFlowId (คลิกดู detail)
+let selectedFlowIds = new Set();
+let lastClickedFlowId = null; // แองเคอร์สำหรับเลือกช่วงด้วย Shift
 
 // filter state
 let flowFilter = '';
@@ -901,8 +904,12 @@ function makeDetailResizer() {
   );
 }
 document.getElementById('clear-flows').addEventListener('click', async () => {
+  selectedFlowIds.clear(); lastClickedFlowId = null; // flow หายแล้ว การเลือกก็ควรหายด้วย
   await fetch('/api/proxy/flows', { method: 'DELETE' });
 });
+// ปุ่มบนแถบเลือกหลายรายการ
+document.getElementById('flow-select-map').addEventListener('click', bulkMapLocalFromSelection);
+document.getElementById('flow-select-clear').addEventListener('click', clearFlowSelection);
 // cmd/ctrl+backspace ตอนอยู่ tab proxy → เคลียร์ traffic (เว้นตอนโฟกัสช่องพิมพ์ ไม่ขวางการลบข้อความ)
 window.addEventListener('keydown', (e) => {
   if (!((e.metaKey || e.ctrlKey) && (e.key === 'Backspace' || e.key === 'Delete'))) return;
@@ -1037,6 +1044,7 @@ function renderDeviceTree() {
 
 // ---- รายการ URL (ซ้ายบน) ----
 function renderFlowTable() {
+  updateFlowSelectBar();
   const flows = filteredFlows();
   document.getElementById('flow-count-label').textContent =
     `${flows.length} / ${allFlows.length}`;
@@ -1050,7 +1058,11 @@ function renderFlowTable() {
   }
   for (const f of flows) {
     const statusText = f.error ? 'ERR' : (f.status || '...');
-    const row = [methodBadge(f.method)];
+    const chk = el('input', { type: 'checkbox', class: 'flow-check', title: 'เลือกเพื่อ Map Local หลายอัน' });
+    chk.checked = selectedFlowIds.has(f.id);
+    chk.addEventListener('click', (e) => e.stopPropagation());
+    chk.addEventListener('change', () => { setFlowSelected(f.id, chk.checked); lastClickedFlowId = f.id; renderFlowTable(); });
+    const row = [chk, methodBadge(f.method)];
     if (f.blocked) {
       row.push(el('span', { class: 'blocked-badge', title: f.error || '', text: '🔒 BLOCKED' }));
       if (f.blockedCount > 1) row.push(el('span', { class: 'blocked-count', text: `×${f.blockedCount}` }));
@@ -1078,13 +1090,27 @@ function renderFlowTable() {
       el('span', { text: f.host + f.path }),
     ]));
     row.push(el('span', { class: 'flow-item-meta', text: f.blocked ? 'cert pinning' : `${fmtTime(f.time)} · ${f.durationMs != null ? f.durationMs + 'ms' : '–'} · ${fmtSize(f.resSize)}` }));
-    const item = el('div', { class: 'flow-item' + (f.id === selectedFlowId ? ' selected' : '') + (f.mapped ? ' mapped' : '') + (f.blocked ? ' blocked' : '') }, [
+    const item = el('div', { class: 'flow-item' + (f.id === selectedFlowId ? ' selected' : '') + (selectedFlowIds.has(f.id) ? ' multi-selected' : '') + (f.mapped ? ' mapped' : '') + (f.blocked ? ' blocked' : '') }, [
       el('div', { class: 'flow-item-row' }, row),
     ]);
     // tag สี: flow ที่อยู่ใน base URL ที่ถูก pin → ติดแถบสีตามที่เลือกไว้กับ pin นั้น
     if (pinnedBaseUrls.includes(flowBaseUrl(f))) { item.classList.add('flow-pinned'); item.style.borderLeftColor = pinColorHex(flowBaseUrl(f)); }
-    item.addEventListener('click', () => {
-      selectedFlowId = f.id;
+    item.addEventListener('click', (ev) => {
+      if (ev.target && ev.target.classList && ev.target.classList.contains('flow-check')) return;
+      if (ev.shiftKey) {            // เลือกช่วงจากแองเคอร์ล่าสุด
+        selectFlowRange(f.id);
+        lastClickedFlowId = f.id;
+        renderFlowTable();
+        return;
+      }
+      if (ev.metaKey || ev.ctrlKey) { // ติ๊ก/ปลดทีละอัน
+        setFlowSelected(f.id, !selectedFlowIds.has(f.id));
+        lastClickedFlowId = f.id;
+        renderFlowTable();
+        return;
+      }
+      selectedFlowId = f.id;         // คลิกปกติ = ดู detail (เหมือนเดิม)
+      lastClickedFlowId = f.id;
       renderFlowTable();
       renderFlowDetail(f);
     });
@@ -1100,6 +1126,59 @@ function renderProxy() {
   renderDeviceTree();
   renderFlowTable();
   renderTcProxyPopup();
+}
+
+// ---- Multi-select flow → bulk Map Local ----
+function setFlowSelected(id, on) { if (on) selectedFlowIds.add(id); else selectedFlowIds.delete(id); }
+function selectFlowRange(toId) {
+  const flows = filteredFlows();
+  const anchor = lastClickedFlowId != null ? flows.findIndex((x) => x.id === lastClickedFlowId) : -1;
+  const to = flows.findIndex((x) => x.id === toId);
+  if (to < 0) return;
+  if (anchor < 0) { selectedFlowIds.add(toId); return; }
+  const [lo, hi] = anchor <= to ? [anchor, to] : [to, anchor];
+  for (let i = lo; i <= hi; i++) selectedFlowIds.add(flows[i].id);
+}
+function clearFlowSelection() { selectedFlowIds.clear(); lastClickedFlowId = null; renderFlowTable(); }
+function updateFlowSelectBar() {
+  const bar = document.getElementById('flow-select-bar');
+  if (!bar) return;
+  const n = selectedFlowIds.size;
+  bar.style.display = n ? 'flex' : 'none';
+  const cnt = document.getElementById('flow-select-count');
+  if (cnt) cnt.textContent = `เลือก ${n} รายการ`;
+  const mapBtn = document.getElementById('flow-select-map');
+  if (mapBtn) mapBtn.textContent = `🎯 Map Local (${n})`;
+}
+async function bulkMapLocalFromSelection() {
+  const chosen = allFlows.filter((f) => selectedFlowIds.has(f.id));
+  if (!chosen.length) return;
+  const seen = new Set();
+  const rules = [];
+  let dup = 0;
+  for (const f of chosen) {
+    if (seen.has(f.url)) { dup++; continue; } // dedupe ด้วยเต็ม URL (รวม query)
+    seen.add(f.url);
+    rules.push({
+      enabled: true,
+      name: `${f.method} ${f.host}${f.path.split('?')[0]}`.slice(0, 80),
+      method: f.method,
+      urlPattern: f.path.split('?')[0] || f.url,
+      status: f.status || 200,
+      contentType: f.resContentType || 'application/json',
+      body: f.error ? '' : (prettyBody(f.resBody) || ''),
+      scenario: '', // สร้างแบบ ungrouped ก่อน ค่อยจัดกลุ่มทีหลัง
+    });
+  }
+  let created = 0;
+  try {
+    const res = await (await fetch('/api/maplocal/bulk', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rules }),
+    })).json();
+    created = res.count != null ? res.count : rules.length;
+  } catch (e) { showToast('สร้าง Map Local ไม่สำเร็จ: ' + e.message); return; }
+  clearFlowSelection();
+  showToast(`สร้าง Map Local ${created} · ข้ามซ้ำ ${dup}`);
 }
 
 // ===== Panel ในหน้า Proxy: เอา list/tree ของ Test Case มาไว้ (dock ซ้าย/ขวา, ย่อ/ขยาย, ปรับกว้าง) =====
@@ -1534,14 +1613,15 @@ function buildRawReqRes(f) {
 
 // toast แจ้งผลคัดลอก (เมนู hover หายไปเลยใช้ toast แทนการเปลี่ยนข้อความปุ่ม)
 let copyToastTimer = null;
-function copyToast(label) {
+function showToast(msg, ms = 1800) {
   let t = document.getElementById('copy-toast');
   if (!t) { t = el('div', { class: 'copy-toast', id: 'copy-toast' }); document.body.appendChild(t); }
-  t.textContent = `✅ คัดลอกแล้ว: ${label}`;
+  t.textContent = msg;
   t.classList.add('show');
   clearTimeout(copyToastTimer);
-  copyToastTimer = setTimeout(() => t.classList.remove('show'), 1500);
+  copyToastTimer = setTimeout(() => t.classList.remove('show'), ms);
 }
+function copyToast(label) { showToast(`✅ คัดลอกแล้ว: ${label}`, 1500); }
 function copyAs(label, text) { navigator.clipboard.writeText(text || ''); copyToast(label); }
 
 // สร้างเมนูย่อย "📋 Copy as ▸" (flyout) — ใช้ร่วมกันทั้งเมนู ⋯ และคลิกขวาบน URL
@@ -2290,8 +2370,11 @@ let selectedRuleId = null;
 let mapSaveHandler = null; // ฟังก์ชัน save ของ editor ที่เปิดอยู่ (ให้ Cmd+S เรียกได้)
 let tcSaveHandler = null;  // เช่นเดียวกัน สำหรับแท็บ Test Case
 
+let mapGroupsData = []; // [{name, order, collapsed, total, enabled, active}]
+
 async function loadMapRules() {
   mapRulesData = await (await fetch('/api/maplocal')).json();
+  try { mapGroupsData = (await (await fetch('/api/maplocal/groups')).json()).groups || []; } catch { mapGroupsData = []; }
   // auto-focus: ยังไม่ได้เลือกอะไร → เปิดกฎที่ enabled ตัวแรกให้เลย (ไม่ต้องกดหลาย step)
   if (!selectedRuleId && mapRulesData.length) {
     const r = mapRulesData.find((x) => x.enabled !== false) || mapRulesData[0];
@@ -2300,35 +2383,151 @@ async function loadMapRules() {
   renderMapList();
 }
 
+// re-render editor ของ rule ที่เลือกอยู่ด้วยข้อมูลล่าสุด (กัน editor ค้างค่ากลุ่มเก่าหลัง group ops)
+function syncMapEditorToSelection() {
+  if (!selectedRuleId) return;
+  const fresh = mapRulesData.find((x) => x.id === selectedRuleId);
+  if (fresh) renderMapEditor(fresh);
+}
+
+// สร้าง DOM ของ rule 1 อัน (ใช้ทั้งในกลุ่มและนอกกลุ่ม) — ลากได้ (drag-drop ย้ายกลุ่ม)
+function mapRuleItem(r) {
+  const on = r.enabled !== false;
+  const tog = el('button', { class: 'map-item-toggle ' + (on ? 'on' : 'off'), type: 'button', text: on ? 'Enabled' : 'Disabled', title: 'คลิกเพื่อสลับเปิด/ปิดกฎนี้' });
+  tog.addEventListener('click', async (e) => {
+    e.stopPropagation(); // อย่าเปิด editor
+    await fetch(`/api/maplocal/${r.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !on }) });
+    await loadMapRules();
+    if (r.id === selectedRuleId) { const fresh = mapRulesData.find((x) => x.id === r.id); if (fresh) renderMapEditor(fresh); }
+  });
+  const item = el('div', { class: 'map-item' + (r.id === selectedRuleId ? ' selected' : ''), draggable: 'true' }, [
+    el('span', { class: 'map-dot ' + (on ? 'on' : 'off'), text: on ? '●' : '○' }),
+    el('div', { class: 'map-item-body' }, [
+      el('div', { class: 'map-item-name' }, [
+        el('span', { class: 'ml-mode-icon', title: r.mode === 'passthrough' ? 'โหมด Passthrough (แก้ response จริง)' : 'โหมด Mock (ตอบ body ที่ตั้ง)', text: (r.mode === 'passthrough' ? '🔀 ' : '📦 ') }),
+        el('span', { text: r.name || r.urlPattern || '(ยังไม่ตั้งชื่อ)' }),
+      ]),
+      el('div', { class: 'map-item-sub', text: `${r.method || 'ANY'} · ${r.urlPattern || '—'} · ${r.status || 200}` }),
+    ]),
+    tog,
+  ]);
+  item.addEventListener('click', () => { selectedRuleId = r.id; renderMapList(); renderMapEditor(r); });
+  item.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', r.id); e.dataTransfer.effectAllowed = 'move'; item.classList.add('dragging'); });
+  item.addEventListener('dragend', () => item.classList.remove('dragging'));
+  return item;
+}
+
+// ทำ zone (header/body ของกลุ่ม) ให้รับ drop → ย้าย rule เข้ากลุ่มนั้น (scenario='' = เอาออกจากกลุ่ม)
+function wireGroupDrop(zone, scenarioName) {
+  zone.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; zone.classList.add('drop-target'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drop-target'));
+  zone.addEventListener('drop', async (e) => {
+    e.preventDefault(); zone.classList.remove('drop-target');
+    const id = e.dataTransfer.getData('text/plain');
+    const r = id && mapRulesData.find((x) => x.id === id);
+    if (!r || (r.scenario || '') === scenarioName) return; // อยู่กลุ่มเดิมแล้ว
+    await fetch(`/api/maplocal/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scenario: scenarioName }) });
+    await loadMapRules();
+    if (id === selectedRuleId) { const fresh = mapRulesData.find((x) => x.id === id); if (fresh) renderMapEditor(fresh); }
+  });
+}
+
+// แก้ชื่อกลุ่ม inline
+function startGroupRename(g, nameEl) {
+  const input = el('input', { class: 'map-group-rename-input', type: 'text', value: g.name });
+  nameEl.replaceWith(input);
+  input.focus(); input.select();
+  let done = false;
+  const commit = async () => {
+    if (done) return; done = true;
+    const nn = input.value.trim();
+    if (nn && nn !== g.name) {
+      await fetch(`/api/maplocal/groups/${encodeURIComponent(g.name)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ newName: nn }) });
+    }
+    await loadMapRules();
+    syncMapEditorToSelection(); // editor dropdown ตามชื่อกลุ่มใหม่
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    else if (e.key === 'Escape') { done = true; loadMapRules(); }
+  });
+  input.addEventListener('blur', commit);
+}
+
+function renderMapGroup(g) {
+  const wrap = el('div', { class: 'map-group' });
+  const rules = mapRulesData.filter((r) => r.scenario === g.name);
+  const state = g.total === 0 ? 'empty' : (g.active ? 'on' : (g.enabled === 0 ? 'off' : 'partial'));
+  const caret = el('span', { class: 'map-group-caret', text: g.collapsed ? '▸' : '▾' });
+  const dot = el('span', { class: 'map-group-dot ' + state, text: state === 'on' ? '●' : (state === 'partial' ? '◐' : '○') });
+  const nameEl = el('span', { class: 'map-group-name', text: g.name, title: 'ดับเบิลคลิกเพื่อเปลี่ยนชื่อ' });
+  const count = el('span', { class: 'map-group-count', text: `${g.enabled}/${g.total}` });
+  const tog = el('button', { class: 'map-group-toggle ' + (g.active ? 'on' : 'off'), type: 'button', text: g.active ? 'ปิดกลุ่ม' : 'เปิดกลุ่ม', title: 'เปิด/ปิดทั้งกลุ่ม (เฉพาะกลุ่มนี้)' });
+  const renameBtn = el('button', { class: 'map-group-rename', type: 'button', text: '✏️', title: 'เปลี่ยนชื่อกลุ่ม' });
+  const delBtn = el('button', { class: 'map-group-del', type: 'button', text: '🗑', title: 'ลบกลุ่ม (rule กลับไปไม่ได้จัดกลุ่ม ไม่ถูกลบ)' });
+  const head = el('div', { class: 'map-group-head', 'data-group': g.name }, [caret, dot, nameEl, count, tog, renameBtn, delBtn]);
+  const toggleCollapse = async () => {
+    await fetch(`/api/maplocal/groups/${encodeURIComponent(g.name)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ collapsed: !g.collapsed }) });
+    await loadMapRules();
+  };
+  caret.addEventListener('click', (e) => { e.stopPropagation(); toggleCollapse(); });
+  head.addEventListener('click', (e) => { if ([nameEl, tog, renameBtn, delBtn, caret].includes(e.target)) return; toggleCollapse(); });
+  tog.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const act = g.active ? 'deactivate' : 'activate';
+    await fetch(`/api/maplocal/scenarios/${encodeURIComponent(g.name)}/${act}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ exclusive: false }) });
+    await loadMapRules();
+    if (selectedRuleId) { const fresh = mapRulesData.find((x) => x.id === selectedRuleId); if (fresh) renderMapEditor(fresh); }
+  });
+  renameBtn.addEventListener('click', (e) => { e.stopPropagation(); startGroupRename(g, nameEl); });
+  nameEl.addEventListener('dblclick', (e) => { e.stopPropagation(); startGroupRename(g, nameEl); });
+  delBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (!confirm(`ลบกลุ่ม "${g.name}"? rule ${g.total} อันจะกลับไปเป็นไม่ได้จัดกลุ่ม (ไม่ถูกลบ)`)) return;
+    await fetch(`/api/maplocal/groups/${encodeURIComponent(g.name)}`, { method: 'DELETE' });
+    await loadMapRules();
+    syncMapEditorToSelection(); // editor ของ rule ในกลุ่มที่ลบ → dropdown กลับเป็น (ไม่มีกลุ่ม)
+  });
+  wrap.appendChild(head);
+  const body = el('div', { class: 'map-group-body' + (g.collapsed ? ' collapsed' : '') });
+  if (!rules.length) body.appendChild(el('p', { class: 'map-group-empty', text: 'ลากกฎมาวางที่นี่' }));
+  for (const r of rules) body.appendChild(mapRuleItem(r));
+  wireGroupDrop(head, g.name);
+  wireGroupDrop(body, g.name);
+  wrap.appendChild(body);
+  return wrap;
+}
+
+function renderUngrouped(rules) {
+  const wrap = el('div', { class: 'map-group map-group-ungrouped' });
+  const head = el('div', { class: 'map-group-head' }, [
+    el('span', { class: 'map-group-name muted', text: 'ไม่ได้จัดกลุ่ม' }),
+    el('span', { class: 'map-group-count', text: String(rules.length) }),
+  ]);
+  wrap.appendChild(head);
+  const body = el('div', { class: 'map-group-body' });
+  if (!rules.length) body.appendChild(el('p', { class: 'map-group-empty', text: 'ลากกฎมาที่นี่เพื่อเอาออกจากกลุ่ม' }));
+  for (const r of rules) body.appendChild(mapRuleItem(r));
+  wireGroupDrop(head, '');
+  wireGroupDrop(body, '');
+  wrap.appendChild(body);
+  return wrap;
+}
+
 function renderMapList() {
   mapListEl.innerHTML = '';
-  if (!mapRulesData.length) {
+  if (!mapRulesData.length && !mapGroupsData.length) {
     mapListEl.appendChild(el('p', { class: 'empty-msg', html: 'ยังไม่มีกฎ<br/>กด "เพิ่มกฎ" เพื่อสร้าง' }));
     return;
   }
-  for (const r of mapRulesData) {
-    const on = r.enabled !== false;
-    const tog = el('button', { class: 'map-item-toggle ' + (on ? 'on' : 'off'), type: 'button', text: on ? 'Enabled' : 'Disabled', title: 'คลิกเพื่อสลับเปิด/ปิดกฎนี้' });
-    tog.addEventListener('click', async (e) => {
-      e.stopPropagation(); // อย่าเปิด editor
-      await fetch(`/api/maplocal/${r.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !on }) });
-      await loadMapRules();
-      if (r.id === selectedRuleId) { const fresh = mapRulesData.find((x) => x.id === r.id); if (fresh) renderMapEditor(fresh); }
-    });
-    const item = el('div', { class: 'map-item' + (r.id === selectedRuleId ? ' selected' : '') }, [
-      el('span', { class: 'map-dot ' + (on ? 'on' : 'off'), text: on ? '●' : '○' }),
-      el('div', { class: 'map-item-body' }, [
-        el('div', { class: 'map-item-name' }, [
-          el('span', { class: 'ml-mode-icon', title: r.mode === 'passthrough' ? 'โหมด Passthrough (แก้ response จริง)' : 'โหมด Mock (ตอบ body ที่ตั้ง)', text: (r.mode === 'passthrough' ? '🔀 ' : '📦 ') }),
-          el('span', { text: r.name || r.urlPattern || '(ยังไม่ตั้งชื่อ)' }),
-        ]),
-        el('div', { class: 'map-item-sub', text: `${r.method || 'ANY'} · ${r.urlPattern || '—'} · ${r.status || 200}` }),
-      ]),
-      tog,
-    ]);
-    item.addEventListener('click', () => { selectedRuleId = r.id; renderMapList(); renderMapEditor(r); });
-    mapListEl.appendChild(item);
+  const ungrouped = mapRulesData.filter((r) => !r.scenario);
+  if (!mapGroupsData.length) {
+    // ยังไม่มีกลุ่มเลย → แสดงแบบเรียบเหมือนเดิม (ยังลากได้ แต่ยังไม่มีที่ให้ลากไป)
+    for (const r of mapRulesData) mapListEl.appendChild(mapRuleItem(r));
+    return;
   }
+  for (const g of mapGroupsData) mapListEl.appendChild(renderMapGroup(g));
+  mapListEl.appendChild(renderUngrouped(ungrouped)); // โชว์เสมอเมื่อมีกลุ่ม (เป็นที่ลากออก)
 }
 
 // widget ตาราง override: แต่ละแถว = [เปิด/ปิด] path → ค่าใหม่ [ลบ] ; คืน { el, collect() }
@@ -2407,6 +2606,18 @@ function renderMapEditor(rule) {
 
   const name = field(cfg, 'ชื่อกฎ (ไว้จำ)', el('input', { type: 'text', value: rule.name || '', placeholder: 'เช่น mock license-types' }));
 
+  // เลือกกลุ่ม (scenario) — รวมกลุ่มที่มี + กลุ่มของ rule นี้เอง
+  const group = el('select');
+  group.appendChild(el('option', { value: '', text: '(ไม่มีกลุ่ม)' }));
+  const gnames = new Set((mapGroupsData || []).map((g) => g.name));
+  if (rule.scenario) gnames.add(rule.scenario);
+  for (const n of [...gnames].sort((a, b) => a.localeCompare(b))) {
+    const opt = el('option', { value: n, text: n });
+    if ((rule.scenario || '') === n) opt.selected = true;
+    group.appendChild(opt);
+  }
+  field(cfg, 'กลุ่ม', group);
+
   const method = el('select');
   for (const m of ['ANY', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE']) {
     const opt = el('option', { value: m, text: m });
@@ -2476,6 +2687,7 @@ function renderMapEditor(rule) {
     contentType: contentType.value.trim(),
     body: bodyEd.textarea.value,
     mode: getMode(),
+    scenario: group.value,
     overrides: overrideEd.collect(),
   });
 
@@ -2547,6 +2759,13 @@ document.getElementById('maplocal-add').addEventListener('click', () => {
   selectedRuleId = null;
   renderMapList();
   renderMapEditor({ enabled: true, method: 'ANY', status: 200, contentType: 'application/json', body: '' });
+});
+
+document.getElementById('maplocal-add-group').addEventListener('click', async () => {
+  const name = (prompt('ชื่อกลุ่มใหม่:') || '').trim();
+  if (!name) return;
+  await fetch('/api/maplocal/groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+  await loadMapRules();
 });
 
 // Cmd/Ctrl+S → บันทึกสิ่งที่เปิดอยู่ (Map Local / Test Case)
