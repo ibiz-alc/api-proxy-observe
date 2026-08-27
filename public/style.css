@@ -642,6 +642,19 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
   padding: 1px 5px;
 }
 .flow-item.mapped { border-left: 3px solid var(--green); }
+/* multi-select flow → bulk Map Local */
+.flow-select-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 12px;
+  background: rgba(56, 189, 248, 0.10);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.78rem; color: var(--accent);
+}
+.flow-select-bar .flow-select-actions { margin-left: auto; display: flex; gap: 6px; }
+.flow-select-bar button { padding: 2px 10px; font-size: 0.75rem; text-transform: none; letter-spacing: 0; }
+.flow-item-row .flow-check { width: 15px; height: 15px; cursor: pointer; accent-color: var(--accent); margin: 0; }
+.flow-item.multi-selected { background: rgba(56, 189, 248, 0.14); }
+.flow-item.multi-selected.selected { background: #1e3a5f; }
 /* tag บอกว่าใช้ Test Case ไหน/step ไหน — คลิกไปที่ step ได้ */
 .tc-badge {
   background: rgba(250, 204, 21, 0.15); color: var(--yellow); border: 1px solid var(--yellow);
@@ -935,6 +948,39 @@ body.col-dragging iframe { pointer-events: none; }
 .map-item-toggle.off { color: var(--muted); }
 .map-item-toggle.on:hover { background: rgba(74, 222, 128, 0.16); }
 .map-item-toggle.off:hover { background: var(--accent); color: #0f172a; }
+/* ===== Map Local groups (scenario) ===== */
+.map-group { border-bottom: 1px solid var(--border); }
+.map-group-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; cursor: pointer;
+  background: var(--panel-2);
+  font-size: 0.82rem; font-weight: 600; user-select: none;
+}
+.map-group-head:hover { background: rgba(56, 189, 248, 0.08); }
+.map-group-caret { width: 12px; color: var(--muted); font-size: 0.7rem; }
+.map-group-dot { font-size: 0.7rem; }
+.map-group-dot.on { color: var(--green); }
+.map-group-dot.partial { color: var(--yellow); }
+.map-group-dot.off, .map-group-dot.empty { color: var(--muted); }
+.map-group-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-group-name.muted { color: var(--muted); font-weight: 500; }
+.map-group-count { color: var(--muted); font-size: 0.72rem; }
+.map-group-toggle {
+  border: 1px solid var(--border); background: transparent; border-radius: 5px;
+  font-size: 0.7rem; font-weight: 700; padding: 2px 8px; cursor: pointer; white-space: nowrap;
+}
+.map-group-toggle.on { color: var(--green); border-color: var(--green); }
+.map-group-toggle.off { color: var(--muted); }
+.map-group-rename, .map-group-del {
+  border: none; background: transparent; cursor: pointer; font-size: 0.8rem; padding: 2px 4px; opacity: 0.6;
+}
+.map-group-rename:hover, .map-group-del:hover { opacity: 1; }
+.map-group-rename-input { flex: 1; font-size: 0.82rem; padding: 2px 6px; }
+.map-group-body.collapsed { display: none; }
+.map-group-body .map-item { border-left: 2px solid var(--border); } /* เยื้องให้เห็นว่าอยู่ในกลุ่ม */
+.map-group-empty { color: var(--muted); font-size: 0.76rem; padding: 10px 12px 10px 24px; font-style: italic; }
+.map-group-head.drop-target, .map-group-body.drop-target { outline: 2px dashed var(--accent); outline-offset: -2px; background: rgba(56, 189, 248, 0.10); }
+.map-item.dragging { opacity: 0.4; }
 /* ===== Test Case left-panel tree (endpoints > steps) ===== */
 .tc-nav { border-bottom: 1px solid var(--border); background: rgba(0, 0, 0, 0.22); padding: 4px 0 8px; }
 .tc-nav-summary { font-size: 0.64rem; color: var(--muted); letter-spacing: 0.06em; padding: 6px 12px 4px; }
