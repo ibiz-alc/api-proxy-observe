@@ -39,6 +39,7 @@ const MAP_GROUPS_FILE = process.env.MAP_GROUPS_FILE || path.join(__dirname, 'dat
 
 // ================= In-memory store =================
 const MAX_REQUESTS = 200;
+const MAX_FLOWS = 1500; // เพดาน flow ที่เก็บใน memory (เก่าสุดถูกดันออกเมื่อเกิน)
 const requests = [];            // captured request entries (newest first)
 const fileBuffers = new Map();  // entryId -> [{ buffer, mimetype, originalname }]
 const sseClients = new Set();
@@ -901,7 +902,7 @@ app.post('/api/proxy/ingest', express.json({ limit: '40mb' }), async (req, res) 
     } catch { /* ignore bad body */ }
   }
   proxyStore.flows.unshift(flow);
-  while (proxyStore.flows.length > 300) {
+  while (proxyStore.flows.length > MAX_FLOWS) {
     const removed = proxyStore.flows.pop();
     proxyImages.delete(`${removed.id}:req`);
     proxyImages.delete(`${removed.id}:res`);
@@ -992,7 +993,7 @@ async function performReplay({ method = 'GET', url, headers = {}, body = null, r
   const finalize = () => {
     if (addToStore) {
       proxyStore.flows.unshift(flow);
-      while (proxyStore.flows.length > 300) {
+      while (proxyStore.flows.length > MAX_FLOWS) {
         const removed = proxyStore.flows.pop();
         proxyImages.delete(`${removed.id}:req`); proxyImages.delete(`${removed.id}:res`);
         proxyRawReqBodies.delete(removed.id);
@@ -1740,7 +1741,9 @@ async function listAllNetworkServices() {
 }
 
 // ตั้ง macOS web + secure web proxy บน service ที่ระบุ (rollback ทั้งหมดถ้าตั้งไม่ครบ กันค้างครึ่งๆ)
+const MAC_PROXY_DRYRUN = !!process.env.MAC_PROXY_DRYRUN; // เทสต์/dev: ไม่แตะ macOS proxy จริง (แค่ update state)
 async function setMacProxy(service) {
+  if (MAC_PROXY_DRYRUN) { console.log('[dryrun] setMacProxy', service, '→ 127.0.0.1:' + MITM_PORT); return; }
   try {
     await execFileP('networksetup', ['-setwebproxy', service, '127.0.0.1', String(MITM_PORT)], { timeout: 8000 });
     await execFileP('networksetup', ['-setsecurewebproxy', service, '127.0.0.1', String(MITM_PORT)], { timeout: 8000 });
@@ -1755,6 +1758,7 @@ async function setMacProxy(service) {
 // ปิด proxy เฉพาะ service ที่ชี้ mitmproxy "ของเรา" (127.0.0.1:MITM_PORT) บนทุก service — best-effort
 // สแกนทุก service (เผื่อถูกตั้งคนละ service กับ primary เช่นสลับ Wi-Fi↔Ethernet) แต่ไม่ไปปิด proxy อื่นที่ผู้ใช้ตั้งเอง
 async function revertAllMacProxy() {
+  if (MAC_PROXY_DRYRUN) { console.log('[dryrun] revertAllMacProxy'); return; }
   const services = await listAllNetworkServices();
   for (const svc of (services.length ? services : ['Wi-Fi'])) {
     try {
@@ -1810,6 +1814,7 @@ function mitmAlive(timeout = 1500) {
 // ปิด "ทุก" service เผื่อถูกตั้งไว้คนละ service กับที่จำไว้
 function revertMacProxySync() {
   if (!iosProxy.active) return;
+  if (MAC_PROXY_DRYRUN) { iosProxy = { active: false, service: null }; return; }
   const cp = require('child_process');
   let services = [];
   try {
@@ -1869,8 +1874,10 @@ app.get('/api/devices/ca/mac-status', (req, res) => {
     trustCmd: `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ${mitmCaPath()}` });
 });
 
-// เชื่อม iOS Simulator: pre-check mitmdump ก่อน (ไม่รัน = ไม่ยอมตั้ง proxy ทิ้งค้าง) แล้วตั้ง macOS proxy
-app.post('/api/devices/ios-sim/connect', express.json(), async (req, res) => {
+// ตั้ง macOS proxy ทั้งเครื่องชี้เข้า mitmproxy → ดักจับ traffic ของทั้ง iOS Simulator และ "แอปบน Mac เอง"
+// (กลไกเดียวกัน: proxy เป็น macOS-wide) · ใช้ทั้ง /ios-sim/connect (เดิม) และ /mac/connect (ดักจับเครื่องนี้)
+// pre-check mitmdump ก่อน (ไม่รัน = ไม่ยอมตั้ง proxy ทิ้งค้าง)
+async function doMacProxyConnect(req, res) {
   if (!(await mitmAlive())) {
     return res.status(409).json({ ok: false, mitmDown: true,
       error: `mitmdump ไม่ได้รันบน :${MITM_PORT} — เปิด mitm ก่อน (ปุ่ม Start/Restart) แล้วค่อยต่อ ` +
@@ -1890,15 +1897,18 @@ app.post('/api/devices/ios-sim/connect', express.json(), async (req, res) => {
     iosProxy = { active: true, service };
     unmute();
     startIosWatchdog();
-    // macCaTrusted=false → UI เตือนว่าแอป Mac อื่นอาจ TLS พังจนกว่าจะ trust CA (แต่ไม่บล็อก การต่อ sim)
+    // macCaTrusted=false → UI เตือนว่าแอป Mac อื่นอาจ TLS พังจนกว่าจะ trust CA (แต่ไม่บล็อกการต่อ)
     res.json({ ok: true, connected: true, service, proxy: `127.0.0.1:${MITM_PORT}`, macCaTrusted: macCaTrusted() });
   } catch (e) {
     res.status(500).json({ ok: false, error: 'ตั้ง macOS proxy ไม่สำเร็จ: ' + e.message });
   }
-});
+}
+app.post('/api/devices/ios-sim/connect', express.json(), doMacProxyConnect);
+app.post('/api/devices/mac/connect', express.json(), doMacProxyConnect); // ดักจับ traffic ของ Mac เอง
 
-// ตัด iOS Simulator: ปิด macOS proxy "ทุก service" (best-effort) + mute/clear flows (เหมือน Android disconnect)
-app.post('/api/devices/ios-sim/disconnect', express.json(), async (req, res) => {
+// ปิด macOS proxy "ทุก service" (best-effort) + mute/clear flows (เหมือน Android disconnect)
+// ใช้ทั้ง /ios-sim/disconnect (เดิม) และ /mac/disconnect (หยุดดักจับเครื่องนี้)
+async function doMacProxyDisconnect(req, res) {
   const service = iosProxy.service;
   stopIosWatchdog();
   await revertAllMacProxy(); // best-effort (กลืน error รายตัว) → disconnect ล้าง state ได้เสมอ ไม่ทิ้ง proxy ค้าง
@@ -1908,7 +1918,9 @@ app.post('/api/devices/ios-sim/disconnect', express.json(), async (req, res) => 
   proxyStore.flows.length = 0;
   proxyImages.clear();
   res.json({ ok: true, connected: false, service });
-});
+}
+app.post('/api/devices/ios-sim/disconnect', express.json(), doMacProxyDisconnect);
+app.post('/api/devices/mac/disconnect', express.json(), doMacProxyDisconnect); // หยุดดักจับ Mac เอง
 
 // ===== Android Emulator — ติดตั้ง CA ลง SYSTEM trust store อัตโนมัติ (auto-trust) =====
 // เครื่องจริง (ไม่ root) ลง CA ได้แค่ user store ซึ่งแอปส่วนใหญ่ไม่เชื่อ → HTTPS ไม่ผ่าน

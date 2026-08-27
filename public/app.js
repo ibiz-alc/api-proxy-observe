@@ -390,7 +390,7 @@ events.addEventListener('proxy', (e) => {
   if (idx >= 0) allFlows[idx] = flow;        // upsert (blocked entry อัปเดต count)
   else {
     allFlows.unshift(flow);
-    if (allFlows.length > 300) allFlows.pop();
+    if (allFlows.length > 1500) allFlows.pop(); // เพดานฝั่ง client (ตรงกับ MAX_FLOWS ใน server.js)
   }
   renderProxy();
   if (flow.id === selectedFlowId) renderFlowDetail(flow);
@@ -3676,6 +3676,21 @@ async function stSimDisconnect() {
   if (!r.ok) throw new Error(r.error || 'disconnect ไม่สำเร็จ');
 }
 
+// ดักจับ traffic ของ Mac เอง (ตั้ง macOS proxy ทั้งเครื่องชี้เข้า mitmproxy — กลไกเดียวกับ iOS sim)
+async function stMacConnect() {
+  const r = await (await fetch('/api/devices/mac/connect', { method: 'POST' })).json();
+  if (!r.ok) throw new Error(r.error || 'เริ่มดักจับเครื่องนี้ไม่สำเร็จ');
+}
+async function stMacDisconnect() {
+  const r = await (await fetch('/api/devices/mac/disconnect', { method: 'POST' })).json();
+  if (!r.ok) throw new Error(r.error || 'หยุดดักจับไม่สำเร็จ');
+}
+async function stMacTrustHelp() {
+  const r = await (await fetch('/api/devices/ios-sim/install-ca', { method: 'POST' })).json();
+  const cmd = r.trustCmd || ('sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ' + (r.caPath || ''));
+  alert('ให้ HTTPS ของแอปบน Mac ถูกถอดรหัส ต้อง trust CA ของ mitmproxy (ทำครั้งเดียว บน Mac):\n\n' + cmd + '\n\nรันในเทอร์มินัล (ใส่รหัสเครื่อง) แล้วรีสตาร์ตแอป/เบราว์เซอร์ที่จะดักจับ');
+}
+
 // ===== Auto-reconnect (ตัว watcher ย้ายไปอยู่ฝั่ง server แล้ว — ทำงานตลอดแม้ปิดหน้าเว็บ) =====
 // UI เหลือหน้าที่เดียว: toggle เปิด/ปิดผ่าน API — สถานะปัจจุบันอ่านจาก /api/status (ฟิลด์ autoReconnect)
 let autoRcMap = {}; // serial → 'usb'|'wifi' — sync จาก /api/status ทุกครั้งที่ renderStatus
@@ -3757,6 +3772,22 @@ async function renderStatus() {
     sv.mitmproxy.up
       ? [stBtn('⏹️ ปิด mitmproxy', () => stStopService('mitm'), 'stop')]
       : [stBtn('▶️ เปิด mitmproxy', () => stStartService('mitm'))]));
+
+  // --- เครื่องนี้ (Mac): ดักจับ traffic ของแอปบน Mac เอง (ตั้ง macOS proxy ทั้งเครื่อง) — ไม่ต้องมี device ---
+  {
+    const active = !!iosProxy.active;
+    const macDetails = active
+      ? ['🟢 กำลังดักจับ — traffic ของแอปบน Mac เครื่องนี้ผ่าน mitmproxy แล้ว',
+         `macOS proxy: ${iosProxy.service || '?'} → 127.0.0.1:${sv.mitmproxy.port}`,
+         ...(iosProxy.macCaTrusted ? [] : ['⚠️ HTTPS จะขึ้น cert error จนกว่าจะ trust CA บน Mac — กดปุ่ม 🔐 ดูคำสั่ง'])]
+      : ['ตั้ง macOS proxy ทั้งเครื่องชี้เข้า mitmproxy → ดักจับ traffic ของ Mac เอง (ไม่ต้องต่อ device)',
+         '⚠️ ทุกแอปบน Mac จะวิ่งผ่าน proxy — อาจกระทบเครื่องมือที่ pin cert (pip/softwareupdate ฯลฯ)'];
+    const macActs = [];
+    if (!active) { const cb = stBtn('▶︎ ดักจับเครื่องนี้', stMacConnect); if (!sv.mitmproxy.up) cb.disabled = true; macActs.push(cb); }
+    else macActs.push(stBtn('⛔ หยุดดักจับ', stMacDisconnect, 'stop'));
+    macActs.push(stBtn('🔐 วิธี trust CA บน Mac', stMacTrustHelp));
+    statusCards.appendChild(stCard('🖥️', `เครื่องนี้ (Mac) ${active ? '🟢 ดักจับอยู่' : '⚪ ยังไม่ดักจับ'}`, active, macDetails, macActs));
+  }
 
   // --- MCP ---
   statusCards.appendChild(stCard('🤖', `MCP server (พอร์ต ${sv.mcp.port})`, sv.mcp.up,
