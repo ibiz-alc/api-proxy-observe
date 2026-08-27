@@ -2491,10 +2491,15 @@ function wireGroupDrop(zone, scenarioName) {
     try { ids = JSON.parse(raw); if (!Array.isArray(ids)) ids = [raw]; } catch { ids = [raw]; } // เผื่อ single id เก่า
     const toMove = ids.filter((id) => { const r = mapRulesData.find((x) => x.id === id); return r && (r.scenario || '') !== scenarioName; });
     if (!toMove.length) return;
-    await Promise.all(toMove.map((id) => fetch(`/api/maplocal/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scenario: scenarioName }) })));
-    selectedRuleIds.clear();
-    await loadMapRules();
-    syncMapEditorToSelection();
+    try {
+      await Promise.all(toMove.map((id) => fetch(`/api/maplocal/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scenario: scenarioName }) })));
+    } catch (err) {
+      showToast('ย้ายกลุ่มไม่สำเร็จ: ' + err.message); // PUT ล้มกลางทาง → แจ้ง แล้วยัง refresh UI ให้ตรงของจริง
+    } finally {
+      selectedRuleIds.clear();
+      await loadMapRules(); // refresh เสมอ (แม้บางตัวล้ม) ไม่ให้ UI ค้างสถานะเก่า
+      syncMapEditorToSelection();
+    }
   });
 }
 
