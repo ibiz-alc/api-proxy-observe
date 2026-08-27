@@ -49,19 +49,19 @@ const injectFlows = (page) => page.evaluate((flows) => {
   await injectFlows(page);
   await sleep(100);
 
-  // 1) render checkbox ครบทุกแถว
+  // 1) render 3 แถว + ไม่มี checkbox (ใช้ highlight เหมือน Map Local อย่างเดียว)
   const nItems = await page.$$eval('#flow-list-body .flow-item', (a) => a.length);
   const nChecks = await page.$$eval('#flow-list-body .flow-check', (a) => a.length);
-  check('1 render 3 แถว + 3 checkbox', nItems === 3 && nChecks === 3, `items=${nItems} checks=${nChecks}`);
+  check('1 render 3 แถว + ไม่มี checkbox', nItems === 3 && nChecks === 0, `items=${nItems} checks=${nChecks}`);
 
-  // 2) checkbox เลือกอันแรก → size 1, action bar โผล่ + count
-  await page.click('#flow-list-body .flow-item:nth-child(1) .flow-check');
+  // 2) Cmd+click อันแรก → size 1, action bar โผล่ + count (ไม่มี checkbox แล้ว)
+  await page.evaluate(() => document.querySelectorAll('#flow-list-body .flow-item')[0].dispatchEvent(new MouseEvent('click', { bubbles: true, metaKey: true })));
   await sleep(60);
-  check('2 checkbox เลือก 1 → size=1', (await selSize(page)) === 1, `size=${await selSize(page)}`);
+  check('2 Cmd+click เลือก 1 → size=1', (await selSize(page)) === 1, `size=${await selSize(page)}`);
   check('2 action bar โผล่', await barVisible(page), '');
   check('2 count = "เลือก 1 รายการ"', (await barCount(page)) === 'เลือก 1 รายการ', await barCount(page));
 
-  // 3) Shift+click แถวที่ 3 → เลือกช่วง 1..3 = ทั้งหมด
+  // 3) Shift+click แถวที่ 3 → เลือกช่วง 1..3 = ทั้งหมด (anchor = อันแรกที่เพิ่ง Cmd-click)
   await page.evaluate(() => {
     const items = document.querySelectorAll('#flow-list-body .flow-item');
     items[2].dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
@@ -69,7 +69,18 @@ const injectFlows = (page) => page.evaluate((flows) => {
   await sleep(60);
   check('3 Shift+click → เลือกช่วงครบ 3', (await selSize(page)) === 3, `size=${await selSize(page)}`);
 
-  // 4) ปุ่มล้าง → size 0, bar หาย
+  // 3b) คลิกปกติ = ล้างไฮไลต์ (แถบเลือกหาย) + ดู detail
+  await page.evaluate(() => document.querySelectorAll('#flow-list-body .flow-item')[1].dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  await sleep(60);
+  check('3b คลิกปกติ → เคลียร์ไฮไลต์ (size=0, bar หาย)', (await selSize(page)) === 0 && !(await barVisible(page)), `size=${await selSize(page)}`);
+
+  // 4) Cmd+click 2 อัน แล้วกดปุ่มล้าง → size 0, bar หาย
+  await page.evaluate(() => {
+    const its = document.querySelectorAll('#flow-list-body .flow-item');
+    its[0].dispatchEvent(new MouseEvent('click', { bubbles: true, metaKey: true }));
+    its[1].dispatchEvent(new MouseEvent('click', { bubbles: true, metaKey: true }));
+  });
+  await sleep(60);
   await page.click('#flow-select-clear');
   await sleep(60);
   check('4 ล้าง → size=0 + bar หาย', (await selSize(page)) === 0 && !(await barVisible(page)), `size=${await selSize(page)} vis=${await barVisible(page)}`);

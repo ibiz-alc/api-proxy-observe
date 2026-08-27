@@ -1922,6 +1922,44 @@ async function doMacProxyDisconnect(req, res) {
 app.post('/api/devices/ios-sim/disconnect', express.json(), doMacProxyDisconnect);
 app.post('/api/devices/mac/disconnect', express.json(), doMacProxyDisconnect); // หยุดดักจับ Mac เอง
 
+// ดักจับ "เว็บที่กำลังทำ": เปิด Chrome แยกโปรไฟล์ ชี้ proxy เข้า mitmproxy โดยไม่ bypass localhost
+// → จับ traffic ของเว็บ (รวม localhost) ได้ โดยไม่ต้องแตะ macOS system proxy / ไม่กระทบเบราว์เซอร์หลัก
+// --ignore-certificate-errors: ยอมรับ cert ของ mitmproxy โดยไม่ต้อง trust CA (โปรไฟล์ชั่วคราวทิ้งได้ → ปลอดภัย)
+app.post('/api/proxy/capture-browser', express.json(), async (req, res) => {
+  const url = (req.body && req.body.url ? String(req.body.url) : '').trim();
+  if (url && !/^https?:\/\//i.test(url)) {
+    return res.status(400).json({ ok: false, error: 'URL ต้องขึ้นต้นด้วย http:// หรือ https://' });
+  }
+  if (!(await mitmAlive())) {
+    return res.status(409).json({ ok: false, mitmDown: true,
+      error: `mitmdump ไม่ได้รันบน :${MITM_PORT} — เปิด mitm ก่อน ไม่งั้นเบราว์เซอร์จะไม่มีเน็ต (proxy ชี้พอร์ตตาย)` });
+  }
+  const chrome = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+  if (!fs.existsSync(chrome)) {
+    return res.status(404).json({ ok: false, error: `ไม่พบ Google Chrome ที่ ${chrome} — ตั้ง env CHROME ชี้ path เอง` });
+  }
+  const profile = path.join(require('os').tmpdir(), 'apitester-capture-profile');
+  const args = [
+    `--proxy-server=http://127.0.0.1:${MITM_PORT}`,
+    '--proxy-bypass-list=<-loopback>', // อย่า bypass localhost → จับ localhost ได้ (นี่คือจุดที่ system proxy ทำไม่ได้)
+    `--user-data-dir=${profile}`,      // โปรไฟล์แยก → ไม่ยุ่งเบราว์เซอร์หลัก, ปิดหน้าต่าง = เลิกดัก
+    '--ignore-certificate-errors',     // รับ cert mitmproxy โดยไม่ต้อง trust CA
+    '--test-type',                     // กัน infobar เตือน unsupported flag
+    '--no-first-run', '--no-default-browser-check',
+  ];
+  if (url) args.push(url);
+  if (process.env.CAPTURE_BROWSER_DRYRUN) return res.json({ ok: true, dryRun: true, chrome, args, proxy: `127.0.0.1:${MITM_PORT}` });
+  try {
+    const child = require('child_process').spawn(chrome, args, { detached: true, stdio: 'ignore' });
+    child.on('error', (e) => console.error('capture-browser spawn error:', e.message)); // ต้องมี ไม่งั้น ENOENT ล้ม server
+    child.unref();
+    unmute(); // เผลอ mute ค้างอยู่ → ปลดให้ traffic เข้า
+    res.json({ ok: true, chrome, args, proxy: `127.0.0.1:${MITM_PORT}`, url: url || null });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: 'เปิดเบราว์เซอร์ไม่สำเร็จ: ' + e.message });
+  }
+});
+
 // ===== Android Emulator — ติดตั้ง CA ลง SYSTEM trust store อัตโนมัติ (auto-trust) =====
 // เครื่องจริง (ไม่ root) ลง CA ได้แค่ user store ซึ่งแอปส่วนใหญ่ไม่เชื่อ → HTTPS ไม่ผ่าน
 // แต่ emulator แบบ userdebug root ได้ → ยัด CA เข้า system store ให้เลย HTTPS ทะลุทันที (ยกเว้นแอปที่ pin cert)

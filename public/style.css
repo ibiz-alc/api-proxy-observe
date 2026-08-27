@@ -625,6 +625,7 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
+  user-select: none; /* กัน text selection ตอน Shift+click เลือกหลายรายการ */
 }
 .flow-item:hover { background: var(--panel-2); }
 .flow-item.selected { background: #1e3a5f; }
@@ -660,7 +661,6 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 #flow-select-map:hover { filter: brightness(1.1); }
 #flow-select-clear { background: transparent; border: 1px solid var(--red); color: var(--red); margin: 0; }
 #flow-select-clear:hover { background: var(--red); color: #0f172a; }
-.flow-item-row .flow-check { width: 15px; height: 15px; cursor: pointer; accent-color: var(--accent); margin: 0; }
 .flow-item.multi-selected { background: rgba(56, 189, 248, 0.14); }
 .flow-item.multi-selected.selected { background: #1e3a5f; }
 /* tag บอกว่าใช้ Test Case ไหน/step ไหน — คลิกไปที่ step ได้ */
@@ -835,10 +835,10 @@ body.col-dragging iframe { pointer-events: none; }
 .detail-meta { color: var(--muted); font-size: 0.8rem; }
 .detail-subtabs {
   display: flex; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--border);
-  flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; /* ช่องแคบ → เลื่อนแนวนอนเห็นปุ่มหลัง (Copy ฯลฯ) */
+  flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: none; /* ช่องแคบ → เลื่อนแนวนอนได้ แต่ "ซ่อนแถบ scroll" (เลื่อนด้วย trackpad/shift-wheel) */
 }
-.detail-subtabs::-webkit-scrollbar { height: 6px; }
-.detail-subtabs::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.detail-subtabs::-webkit-scrollbar { height: 0; width: 0; display: none; } /* ซ่อน scrollbar (WebKit) */
 .detail-subtabs > button { flex-shrink: 0; }      /* ปุ่มทั้งหมด (subtab + Copy) ไม่ถูกบีบจนหาย */
 .subtab-btn {
   background: transparent;
@@ -1368,7 +1368,13 @@ body.mirror-open .tc-popup.dock-right { right: calc(44px + var(--mirror-w)); }
 .st-badge.down { background: rgba(248, 113, 113, 0.15); color: var(--red); }
 .st-body { display: flex; flex-direction: column; gap: 4px; }
 .st-line { font-size: 13px; color: var(--muted); }
-.st-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.st-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.st-url-input {
+  flex: 1 1 200px; min-width: 160px; font-size: 0.82rem; padding: 5px 9px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 7px; color: var(--text);
+  font-family: var(--mono, ui-monospace, monospace);
+}
+.st-url-input:focus { outline: none; border-color: var(--accent); }
 .st-action {
   background: var(--accent);
   border: 1px solid var(--accent);
