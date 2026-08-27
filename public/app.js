@@ -2728,12 +2728,39 @@ function renderMapEditor(rule) {
       jsonHint.textContent = '⚠️ format ไม่ได้ (JSON ไม่ถูกต้อง): ' + e.message; jsonHint.style.color = 'var(--yellow)';
     }
   });
-  bodyCol.appendChild(el('div', { class: 'map-body-head' }, [el('span', { class: 'map-label', text: 'Response body' }), fmtBtn]));
+  // toggle มุมมอง: ✏️ แก้ไข (textarea) / 🌳 Tree (อ่านอย่างเดียว — hover ดู JSON path + คัดลอกค่า เหมือน Proxy > Response)
+  const mbEditBtn = el('button', { class: 'mb-view-btn active', type: 'button', title: 'แก้ไข JSON', text: '✏️ แก้ไข' });
+  const mbTreeBtn = el('button', { class: 'mb-view-btn', type: 'button', title: 'ดูเป็น tree — เอาเมาส์ชี้บรรทัดเพื่อดู JSON path + คัดลอกค่า', text: '🌳 Tree' });
+  bodyCol.appendChild(el('div', { class: 'map-body-head' }, [el('span', { class: 'map-label', text: 'Response body' }), el('div', { class: 'mb-view-toggle' }, [mbEditBtn, mbTreeBtn]), fmtBtn]));
   const passthroughNote = el('div', { class: 'tc-file-banner', text: '🔀 โหมด Passthrough: ใช้ response จริงจาก server — ช่อง body นี้ไม่ถูกใช้ (แก้ค่าด้วย “Override เฉพาะ key” ทางซ้าย)' });
   passthroughNote.style.display = 'none';
   bodyCol.appendChild(passthroughNote);
   bodyCol.appendChild(bodyEd.wrap);
+  // มุมมอง Tree (อ่านอย่างเดียว) + pathbar — jsonTree จะหา .jt-pathbar ใน .jt-pane-host ที่ครอบ (hover บรรทัด → โชว์ path)
+  const mbPathbar = el('div', { class: 'jt-pathbar', title: 'JSON path ของบรรทัดที่ชี้อยู่' });
+  const mbTreeBox = el('div', { class: 'mb-tree-box' });
+  const mbTreeHost = el('div', { class: 'jt-pane-host mb-tree-host' }, [el('div', { class: 'mb-tree-bar' }, [el('span', { class: 'hint', text: 'ชี้บรรทัดเพื่อดู path · คลิกไอคอน 📋 คัดลอกค่า' }), mbPathbar]), mbTreeBox]);
+  mbTreeHost.style.display = 'none';
+  bodyCol.appendChild(mbTreeHost);
   bodyCol.appendChild(jsonHint);
+  const showBodyEdit = () => {
+    mbEditBtn.classList.add('active'); mbTreeBtn.classList.remove('active');
+    bodyEd.wrap.style.display = ''; mbTreeHost.style.display = 'none'; fmtBtn.style.display = '';
+    bodyEd.refresh();
+  };
+  const showBodyTree = () => {
+    const v = bodyEd.textarea.value.trim();
+    mbTreeBox.innerHTML = ''; mbPathbar.textContent = '';
+    if (!v) mbTreeBox.appendChild(el('p', { class: 'hint', text: '(body ว่าง)' }));
+    else {
+      try { mbTreeBox.appendChild(jsonTree(JSON.parse(v))); }
+      catch (e) { const p = el('p', { class: 'hint', text: '⚠️ JSON ไม่ถูกต้อง — แก้ให้ถูกก่อนถึงจะดู tree ได้: ' + e.message }); p.style.color = 'var(--yellow)'; mbTreeBox.appendChild(p); }
+    }
+    mbEditBtn.classList.remove('active'); mbTreeBtn.classList.add('active');
+    bodyEd.wrap.style.display = 'none'; mbTreeHost.style.display = ''; fmtBtn.style.display = 'none';
+  };
+  mbEditBtn.addEventListener('click', showBodyEdit);
+  mbTreeBtn.addEventListener('click', showBodyTree);
   // Override เฉพาะ key — วางในคอลัมน์กว้าง (ขวา) จะได้ช่อง path/value กว้างพอ
   bodyCol.appendChild(el('label', { class: 'map-label', text: '🔧 Override เฉพาะ key (path → ค่าใหม่) — ทับบน body/response จริง' }));
   bodyCol.appendChild(overrideEd.el);
