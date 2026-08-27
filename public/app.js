@@ -1148,7 +1148,7 @@ function updateFlowSelectBar() {
   const cnt = document.getElementById('flow-select-count');
   if (cnt) cnt.textContent = `เลือก ${n} รายการ`;
   const mapBtn = document.getElementById('flow-select-map');
-  if (mapBtn) mapBtn.textContent = `🎯 Map Local (${n})`;
+  if (mapBtn) mapBtn.textContent = `Map Local (${n})`;
 }
 async function bulkMapLocalFromSelection() {
   const chosen = allFlows.filter((f) => selectedFlowIds.has(f.id));
@@ -1172,9 +1172,15 @@ async function bulkMapLocalFromSelection() {
   }
   let created = 0;
   try {
-    const res = await (await fetch('/api/maplocal/bulk', {
+    const resp = await fetch('/api/maplocal/bulk', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rules }),
-    })).json();
+    });
+    const ct = resp.headers.get('content-type') || '';
+    // ถ้าตอบไม่ใช่ JSON (เช่น 404 HTML) = endpoint /bulk ยังไม่มีบนเซิร์ฟเวอร์ที่รันอยู่ → ต้อง restart server
+    if (!resp.ok || !ct.includes('json')) {
+      throw new Error(`endpoint /bulk ยังไม่พร้อม (HTTP ${resp.status}) — เซิร์ฟเวอร์ยังรันโค้ดเก่า ต้อง restart server`);
+    }
+    const res = await resp.json();
     created = res.count != null ? res.count : rules.length;
   } catch (e) { showToast('สร้าง Map Local ไม่สำเร็จ: ' + e.message); return; }
   clearFlowSelection();
