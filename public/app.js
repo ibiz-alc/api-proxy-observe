@@ -1058,11 +1058,7 @@ function renderFlowTable() {
   }
   for (const f of flows) {
     const statusText = f.error ? 'ERR' : (f.status || '...');
-    const chk = el('input', { type: 'checkbox', class: 'flow-check', title: 'เลือกเพื่อ Map Local หลายอัน' });
-    chk.checked = selectedFlowIds.has(f.id);
-    chk.addEventListener('click', (e) => e.stopPropagation());
-    chk.addEventListener('change', () => { setFlowSelected(f.id, chk.checked); lastClickedFlowId = f.id; renderFlowTable(); });
-    const row = [chk, methodBadge(f.method)];
+    const row = [methodBadge(f.method)];
     if (f.blocked) {
       row.push(el('span', { class: 'blocked-badge', title: f.error || '', text: '🔒 BLOCKED' }));
       if (f.blockedCount > 1) row.push(el('span', { class: 'blocked-count', text: `×${f.blockedCount}` }));
@@ -1096,20 +1092,20 @@ function renderFlowTable() {
     // tag สี: flow ที่อยู่ใน base URL ที่ถูก pin → ติดแถบสีตามที่เลือกไว้กับ pin นั้น
     if (pinnedBaseUrls.includes(flowBaseUrl(f))) { item.classList.add('flow-pinned'); item.style.borderLeftColor = pinColorHex(flowBaseUrl(f)); }
     item.addEventListener('click', (ev) => {
-      if (ev.target && ev.target.classList && ev.target.classList.contains('flow-check')) return;
-      if (ev.shiftKey) {            // เลือกช่วงจากแองเคอร์ล่าสุด
+      if (ev.shiftKey) {            // Shift+click = ไฮไลต์เป็นช่วง (เหมือน Map Local)
         selectFlowRange(f.id);
         lastClickedFlowId = f.id;
         renderFlowTable();
         return;
       }
-      if (ev.metaKey || ev.ctrlKey) { // ติ๊ก/ปลดทีละอัน
+      if (ev.metaKey || ev.ctrlKey) { // Cmd/Ctrl+click = ติ๊ก/ปลดทีละอัน
         setFlowSelected(f.id, !selectedFlowIds.has(f.id));
         lastClickedFlowId = f.id;
         renderFlowTable();
         return;
       }
-      selectedFlowId = f.id;         // คลิกปกติ = ดู detail (เหมือนเดิม)
+      selectedFlowId = f.id;         // คลิกปกติ = ดู detail + ล้างไฮไลต์ multi (แถบเลือกหาย)
+      selectedFlowIds.clear();
       lastClickedFlowId = f.id;
       renderFlowTable();
       renderFlowDetail(f);
@@ -3787,6 +3783,23 @@ async function renderStatus() {
     else macActs.push(stBtn('⛔ หยุดดักจับ', stMacDisconnect, 'stop'));
     macActs.push(stBtn('🔐 วิธี trust CA บน Mac', stMacTrustHelp));
     statusCards.appendChild(stCard('🖥️', `เครื่องนี้ (Mac) ${active ? '🟢 ดักจับอยู่' : '⚪ ยังไม่ดักจับ'}`, active, macDetails, macActs));
+  }
+
+  // --- ดักจับเว็บที่กำลังทำ: เปิด Chrome แยกโปรไฟล์ผ่าน mitmproxy (จับ localhost ได้ ไม่แตะ system proxy) ---
+  {
+    const urlInput = el('input', { type: 'text', class: 'st-url-input', placeholder: 'http://localhost:5173', value: localStorage.getItem('apitester.captureUrl') || '' });
+    const openBtn = stBtn('🌐 เปิดเบราว์เซอร์ดักจับ', async () => {
+      const url = urlInput.value.trim();
+      localStorage.setItem('apitester.captureUrl', url);
+      const r = await (await fetch('/api/proxy/capture-browser', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) })).json();
+      if (!r.ok) throw new Error(r.error || 'เปิดเบราว์เซอร์ไม่สำเร็จ');
+    });
+    if (!sv.mitmproxy.up) openBtn.disabled = true;
+    const details = [
+      'เปิด Chrome แยกโปรไฟล์ ชี้เข้า mitmproxy → ดักจับ traffic ของเว็บ (รวม localhost) โดยไม่แตะ system proxy และไม่กระทบเบราว์เซอร์หลัก',
+      'ยอมรับ cert ของ mitmproxy ให้อัตโนมัติ (ไม่ต้อง trust CA) เพราะเป็นโปรไฟล์ชั่วคราว · ปิดหน้าต่าง = เลิกดัก',
+    ];
+    statusCards.appendChild(stCard('🌐', 'ดักจับเว็บที่กำลังทำ', true, details, [urlInput, openBtn]));
   }
 
   // --- MCP ---
