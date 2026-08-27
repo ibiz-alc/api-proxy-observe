@@ -2386,6 +2386,9 @@ const mapListEl = document.getElementById('maplocal-list');
 const mapEditorEl = document.getElementById('maplocal-editor');
 let mapRulesData = [];
 let selectedRuleId = null;
+// ไฮไลต์หลาย rule (Shift/Cmd-click) เพื่อลากเข้ากลุ่มทีเดียว — คนละตัวกับ selectedRuleId (โฟกัส editor)
+let selectedRuleIds = new Set();
+let lastClickedRuleId = null; // แองเคอร์สำหรับเลือกช่วงด้วย Shift
 let mapSaveHandler = null; // ฟังก์ชัน save ของ editor ที่เปิดอยู่ (ให้ Cmd+S เรียกได้)
 let tcSaveHandler = null;  // เช่นเดียวกัน สำหรับแท็บ Test Case
 
@@ -2409,7 +2412,25 @@ function syncMapEditorToSelection() {
   if (fresh) renderMapEditor(fresh);
 }
 
-// สร้าง DOM ของ rule 1 อัน (ใช้ทั้งในกลุ่มและนอกกลุ่ม) — ลากได้ (drag-drop ย้ายกลุ่ม)
+// ลำดับ rule ตามที่แสดงจริง (กลุ่มตามลำดับ → rule ในกลุ่ม → ไม่ได้จัดกลุ่ม) — ใช้เลือกช่วงด้วย Shift
+function displayedRuleOrder() {
+  const ids = [];
+  if (!mapGroupsData.length) { for (const r of mapRulesData) ids.push(r.id); return ids; }
+  for (const g of mapGroupsData) for (const r of mapRulesData) if (r.scenario === g.name) ids.push(r.id);
+  for (const r of mapRulesData) if (!r.scenario) ids.push(r.id);
+  return ids;
+}
+function selectRuleRange(toId) {
+  const order = displayedRuleOrder();
+  const to = order.indexOf(toId);
+  if (to < 0) return;
+  const anchor = lastClickedRuleId != null ? order.indexOf(lastClickedRuleId) : -1;
+  if (anchor < 0) { selectedRuleIds.add(toId); return; }
+  const [lo, hi] = anchor <= to ? [anchor, to] : [to, anchor];
+  for (let i = lo; i <= hi; i++) selectedRuleIds.add(order[i]); // คง anchor ไว้ให้ขยายช่วงต่อได้
+}
+
+// สร้าง DOM ของ rule 1 อัน (ใช้ทั้งในกลุ่มและนอกกลุ่ม) — ลากได้ (ลากทั้งชุดถ้าไฮไลต์หลายอัน)
 function mapRuleItem(r) {
   const on = r.enabled !== false;
   const tog = el('button', { class: 'map-item-toggle ' + (on ? 'on' : 'off'), type: 'button', text: on ? 'Enabled' : 'Disabled', title: 'คลิกเพื่อสลับเปิด/ปิดกฎนี้' });
@@ -2419,7 +2440,7 @@ function mapRuleItem(r) {
     await loadMapRules();
     if (r.id === selectedRuleId) { const fresh = mapRulesData.find((x) => x.id === r.id); if (fresh) renderMapEditor(fresh); }
   });
-  const item = el('div', { class: 'map-item' + (r.id === selectedRuleId ? ' selected' : ''), draggable: 'true' }, [
+  const item = el('div', { class: 'map-item' + (r.id === selectedRuleId ? ' selected' : '') + (selectedRuleIds.has(r.id) ? ' multi-selected' : ''), draggable: 'true' }, [
     el('span', { class: 'map-dot ' + (on ? 'on' : 'off'), text: on ? '●' : '○' }),
     el('div', { class: 'map-item-body' }, [
       el('div', { class: 'map-item-name' }, [
@@ -2430,24 +2451,54 @@ function mapRuleItem(r) {
     ]),
     tog,
   ]);
-  item.addEventListener('click', () => { selectedRuleId = r.id; renderMapList(); renderMapEditor(r); });
-  item.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', r.id); e.dataTransfer.effectAllowed = 'move'; item.classList.add('dragging'); });
+  item.addEventListener('click', (ev) => {
+    if (ev.shiftKey) {              // เลือกช่วง — ไฮไลต์หลายอัน (ไม่เปลี่ยน editor)
+      selectRuleRange(r.id);
+      renderMapList();
+      return;
+    }
+    if (ev.metaKey || ev.ctrlKey) { // ติ๊ก/ปลดทีละอัน
+      if (selectedRuleIds.has(r.id)) selectedRuleIds.delete(r.id); else selectedRuleIds.add(r.id);
+      lastClickedRuleId = r.id;
+      renderMapList();
+      return;
+    }
+    // คลิกปกติ = เลือกเดี่ยว + เปิด editor (รีเซ็ตไฮไลต์เป็นตัวนี้)
+    selectedRuleId = r.id;
+    selectedRuleIds = new Set([r.id]);
+    lastClickedRuleId = r.id;
+    renderMapList();
+    renderMapEditor(r);
+  });
+  item.addEventListener('dragstart', (e) => {
+    // ลากตัวที่อยู่ในไฮไลต์หลายอัน → ลากทั้งชุด; ลากตัวที่ไม่ได้ไฮไลต์ → ลากตัวเดียว (รีเซ็ตไฮไลต์)
+    let ids;
+    if (selectedRuleIds.has(r.id) && selectedRuleIds.size > 1) ids = [...selectedRuleIds];
+    else { ids = [r.id]; selectedRuleIds = new Set([r.id]); renderMapList(); }
+    e.dataTransfer.setData('text/plain', JSON.stringify(ids));
+    e.dataTransfer.effectAllowed = 'move';
+    item.classList.add('dragging');
+  });
   item.addEventListener('dragend', () => item.classList.remove('dragging'));
   return item;
 }
 
-// ทำ zone (header/body ของกลุ่ม) ให้รับ drop → ย้าย rule เข้ากลุ่มนั้น (scenario='' = เอาออกจากกลุ่ม)
+// ทำ zone (header/body ของกลุ่ม) ให้รับ drop → ย้าย rule (อาจหลายอัน) เข้ากลุ่มนั้น (scenario='' = เอาออกจากกลุ่ม)
 function wireGroupDrop(zone, scenarioName) {
   zone.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; zone.classList.add('drop-target'); });
   zone.addEventListener('dragleave', () => zone.classList.remove('drop-target'));
   zone.addEventListener('drop', async (e) => {
     e.preventDefault(); zone.classList.remove('drop-target');
-    const id = e.dataTransfer.getData('text/plain');
-    const r = id && mapRulesData.find((x) => x.id === id);
-    if (!r || (r.scenario || '') === scenarioName) return; // อยู่กลุ่มเดิมแล้ว
-    await fetch(`/api/maplocal/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scenario: scenarioName }) });
+    const raw = e.dataTransfer.getData('text/plain');
+    if (!raw) return;
+    let ids;
+    try { ids = JSON.parse(raw); if (!Array.isArray(ids)) ids = [raw]; } catch { ids = [raw]; } // เผื่อ single id เก่า
+    const toMove = ids.filter((id) => { const r = mapRulesData.find((x) => x.id === id); return r && (r.scenario || '') !== scenarioName; });
+    if (!toMove.length) return;
+    await Promise.all(toMove.map((id) => fetch(`/api/maplocal/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scenario: scenarioName }) })));
+    selectedRuleIds.clear();
     await loadMapRules();
-    if (id === selectedRuleId) { const fresh = mapRulesData.find((x) => x.id === id); if (fresh) renderMapEditor(fresh); }
+    syncMapEditorToSelection();
   });
 }
 

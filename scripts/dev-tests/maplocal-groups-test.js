@@ -93,6 +93,28 @@ const groupSelVal = (page) => page.evaluate(() => {
   const ungAfter = (await rules()).filter((r) => !r.scenario).length;
   check('4 ไม่ได้จัดกลุ่ม เหลือ 1', ungAfter === 1, `ung=${ungAfter}`);
 
+  // 4b) multi-select (Shift+click) + ลากทั้งชุดเข้ากลุ่มทีเดียว
+  await post('/api/maplocal', { name: 'M1', method: 'GET', urlPattern: '/m1', body: '{}' });
+  await post('/api/maplocal', { name: 'M2', method: 'GET', urlPattern: '/m2', body: '{}' });
+  await openMaplocal(page); // reload ให้ render ใหม่ (ตอนนี้ ungrouped มี 3)
+  const ungBefore = (await rules()).filter((r) => !r.scenario).length;
+  await page.evaluate(() => { document.querySelector('.map-group-ungrouped .map-item').dispatchEvent(new MouseEvent('click', { bubbles: true })); }); // plain = anchor
+  await sleep(100);
+  await page.evaluate(() => { const its = document.querySelectorAll('.map-group-ungrouped .map-item'); its[its.length - 1].dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true })); }); // Shift = ช่วง
+  await sleep(120);
+  const hl = await page.$$eval('.map-group-ungrouped .map-item.multi-selected', (a) => a.length);
+  check('4b Shift+click ไฮไลต์ทั้งช่วง ungrouped', hl === ungBefore && ungBefore >= 3, `hl=${hl}/${ungBefore}`);
+  await page.evaluate(() => {
+    const src = document.querySelector('.map-group-ungrouped .map-item.multi-selected');
+    const target = document.querySelector('.map-group:not(.map-group-ungrouped) .map-group-head');
+    const dt = new DataTransfer();
+    src.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
+    target.dispatchEvent(new DragEvent('dragover', { bubbles: true, dataTransfer: dt }));
+    target.dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer: dt }));
+  });
+  await sleep(600);
+  check('4b ลากหลายอันทีเดียว → ไม่ได้จัดกลุ่มว่างหมด', (await rules()).filter((r) => !r.scenario).length === 0, `ung=${(await rules()).filter((r) => !r.scenario).length}`);
+
   // 5) กลุ่มว่างอยู่รอด reload: สร้างกลุ่มเปล่าผ่านปุ่ม + (prompt) แล้ว reload
   promptValue = 'EmptyG';
   await page.click('#maplocal-add-group');
