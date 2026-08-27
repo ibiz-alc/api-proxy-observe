@@ -645,13 +645,21 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, Menlo, mono
 /* multi-select flow → bulk Map Local */
 .flow-select-bar {
   display: flex; align-items: center; gap: 10px;
-  padding: 6px 12px;
-  background: rgba(56, 189, 248, 0.10);
+  padding: 7px 12px;
+  background: rgba(56, 189, 248, 0.12);
   border-bottom: 1px solid var(--border);
-  font-size: 0.78rem; color: var(--accent);
+  font-size: 0.78rem; color: var(--accent); font-weight: 600;
 }
-.flow-select-bar .flow-select-actions { margin-left: auto; display: flex; gap: 6px; }
-.flow-select-bar button { padding: 2px 10px; font-size: 0.75rem; text-transform: none; letter-spacing: 0; }
+.flow-select-bar .flow-select-actions { margin-left: auto; display: flex; gap: 8px; }
+.flow-select-bar button {
+  padding: 3px 14px; font-size: 0.74rem; font-weight: 600;
+  border-radius: 7px; text-transform: none; letter-spacing: 0; line-height: 1.6;
+  transition: background 0.12s, color 0.12s, filter 0.12s;
+}
+#flow-select-map { background: var(--accent); color: #0f172a; border: none; }
+#flow-select-map:hover { filter: brightness(1.1); }
+#flow-select-clear { background: transparent; border: 1px solid var(--red); color: var(--red); margin: 0; }
+#flow-select-clear:hover { background: var(--red); color: #0f172a; }
 .flow-item-row .flow-check { width: 15px; height: 15px; cursor: pointer; accent-color: var(--accent); margin: 0; }
 .flow-item.multi-selected { background: rgba(56, 189, 248, 0.14); }
 .flow-item.multi-selected.selected { background: #1e3a5f; }
