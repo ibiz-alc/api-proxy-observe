@@ -33,7 +33,9 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const PROXY_PORT = process.env.PROXY_PORT || 9099;
 const CA_DIR = path.join(__dirname, '.proxy-ca');
-const MAP_LOCAL_FILE = path.join(__dirname, 'map-local.json');
+// override ได้ผ่าน env เพื่อกัน dev server/เทสต์เขียนทับไฟล์จริง (map-local.json ของงานจริง)
+const MAP_LOCAL_FILE = process.env.MAP_LOCAL_FILE || path.join(__dirname, 'map-local.json');
+const MAP_GROUPS_FILE = process.env.MAP_GROUPS_FILE || path.join(__dirname, 'data', 'map-groups.json');
 
 // ================= In-memory store =================
 const MAX_REQUESTS = 200;
@@ -131,6 +133,45 @@ function saveMapRules() {
     console.error('บันทึก map-local.json ไม่ได้:', err.message);
   }
 }
+
+// ---- Group metadata: ให้ "กลุ่มว่าง" อยู่รอด reload + จำลำดับ/สถานะพับ ----
+// group จริงๆ ผูกกับ field rule.scenario; ไฟล์นี้แค่เก็บกลุ่มที่ยังไม่มี rule + ลำดับ/collapsed
+let mapGroups = []; // [{name, order, collapsed}]
+try {
+  if (fs.existsSync(MAP_GROUPS_FILE)) mapGroups = JSON.parse(fs.readFileSync(MAP_GROUPS_FILE, 'utf8'));
+  if (!Array.isArray(mapGroups)) mapGroups = [];
+} catch (err) {
+  console.error('โหลด map-groups.json ไม่ได้:', err.message);
+  mapGroups = [];
+}
+function saveMapGroups() {
+  try {
+    fs.mkdirSync(path.dirname(MAP_GROUPS_FILE), { recursive: true });
+    fs.writeFileSync(MAP_GROUPS_FILE, JSON.stringify(mapGroups, null, 2));
+  } catch (err) {
+    console.error('บันทึก map-groups.json ไม่ได้:', err.message);
+  }
+}
+// รวมกลุ่มจาก 2 แหล่ง: metadata (กลุ่มเปล่า/ลำดับ) ∪ scenario ที่มีบน rules
+function groupsSummary() {
+  const byName = new Map();
+  for (const g of mapGroups) {
+    if (!g || !g.name) continue;
+    byName.set(g.name, { name: g.name, order: Number.isFinite(g.order) ? g.order : 0, collapsed: !!g.collapsed, total: 0, enabled: 0 });
+  }
+  let autoOrder = mapGroups.length;
+  for (const r of mapRules) {
+    if (!r.scenario) continue;
+    let s = byName.get(r.scenario);
+    if (!s) { s = { name: r.scenario, order: autoOrder++, collapsed: false, total: 0, enabled: 0 }; byName.set(r.scenario, s); }
+    s.total += 1;
+    if (r.enabled) s.enabled += 1;
+  }
+  return [...byName.values()]
+    .map((s) => ({ ...s, active: s.total > 0 && s.enabled === s.total }))
+    .sort((a, b) => (a.order - b.order) || a.name.localeCompare(b.name));
+}
+function groupExists(name) { return mapGroups.some((g) => g && g.name === name) || mapRules.some((r) => r.scenario === name); }
 
 // แปลง pattern -> ตัวเช็ค: มี * = wildcard (.*), ไม่มี * = ตรวจแบบ "มีคำนี้อยู่" (contains)
 function patternMatches(pattern, url) {
@@ -281,6 +322,89 @@ app.post('/api/maplocal/scenarios/:name/deactivate', (req, res) => {
   }
   saveMapRules();
   res.json({ ok: true, scenario: name, changed });
+});
+
+// สร้าง rule หลายอันทีเดียว (จากหน้า Proxy ที่เลือกหลาย URL) — เขียนไฟล์ครั้งเดียว
+app.post('/api/maplocal/bulk', express.json({ limit: '25mb' }), (req, res) => {
+  const list = Array.isArray((req.body || {}).rules) ? req.body.rules : [];
+  const created = list.map((b) => ({
+    id: crypto.randomUUID(),
+    enabled: b.enabled !== false,
+    name: b.name || '',
+    method: b.method || 'ANY',
+    urlPattern: b.urlPattern || '',
+    status: Number(b.status) || 200,
+    contentType: b.contentType || 'application/json',
+    body: b.body != null ? String(b.body) : '',
+    scenario: b.scenario || '',
+    mode: b.mode === 'passthrough' ? 'passthrough' : 'mock',
+    overrides: normalizeOverrides(b.overrides),
+  }));
+  mapRules.unshift(...created); // คงลำดับที่ส่งมาไว้บนสุด
+  saveMapRules();
+  res.json({ ok: true, created, count: created.length });
+});
+
+// ---- Groups (UI ทับ scenario): list / สร้างเปล่า / rename+collapse / ลบ(=ungroup) ----
+app.get('/api/maplocal/groups', (req, res) => res.json({ ok: true, groups: groupsSummary() }));
+
+app.post('/api/maplocal/groups', express.json(), (req, res) => {
+  const name = String((req.body || {}).name || '').trim();
+  if (!name) return res.status(400).json({ ok: false, error: 'ต้องมีชื่อกลุ่ม' });
+  const existed = groupExists(name);
+  if (!mapGroups.some((g) => g && g.name === name)) {
+    const order = mapGroups.reduce((m, g) => Math.max(m, Number(g.order) || 0), -1) + 1;
+    mapGroups.push({ name, order, collapsed: false });
+    saveMapGroups();
+  }
+  res.json({ ok: true, group: name, existed, groups: groupsSummary() });
+});
+
+app.put('/api/maplocal/groups/:name', express.json(), (req, res) => {
+  const name = req.params.name;
+  const b = req.body || {};
+  let meta = mapGroups.find((g) => g && g.name === name);
+  // rename: ย้าย scenario ทุก rule + จัดการ metadata (ชนชื่อเดิม = merge)
+  if (b.newName !== undefined) {
+    const newName = String(b.newName || '').trim();
+    if (!newName) return res.status(400).json({ ok: false, error: 'ชื่อใหม่ว่างไม่ได้' });
+    if (newName !== name) {
+      let moved = 0;
+      for (const r of mapRules) { if (r.scenario === name) { r.scenario = newName; moved++; } }
+      const targetMeta = mapGroups.find((g) => g && g.name === newName);
+      if (targetMeta) {
+        // merge: ทิ้ง metadata ของชื่อเก่า
+        mapGroups = mapGroups.filter((g) => g && g.name !== name);
+      } else if (meta) {
+        meta.name = newName; // rename metadata เดิม
+      } else {
+        // ชื่อเก่าเป็น scenario-only (ไม่มี metadata) → สร้าง entry ใหม่ให้ชื่อใหม่
+        const order = mapGroups.reduce((m, g) => Math.max(m, Number(g.order) || 0), -1) + 1;
+        mapGroups.push({ name: newName, order, collapsed: false });
+      }
+      saveMapRules();
+      saveMapGroups();
+      return res.json({ ok: true, renamed: { from: name, to: newName, moved }, groups: groupsSummary() });
+    }
+  }
+  // อัปเดต collapsed / order (สร้าง metadata ถ้ายังไม่มี)
+  if (b.collapsed !== undefined || b.order !== undefined) {
+    if (!meta) { meta = { name, order: mapGroups.length, collapsed: false }; mapGroups.push(meta); }
+    if (b.collapsed !== undefined) meta.collapsed = !!b.collapsed;
+    if (b.order !== undefined) meta.order = Number(b.order) || 0;
+    saveMapGroups();
+  }
+  res.json({ ok: true, group: name, groups: groupsSummary() });
+});
+
+app.delete('/api/maplocal/groups/:name', (req, res) => {
+  const name = req.params.name;
+  let ungrouped = 0;
+  for (const r of mapRules) { if (r.scenario === name) { r.scenario = ''; ungrouped++; } }
+  mapGroups = mapGroups.filter((g) => g && g.name !== name);
+  saveMapRules();
+  saveMapGroups();
+  res.json({ ok: true, group: name, ungrouped }); // ungroup rules — ไม่ลบ rule
 });
 
 // ================= Dynamic Test Cases (sequenced Map Local) =================
