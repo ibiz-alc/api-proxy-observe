@@ -35,6 +35,8 @@ const injectFlows = (page) => page.evaluate((flows) => {
 (async () => {
   // เคลียร์ rule ที่ค้างในไฟล์ temp ก่อน
   for (const r of await rules()) await fetch(BASE + '/api/maplocal/' + r.id, { method: 'DELETE' });
+  const grps = async () => (await (await fetch(BASE + '/api/maplocal/groups')).json()).groups || [];
+  for (const g of await grps()) await fetch(BASE + '/api/maplocal/groups/' + encodeURIComponent(g.name), { method: 'DELETE' });
 
   const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new' });
   const page = await browser.newPage();
@@ -82,14 +84,15 @@ const injectFlows = (page) => page.evaluate((flows) => {
   check('5 Cmd+click เลือกครบ 3', (await selSize(page)) === 3, `size=${await selSize(page)}`);
   check('5 count = "เลือก 3 รายการ"', (await barCount(page)) === 'เลือก 3 รายการ', await barCount(page));
 
-  // 6) กด Map Local → dedupe เต็ม URL: 3 เลือก (2 ซ้ำ) → สร้าง 2 rule, ข้ามซ้ำ 1
+  // 6) กด Map Local → dedupe เต็ม URL: 3 เลือก (2 ซ้ำ) → สร้าง 2 rule เข้ากลุ่ม default "Group", ข้ามซ้ำ 1
   await page.click('#flow-select-map');
   await sleep(500);
   const created = await rules();
   check('6 bulk สร้าง 2 rule (dedupe เต็ม URL)', created.length === 2, `len=${created.length}`);
-  check('6 rule ที่สร้าง = ungrouped', created.every((r) => r.scenario === ''), JSON.stringify(created.map((r) => r.scenario)));
+  check('6 rule ที่สร้าง = อยู่ในกลุ่ม default "Group"', created.every((r) => r.scenario === 'Group'), JSON.stringify(created.map((r) => r.scenario)));
+  check('6 กลุ่ม "Group" โผล่ใน groups (total=2)', ((await grps()).find((g) => g.name === 'Group') || {}).total === 2, JSON.stringify((await grps()).map((g) => `${g.name}:${g.total}`)));
   const toast = await page.evaluate(() => (document.getElementById('copy-toast') || {}).textContent || '');
-  check('6 toast บอก "สร้าง 2 · ข้ามซ้ำ 1"', /สร้าง Map Local 2/.test(toast) && /ข้ามซ้ำ 1/.test(toast), toast);
+  check('6 toast บอก \'สร้าง 2 อันในกลุ่ม "Group" · ข้ามซ้ำ 1\'', /สร้าง Map Local 2 อันในกลุ่ม "Group"/.test(toast) && /ข้ามซ้ำ 1/.test(toast), toast);
   check('6 หลังสร้างเสร็จ selection ถูกล้าง (bar หาย)', !(await barVisible(page)), '');
 
   check('7 ไม่มี page error', pageErrors.length === 0, pageErrors.join(' | '));
@@ -99,6 +102,7 @@ const injectFlows = (page) => page.evaluate((flows) => {
   await browser.close();
   // เก็บกวาด
   for (const r of await rules()) await fetch(BASE + '/api/maplocal/' + r.id, { method: 'DELETE' });
+  for (const g of await grps()) await fetch(BASE + '/api/maplocal/groups/' + encodeURIComponent(g.name), { method: 'DELETE' });
   console.log(failed ? `\n${failed} เช็คไม่ผ่าน` : '\nผ่านทั้งหมด');
   process.exit(failed ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

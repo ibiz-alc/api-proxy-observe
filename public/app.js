@@ -1150,6 +1150,14 @@ function updateFlowSelectBar() {
   const mapBtn = document.getElementById('flow-select-map');
   if (mapBtn) mapBtn.textContent = `Map Local (${n})`;
 }
+// หาชื่อกลุ่ม default ที่ไม่ชน: "Group", ถ้ามีแล้ว → "Group (2)", "Group (3)"...
+function nextDefaultGroupName(existingNames) {
+  const names = new Set(existingNames || []);
+  if (!names.has('Group')) return 'Group';
+  let i = 2;
+  while (names.has(`Group (${i})`)) i++;
+  return `Group (${i})`;
+}
 async function bulkMapLocalFromSelection() {
   const chosen = allFlows.filter((f) => selectedFlowIds.has(f.id));
   if (!chosen.length) return;
@@ -1167,11 +1175,16 @@ async function bulkMapLocalFromSelection() {
       status: f.status || 200,
       contentType: f.resContentType || 'application/json',
       body: f.error ? '' : (prettyBody(f.resBody) || ''),
-      scenario: '', // สร้างแบบ ungrouped ก่อน ค่อยจัดกลุ่มทีหลัง
     });
   }
-  let created = 0;
+  let created = 0; let groupName = 'Group';
   try {
+    // ตั้งชื่อกลุ่ม default ไม่ให้ชนกับกลุ่มที่มีอยู่ แล้วสร้าง rule ทั้งชุดเข้ากลุ่มนั้นเลย
+    try {
+      const gs = (await (await fetch('/api/maplocal/groups')).json()).groups || [];
+      groupName = nextDefaultGroupName(gs.map((g) => g.name));
+    } catch { /* ใช้ 'Group' */ }
+    rules.forEach((r) => { r.scenario = groupName; });
     const resp = await fetch('/api/maplocal/bulk', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rules }),
     });
@@ -1184,7 +1197,7 @@ async function bulkMapLocalFromSelection() {
     created = res.count != null ? res.count : rules.length;
   } catch (e) { showToast('สร้าง Map Local ไม่สำเร็จ: ' + e.message); return; }
   clearFlowSelection();
-  showToast(`สร้าง Map Local ${created} · ข้ามซ้ำ ${dup}`);
+  showToast(`สร้าง Map Local ${created} อันในกลุ่ม "${groupName}"${dup ? ` · ข้ามซ้ำ ${dup}` : ''}`);
 }
 
 // ===== Panel ในหน้า Proxy: เอา list/tree ของ Test Case มาไว้ (dock ซ้าย/ขวา, ย่อ/ขยาย, ปรับกว้าง) =====
@@ -2471,7 +2484,8 @@ function renderMapGroup(g) {
   const tog = el('button', { class: 'map-group-toggle ' + (g.active ? 'on' : 'off'), type: 'button', text: g.active ? 'ปิดกลุ่ม' : 'เปิดกลุ่ม', title: 'เปิด/ปิดทั้งกลุ่ม (เฉพาะกลุ่มนี้)' });
   const renameBtn = el('button', { class: 'map-group-rename', type: 'button', text: '✏️', title: 'เปลี่ยนชื่อกลุ่ม' });
   const delBtn = el('button', { class: 'map-group-del', type: 'button', text: '🗑', title: 'ลบกลุ่ม (rule กลับไปไม่ได้จัดกลุ่ม ไม่ถูกลบ)' });
-  const head = el('div', { class: 'map-group-head', 'data-group': g.name }, [caret, dot, nameEl, count, tog, renameBtn, delBtn]);
+  const actions = el('div', { class: 'map-group-actions' }, [tog, renameBtn, delBtn]);
+  const head = el('div', { class: 'map-group-head' + (g.active ? ' active-group' : ''), 'data-group': g.name }, [caret, dot, nameEl, count, actions]);
   const toggleCollapse = async () => {
     await fetch(`/api/maplocal/groups/${encodeURIComponent(g.name)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ collapsed: !g.collapsed }) });
     await loadMapRules();
