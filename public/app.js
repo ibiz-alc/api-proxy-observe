@@ -253,6 +253,66 @@ function fmtTime(iso) {
   return new Date(iso).toLocaleTimeString('th-TH', { hour12: false });
 }
 
+// ===== ตัวลากปรับขนาด บน(URL/Headers) / ล่าง(Response body) — ใช้ทั้ง Inspector + Sender =====
+// pane ถูก rebuild (innerHTML='') ทุก render → เก็บความสูงส่วนบนไว้ใน localStorage แล้ว apply ตอนสร้าง
+const VSPLIT_MIN = 90;      // px ต่ำสุดของแต่ละฝั่ง
+const VSPLIT_DEFAULT = 260; // px ความสูงส่วนบนเริ่มต้น / ค่าดับเบิลคลิกรีเซ็ต
+
+function bindVSplitResizer(resizer, top, bottom, pane, storageKey) {
+  let dragging = false, topStart = 0, grabOffset = 0, min = VSPLIT_MIN, maxTop = 0;
+  const onMove = (ev) => {
+    if (!dragging) return;
+    // จับ boundary ให้ตามเมาส์แม่น (หัก grab-offset) แล้ว clamp ให้ทั้งสองฝั่ง ≥ min
+    const h = Math.max(min, Math.min(maxTop, ev.clientY - grabOffset - topStart));
+    top.style.height = h + 'px';
+  };
+  const onUp = () => {
+    if (!dragging) return;
+    dragging = false;
+    resizer.classList.remove('dragging');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    document.body.classList.remove('row-dragging');
+    window.removeEventListener('mousemove', onMove);
+    window.removeEventListener('mouseup', onUp);
+    localStorage.setItem(storageKey, String(parseInt(top.style.height, 10) || VSPLIT_DEFAULT));
+  };
+  resizer.addEventListener('mousedown', (e) => {
+    const tr = top.getBoundingClientRect(), br = bottom.getBoundingClientRect();
+    topStart = tr.top;                       // ขอบบนของส่วนบน (ใช้อ้างอิงความสูง)
+    grabOffset = e.clientY - tr.bottom;       // ระยะจากขอบล่างส่วนบน → จุดที่จับ (margin + ครึ่งตัวลาก)
+    const total = br.bottom - tr.top;         // พื้นที่ที่แบ่งกันจริง (top + ตัวลาก + bottom)
+    const rzTotal = total - tr.height - br.height; // ความสูงตัวลากรวม margin
+    min = Math.min(VSPLIT_MIN, total / 3);
+    maxTop = total - rzTotal - min;           // ให้ bottom เหลืออย่างน้อย min
+    dragging = true;
+    resizer.classList.add('dragging');
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+    document.body.classList.add('row-dragging');
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    e.preventDefault();
+  });
+  resizer.addEventListener('dblclick', () => {
+    top.style.height = VSPLIT_DEFAULT + 'px';
+    localStorage.setItem(storageKey, String(VSPLIT_DEFAULT));
+  });
+}
+
+// สร้าง pane แบบแบ่งบน-ล่างพร้อมตัวลาก · topNodes/bottomNodes = array ของ element (กรอง null ออก)
+function renderVSplit(pane, storageKey, topNodes, bottomNodes) {
+  pane.innerHTML = '';
+  pane.classList.add('vsplit-pane');
+  const top = el('div', { class: 'vsplit-top' }, topNodes.filter(Boolean));
+  const resizer = el('div', { class: 'vsplit-resizer', title: 'ลากปรับขนาด · ดับเบิลคลิก = รีเซ็ต' });
+  const bottom = el('div', { class: 'vsplit-bottom' }, bottomNodes.filter(Boolean));
+  const saved = parseInt(localStorage.getItem(storageKey) || '', 10);
+  top.style.height = (saved >= VSPLIT_MIN ? saved : VSPLIT_DEFAULT) + 'px';
+  pane.append(top, resizer, bottom);
+  bindVSplitResizer(resizer, top, bottom, pane, storageKey);
+}
+
 // ================= Inspector =================
 const listEl = document.getElementById('request-list');
 const detailEl = document.getElementById('request-detail');
@@ -294,39 +354,32 @@ function renderList() {
 
 function renderDetail(r) {
   detailEl.innerHTML = '';
-  detailEl.appendChild(el('div', { class: 'detail-header' }, [
+  detailEl.classList.remove('vsplit-pane');
+
+  // ส่วนบน = URL / Query / Headers / Request body / ไฟล์แนบ
+  const top = [];
+  top.push(el('div', { class: 'detail-header' }, [
     methodBadge(r.method),
     el('strong', { text: r.path }),
     el('span', { class: 'req-time', text: `${new Date(r.time).toLocaleString('th-TH')} • จาก ${r.ip}` }),
   ]));
 
   if (Object.keys(r.query || {}).length) {
-    detailEl.appendChild(el('div', { class: 'section-title', text: 'Query Parameters' }));
-    detailEl.appendChild(kvTable(r.query));
+    top.push(el('div', { class: 'section-title', text: 'Query Parameters' }));
+    top.push(kvTable(r.query));
   }
 
-  detailEl.appendChild(el('div', { class: 'section-title', text: 'Headers' }));
-  detailEl.appendChild(kvTable(r.headers));
+  top.push(el('div', { class: 'section-title', text: 'Headers' }));
+  top.push(kvTable(r.headers));
 
   const bodyText = prettyBody(r.body);
   if (bodyText) {
-    detailEl.appendChild(el('div', { class: 'section-title', text: `Body ${r.contentType ? `(${r.contentType.split(';')[0]})` : ''}` }));
-    detailEl.appendChild(bodyBlock(r.body));
-  }
-
-  // response ที่ได้กลับมา (เฉพาะ entry ที่มาจาก Sender)
-  if (r.senderResponse) {
-    if (r.senderResponse.error) {
-      detailEl.appendChild(el('div', { class: 'section-title', text: '↙ Response (จาก Sender)' }));
-      detailEl.appendChild(el('pre', { class: 'code-block', text: 'ERROR: ' + r.senderResponse.error }));
-    } else {
-      detailEl.appendChild(el('div', { class: 'section-title', text: `↙ Response (จาก Sender) — HTTP ${r.senderResponse.status}` }));
-      detailEl.appendChild(r.senderResponse.body ? bodyBlock(r.senderResponse.body) : el('pre', { class: 'code-block', text: '(response ว่าง)' }));
-    }
+    top.push(el('div', { class: 'section-title', text: `Body ${r.contentType ? `(${r.contentType.split(';')[0]})` : ''}` }));
+    top.push(bodyBlock(r.body));
   }
 
   if (r.files && r.files.length) {
-    detailEl.appendChild(el('div', { class: 'section-title', text: `ไฟล์แนบ (${r.files.length})` }));
+    top.push(el('div', { class: 'section-title', text: `ไฟล์แนบ (${r.files.length})` }));
     for (const f of r.files) {
       const url = `/api/requests/${r.id}/files/${f.index}`;
       const chip = el('div', { class: 'file-chip' });
@@ -356,8 +409,27 @@ function renderDetail(r) {
         chip.appendChild(metaBtn);
         chip.appendChild(metaContainer);
       }
-      detailEl.appendChild(chip);
+      top.push(chip);
     }
+  }
+
+  // ส่วนล่าง = response ที่ได้กลับมา (เฉพาะ entry ที่มาจาก Sender)
+  const bottom = [];
+  if (r.senderResponse) {
+    if (r.senderResponse.error) {
+      bottom.push(el('div', { class: 'section-title', text: '↙ Response (จาก Sender)' }));
+      bottom.push(el('pre', { class: 'code-block', text: 'ERROR: ' + r.senderResponse.error }));
+    } else {
+      bottom.push(el('div', { class: 'section-title', text: `↙ Response (จาก Sender) — HTTP ${r.senderResponse.status}` }));
+      bottom.push(r.senderResponse.body ? bodyBlock(r.senderResponse.body) : el('pre', { class: 'code-block', text: '(response ว่าง)' }));
+    }
+  }
+
+  // มี response → แบ่งบน-ล่างพร้อมตัวลาก · ไม่มี → แสดงรวมเลื่อนเดียวเหมือนเดิม
+  if (bottom.length) {
+    renderVSplit(detailEl, 'inspectorDetailH', top, bottom);
+  } else {
+    top.forEach((n) => detailEl.appendChild(n));
   }
 }
 
@@ -448,6 +520,7 @@ function parseHeaderLines(text) {
 
 function renderSendResult(result) {
   sendResultEl.innerHTML = '';
+  sendResultEl.classList.remove('vsplit-pane');
   if (!result.ok) {
     sendResultEl.appendChild(el('div', { class: 'detail-header' }, [
       el('span', { class: 'status-badge status-err', text: 'ERROR' }),
@@ -457,14 +530,20 @@ function renderSendResult(result) {
     return;
   }
   const cls = `status-${Math.floor(result.status / 100)}xx`;
-  sendResultEl.appendChild(el('div', { class: 'detail-header' }, [
-    el('span', { class: `status-badge ${cls}`, text: `${result.status} ${result.statusText}` }),
-    el('span', { class: 'req-time', text: `${result.durationMs} ms` }),
-  ]));
-  sendResultEl.appendChild(el('div', { class: 'section-title', text: 'Response Headers' }));
-  sendResultEl.appendChild(kvTable(result.headers));
-  sendResultEl.appendChild(el('div', { class: 'section-title', text: 'Response Body' }));
-  sendResultEl.appendChild(result.body ? bodyBlock(result.body) : el('pre', { class: 'code-block', text: '(ว่าง)' }));
+  // ส่วนบน = สถานะ + Response Headers · ส่วนล่าง = Response Body (ปรับขนาดได้ด้วยตัวลาก)
+  const top = [
+    el('div', { class: 'detail-header' }, [
+      el('span', { class: `status-badge ${cls}`, text: `${result.status} ${result.statusText}` }),
+      el('span', { class: 'req-time', text: `${result.durationMs} ms` }),
+    ]),
+    el('div', { class: 'section-title', text: 'Response Headers' }),
+    kvTable(result.headers),
+  ];
+  const bottom = [
+    el('div', { class: 'section-title', text: 'Response Body' }),
+    result.body ? bodyBlock(result.body) : el('pre', { class: 'code-block', text: '(ว่าง)' }),
+  ];
+  renderVSplit(sendResultEl, 'senderResultH', top, bottom);
 }
 
 // สลับโหมด ฟอร์ม / cURL
