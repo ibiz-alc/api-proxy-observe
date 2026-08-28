@@ -29,11 +29,12 @@ const FLOW = {
 
 // ความกว้างจริงของ pane ซ้าย/ขวา + ตำแหน่งตัวลาก
 const readGeom = (page) => page.evaluate(() => {
+  // scope ใต้ #flow-detail — .detail-hresizer/.detail-split มีในแท็บอื่นด้วย (Inspector/Sender)
   const g = {
-    req: document.querySelectorAll('.detail-split > .detail-pane')[0].getBoundingClientRect(),
-    res: document.querySelectorAll('.detail-split > .detail-pane')[1].getBoundingClientRect(),
-    rz: document.querySelector('.detail-hresizer').getBoundingClientRect(),
-    split: document.querySelector('.detail-split').getBoundingClientRect(),
+    req: document.querySelectorAll('#flow-detail .detail-split > .detail-pane')[0].getBoundingClientRect(),
+    res: document.querySelectorAll('#flow-detail .detail-split > .detail-pane')[1].getBoundingClientRect(),
+    rz: document.querySelector('#flow-detail .detail-hresizer').getBoundingClientRect(),
+    split: document.querySelector('#flow-detail .detail-split').getBoundingClientRect(),
   };
   return {
     reqW: g.req.width, resW: g.res.width, splitW: g.split.width,
@@ -65,7 +66,7 @@ const readGeom = (page) => page.evaluate(() => {
   check('2 เริ่มต้นแบ่งครึ่งพอดี', Math.abs(g0.reqW - g0.resW) <= 1, `req=${g0.reqW.toFixed(1)} res=${g0.resW.toFixed(1)}`);
 
   // 3) ลากไปทางซ้าย 300px → Request แคบลง ~300, Response กว้างขึ้น ~300, ตัวลากตามเมาส์
-  const y = await page.evaluate(() => { const r = document.querySelector('.detail-hresizer').getBoundingClientRect(); return r.top + r.height / 2; });
+  const y = await page.evaluate(() => { const r = document.querySelector('#flow-detail .detail-hresizer').getBoundingClientRect(); return r.top + r.height / 2; });
   const targetX = g0.rzX - 300;
   await page.mouse.move(g0.rzX, y);
   await page.mouse.down();
@@ -92,7 +93,7 @@ const readGeom = (page) => page.evaluate(() => {
   await page.mouse.move(gR.rzX, y); await page.mouse.down();
   await page.mouse.move(1000, y, { steps: 10 }); await page.mouse.up();
   const gSet = await readGeom(page);
-  await page.evaluate(() => [...document.querySelectorAll('.detail-pane .subtab-btn')].find((b) => b.textContent.trim() === 'Raw').click());
+  await page.evaluate(() => [...document.querySelectorAll('#flow-detail .detail-pane .subtab-btn')].find((b) => b.textContent.trim() === 'Raw').click());
   await sleep(150);
   const gAfterTab = await readGeom(page);
   check('5 คงความกว้างหลังสลับ subtab', Math.abs(gAfterTab.reqW - gSet.reqW) <= 1.5, `${gSet.reqW.toFixed(1)} → ${gAfterTab.reqW.toFixed(1)}`);
@@ -108,7 +109,7 @@ const readGeom = (page) => page.evaluate(() => {
 
   // 7) ดับเบิลคลิก → กลับไป 50/50
   await page.evaluate(() => {
-    const rz = document.querySelector('.detail-hresizer');
+    const rz = document.querySelector('#flow-detail .detail-hresizer');
     rz.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
   });
   await sleep(100);
