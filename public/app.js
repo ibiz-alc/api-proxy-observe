@@ -2085,7 +2085,15 @@ function renderFlowDetail(f) {
   editItem.addEventListener('click', () => { dismissKebab(); openRepeatEdit(f); });
   const copyWrap = makeCopyAsWrap(f); // เมนูย่อย "Copy as ▸" (flyout ออกด้านซ้าย)
   const kebabBtn = el('button', { class: 'maplocal-icon-btn kebab-btn', type: 'button', title: 'เพิ่มเติม', text: '⋯' });
-  kebabWrap.append(kebabBtn, el('div', { class: 'kebab-menu' }, [repeatItem, editItem, el('div', { class: 'kebab-sep' }), copyWrap]));
+  const kebabMenu = el('div', { class: 'kebab-menu' }, [repeatItem, editItem, el('div', { class: 'kebab-sep' }), copyWrap]);
+  kebabWrap.append(kebabBtn, kebabMenu);
+  // เมนูเป็น position:fixed (หลุด overflow ของ .detail-subtabs) → ตั้งพิกัดจากปุ่มตอนเข้า hover
+  // ชิดขวาปุ่มเหมือน right:0 เดิม + drop ลงใต้ปุ่ม 4px (ตรงกับ .kebab-wrap::after ที่บริดจ์ hover)
+  kebabWrap.addEventListener('mouseenter', () => {
+    const r = kebabBtn.getBoundingClientRect();
+    kebabMenu.style.top = (r.bottom + 4) + 'px';
+    kebabMenu.style.right = (window.innerWidth - r.right) + 'px';
+  });
   // ออกจากปุ่ม ⋯ แล้วรีเซ็ต เพื่อให้ hover ครั้งถัดไปเปิดเมนูได้อีก
   kebabWrap.addEventListener('mouseleave', () => kebabWrap.classList.remove('menu-dismissed'));
   const reqExtra = el('div', { class: 'detail-extra' }, [copyUrlBtn, mapBtn, pinBtn, kebabWrap]);
