@@ -202,38 +202,10 @@ button.danger {
   padding: 16px;
 }
 
-/* pane แบ่ง บน(URL/Headers) - ล่าง(Response body) ปรับขนาดได้ (Inspector + Sender) */
-#request-detail.vsplit-pane, #send-result.vsplit-pane {
-  display: flex;
-  flex-direction: column;
-  padding: 0;
-  overflow: hidden;
-}
-.vsplit-top {
-  flex: 0 0 auto;
-  min-height: 90px;
-  overflow-y: auto;
-  padding: 16px 16px 4px;
-}
-.vsplit-bottom {
-  flex: 1 1 0;
-  min-height: 90px;
-  overflow-y: auto;
-  padding: 4px 16px 16px;
-}
-/* ตัวลากปรับขนาดบน/ล่าง — เส้นคั่นอยู่ที่ตัวลาก (แบบเดียวกับ .proxy-vresizer) */
-.vsplit-resizer {
-  flex: 0 0 10px;
-  height: 10px;
-  cursor: row-resize;
-  border-radius: 5px;
-  margin: 2px 12px;
-  background:
-    linear-gradient(var(--border), var(--border)) center / 40px 3px no-repeat;
-  transition: background-color 0.15s;
-}
-.vsplit-resizer:hover, .vsplit-resizer.dragging { background-color: var(--panel-2); }
-body.row-dragging iframe { pointer-events: none; }
+/* Inspector detail: แบ่ง ซ้าย(URL/Headers/request) | ขวา(Response) ปรับความกว้างได้
+   ใช้ .detail-split (grid + --detail-l %) + .detail-hresizer ชุดเดียวกับแท็บ Proxy */
+#request-detail.hsplit-pane { padding: 0; overflow: hidden; }
+.hsplit-col { min-width: 0; overflow-y: auto; padding: 16px; }
 
 .detail-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
 .detail-header .req-time { color: var(--muted); }
@@ -360,10 +332,11 @@ pre.code-block.json { color: #cbd5e1; }
 .inline-meta { margin-top: 10px; }
 
 /* ---------- Sender ---------- */
+/* ฟอร์ม (ซ้าย) | ตัวลาก | ผลลัพธ์ (ขวา) — ความกว้างฝั่งซ้ายเก็บใน --sender-l (ลากปรับได้) */
 .sender-layout {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
+  grid-template-columns: var(--sender-l, calc(50% - 5px)) 10px minmax(0, 1fr);
+  gap: 0;
   height: calc(100vh - 110px);
 }
 
@@ -1363,12 +1336,16 @@ body.mirror-open .tc-popup.dock-right { right: calc(44px + var(--mirror-w)); }
 }
 
 @media (max-width: 900px) {
-  .inspector-layout, .sender-layout, .image-layout { grid-template-columns: 1fr; height: auto; }
+  .inspector-layout, .image-layout { grid-template-columns: 1fr; height: auto; }
+  /* จอแคบ: ทิ้งตัวลากซ้าย/ขวา (ฟีเจอร์ desktop) กลับเป็นคอลัมน์เดียวเรียงลง เลื่อนตามเนื้อหา */
+  .sender-layout { grid-template-columns: 1fr; height: auto; }
+  .sender-layout > .detail-hresizer { display: none; }
   #request-list { max-height: 300px; }
-  /* จอแคบ pane สูง auto → flex:1 ของส่วนล่างจะยุบ · ทิ้งตัวลาก (ฟีเจอร์ desktop) กลับเป็นเลื่อนเดียว */
-  #request-detail.vsplit-pane, #send-result.vsplit-pane { display: block; overflow-y: auto; padding: 16px; }
-  .vsplit-top, .vsplit-bottom { height: auto !important; overflow: visible; padding: 0; }
-  .vsplit-resizer { display: none; }
+  /* Inspector detail split → คอลัมน์เดียว (grid 1 คอลัมน์) ซ่อนตัวลาก */
+  #request-detail.hsplit-pane { padding: 16px; overflow-y: auto; }
+  #request-detail .detail-split { display: block; height: auto; }
+  #request-detail .detail-split > .detail-hresizer { display: none; }
+  .hsplit-col { padding: 0; overflow: visible; }
 }
 
 /* ================= Status tab ================= */
