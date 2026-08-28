@@ -143,6 +143,26 @@ async function runPane(page, label, paneSel, storageKey, activate, render) {
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   check('ไม่มี horizontal overflow', overflow <= 0, `overflow=${overflow}`);
+
+  // ---- จอแคบ (≤900px): ทิ้งตัวลาก กลับเป็นเลื่อนเดียว ส่วนล่างต้องไม่ยุบเหลือ 90px ----
+  await page.setViewport({ width: 480, height: 720 });
+  await page.click('button[data-tab="inspector"]');
+  await page.evaluate((r) => window.renderDetail(r), REQ);
+  await sleep(150);
+  const narrow = await page.evaluate(() => {
+    const bottom = document.querySelector('#request-detail .vsplit-bottom');
+    const rz = document.querySelector('#request-detail .vsplit-resizer');
+    return {
+      rzHidden: rz ? getComputedStyle(rz).display === 'none' : true,
+      botH: bottom ? bottom.getBoundingClientRect().height : 0,
+      botScrollH: bottom ? bottom.scrollHeight : 0,
+    };
+  });
+  check('จอแคบ ซ่อนตัวลาก', narrow.rzHidden, `rzHidden=${narrow.rzHidden}`);
+  check('จอแคบ ส่วนล่างไม่ยุบเหลือ 90px', narrow.botH >= narrow.botScrollH - 2 && narrow.botH > 90,
+    `botH=${narrow.botH.toFixed(1)} scrollH=${narrow.botScrollH.toFixed(1)}`);
+  await page.setViewport({ width: 1440, height: 900 });
+
   check('ไม่มี page error', pageErrors.length === 0, pageErrors.join(' | '));
 
   await browser.close();

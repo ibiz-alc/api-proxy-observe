@@ -1365,6 +1365,10 @@ body.mirror-open .tc-popup.dock-right { right: calc(44px + var(--mirror-w)); }
 @media (max-width: 900px) {
   .inspector-layout, .sender-layout, .image-layout { grid-template-columns: 1fr; height: auto; }
   #request-list { max-height: 300px; }
+  /* จอแคบ pane สูง auto → flex:1 ของส่วนล่างจะยุบ · ทิ้งตัวลาก (ฟีเจอร์ desktop) กลับเป็นเลื่อนเดียว */
+  #request-detail.vsplit-pane, #send-result.vsplit-pane { display: block; overflow-y: auto; padding: 16px; }
+  .vsplit-top, .vsplit-bottom { height: auto !important; overflow: visible; padding: 0; }
+  .vsplit-resizer { display: none; }
 }
 
 /* ================= Status tab ================= */
