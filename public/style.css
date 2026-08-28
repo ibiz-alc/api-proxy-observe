@@ -883,8 +883,10 @@ body.col-dragging iframe { pointer-events: none; }
 .kebab-wrap { position: relative; }
 .maplocal-icon-btn.kebab-btn { margin-left: 0; border-color: var(--border); color: var(--muted); font-weight: 700; padding: 3px 12px; }
 .maplocal-icon-btn.kebab-btn:hover { background: var(--panel-2); color: var(--text); }
+/* position: fixed — หลุดจาก overflow ของ .detail-subtabs (overflow-y:hidden กันเมนูโดน clip)
+   พิกัด top/right ตั้งด้วย JS จาก rect ของปุ่ม ⋯ ตอน mouseenter */
 .kebab-menu {
-  display: none; position: absolute; top: calc(100% + 4px); right: 0; z-index: 10000;
+  display: none; position: fixed; z-index: 10000;
   min-width: 170px; background: var(--panel); border: 1px solid var(--border);
   border-radius: 8px; padding: 4px; box-shadow: 0 8px 28px rgba(0,0,0,0.55);
   flex-direction: column; gap: 2px;
