@@ -1829,8 +1829,12 @@ body.mirror-open { padding-right: calc(44px + var(--mirror-w)); transition: none
 .jc-layout {
   display: grid;
   grid-template-columns: var(--jc-l, calc(50% - 5px)) 10px minmax(0, 1fr);
-  flex: 1 1 auto; min-height: 200px;
+  /* แถวต้อง minmax(0,1fr) + flex-basis 0 — ไม่งั้นแถว grid สูงตาม tree ทั้งก้อน ดันหน้าทั้งแท็บให้ยาว
+     แล้วตอนคลิกแถว diff หน้าเลื่อนหนี ทำให้แผง "Key ที่ต่างกัน" เด้งหายจากจอ */
+  grid-template-rows: minmax(0, 1fr);
+  flex: 1 1 0; min-height: 200px;
 }
+.jc-side { min-height: 0; }
 .jc-side-head { display: flex; align-items: center; gap: 8px; flex-shrink: 0; min-width: 0; }
 .jc-side-label { font-size: 0.82rem; white-space: nowrap; }
 .jc-side[data-side="a"] .jc-side-label { color: var(--red); }
@@ -1845,7 +1849,7 @@ body.mirror-open { padding-right: calc(44px + var(--mirror-w)); transition: none
 .jc-tree.jv-stale { opacity: 0.45; }
 .jc-stat-diff { color: var(--yellow); }
 .jc-stat-same { color: var(--green); }
-.jc-diff { flex: 0 0 auto; max-height: 34%; min-height: 90px; display: flex; flex-direction: column; margin-top: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+.jc-diff { flex: 0 0 auto; /* ปักล่างจอ: compare-mode สูงพอดีจอ + layout ด้านบนกินที่เหลือ */ max-height: 34%; min-height: 90px; display: flex; flex-direction: column; margin-top: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
 .jc-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: 0.8rem; }
 .jc-legend-title { font-weight: 600; }
 .jc-legend .hint { margin-left: auto; }
