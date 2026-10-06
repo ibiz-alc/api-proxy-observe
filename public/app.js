@@ -4135,6 +4135,72 @@ function jdShort(v, max = 80) { // ค่าแบบสั้นสำหรั
   const s = JSON.stringify(v);
   return s.length > max ? s.slice(0, max - 1) + '…' : s;
 }
+// ---- path ของ JSON ณ ตำแหน่งตัวอักษรในข้อความดิบ (ใช้ตอน hover ใน editor) ----
+// scanner แบบทนทาน: JSON พังครึ่งทางก็ยังได้ path ถึงจุดที่อ่านได้ · คืน segments แบบเดียวกับ jtNode (key=string, index=number)
+function jvPathAt(text, pos) {
+  const stack = []; // { t:'o', key, state:'key'|'val' } | { t:'a', idx }
+  let i = 0;
+  while (i < text.length && i <= pos) {
+    const c = text[i];
+    const top = stack[stack.length - 1];
+    if (c === '"') {
+      let j = i + 1; let s = '';
+      while (j < text.length && text[j] !== '"' && text[j] !== '\n') {
+        if (text[j] === '\\') { s += text.slice(j, j + 2); j += 2; } else s += text[j++];
+      }
+      if (top && top.t === 'o' && top.state === 'key') {
+        try { top.key = JSON.parse('"' + s + '"'); } catch { top.key = s; }
+      }
+      if (j >= pos) break; // เมาส์อยู่ในสตริงนี้
+      i = j + 1; continue;
+    }
+    if (c === '{') stack.push({ t: 'o', key: null, state: 'key' });
+    else if (c === '[') stack.push({ t: 'a', idx: 0 });
+    else if (c === '}' || c === ']') { if (i === pos) break; stack.pop(); }
+    else if (c === ':' && top && top.t === 'o') top.state = 'val';
+    else if (c === ',' && top) { if (top.t === 'a') top.idx++; else { top.state = 'key'; top.key = null; } }
+    i++;
+  }
+  const segs = [];
+  for (const f of stack) {
+    if (f.t === 'a') segs.push(f.idx);
+    else if (f.key != null) segs.push(f.key);
+    else break;
+  }
+  return segs;
+}
+window.jvPathAt = jvPathAt;
+// hover ใน makeJsonEditor → โชว์ path บน bar · textarea ทับ layer ไฮไลต์อยู่ จึงสลับ pointer-events ชั่วคราว
+// เพื่อให้ caretRangeFromPoint ชี้ลงตัวอักษรใน <pre> (สลับแบบ sync ไม่มี repaint ระหว่างกลาง)
+function bindEditorHoverPath(ed, getBar) {
+  const hl = ed.wrap.querySelector('.je-highlight');
+  const code = hl.querySelector('code');
+  let raf = 0; let last = null;
+  const offsetAt = (x, y) => {
+    ed.textarea.style.pointerEvents = 'none'; hl.style.pointerEvents = 'auto';
+    let node = null; let off = 0;
+    try {
+      if (document.caretRangeFromPoint) { const r = document.caretRangeFromPoint(x, y); if (r) { node = r.startContainer; off = r.startOffset; } }
+      else if (document.caretPositionFromPoint) { const p = document.caretPositionFromPoint(x, y); if (p) { node = p.offsetNode; off = p.offset; } }
+    } finally { ed.textarea.style.pointerEvents = ''; hl.style.pointerEvents = ''; }
+    if (!node || !code.contains(node)) return null;
+    const pre = document.createRange();
+    pre.selectNodeContents(code); pre.setEnd(node, off);
+    return pre.toString().length;
+  };
+  ed.textarea.addEventListener('mousemove', (e) => {
+    last = e;
+    if (raf) return;
+    raf = requestAnimationFrame(() => {
+      raf = 0;
+      const bar = getBar(); if (!bar || !last) return;
+      const text = ed.textarea.value;
+      const pos = text.length > JV_MAX_PARSE ? null : offsetAt(last.clientX, last.clientY);
+      bar.textContent = pos == null || !text.trim() ? '' : jtPathStr(jvPathAt(text, pos));
+    });
+  });
+  ed.textarea.addEventListener('mouseleave', () => { last = null; const bar = getBar(); if (bar) bar.textContent = ''; });
+}
 function jvExpandIn(box, line) { // กางบล็อกบรรพบุรุษที่พับอยู่ (คลิก head — state พับเก็บใน closure ของ jtNode)
   for (let elx = line.parentElement; elx && elx !== box; elx = elx.parentElement) {
     if (elx.classList.contains('jt-children') && elx.style.display === 'none') {
@@ -4257,6 +4323,7 @@ function setupJsonViewer() {
   // ===== โหมด view (ดู JSON ก้อนเดียว): editor ซ้าย → tree ขวา =====
   const ed = makeJsonEditor('');
   host.appendChild(ed.wrap);
+  bindEditorHoverPath(ed, () => document.querySelector('#jv-view-mode .jt-pathbar'));
   const ta = ed.textarea;
   const treeBox = document.getElementById('jv-tree');
   const errBar = document.getElementById('jv-error');
@@ -4388,11 +4455,30 @@ function setupJsonViewer() {
     const sec = cmpBox.querySelector(`.jc-side[data-side="${k}"]`);
     const sed = makeJsonEditor('');
     sec.querySelector('.jc-editor-host').appendChild(sed.wrap);
+    bindEditorHoverPath(sed, () => sec.querySelector('.jt-pathbar'));
     const file = sec.querySelector('.jc-file');
     sec.querySelector('.jc-open-btn').addEventListener('click', () => file.click());
     return { sec, ed: sed, err: sec.querySelector('.jv-error'), tree: sec.querySelector('.jc-tree'), file, val: undefined, ok: false };
   };
   const cmp = { a: mkSide('a'), b: mkSide('b'), diffs: [], hidden: new Set() };
+  // hover บรรทัดใน tree ฝั่งหนึ่ง → ไฮไลต์ key เดียวกันอีกฝั่ง + โชว์ path บน bar ทั้งสองฝั่ง
+  // (bar ฝั่งตัวเอง jsonTree เซ็ตให้อยู่แล้ว · ไม่มีบรรทัดนั้นอีกฝั่ง = key ที่มีแค่ฝั่งเดียว → bar อีกฝั่งบอกว่าไม่มี)
+  const clearPeer = () => {
+    for (const s of [cmp.a, cmp.b]) s.tree.querySelectorAll('.jc-peer').forEach((l) => l.classList.remove('jc-peer'));
+  };
+  for (const [me, other] of [[cmp.a, cmp.b], [cmp.a, cmp.b].reverse()]) {
+    me.tree.addEventListener('mouseover', (e) => {
+      const line = e.target.closest && e.target.closest('.jt-line[data-jtpath]');
+      if (!line || !me.tree.contains(line)) return;
+      clearPeer();
+      const p = line.dataset.jtpath;
+      const peer = [...other.tree.querySelectorAll('.jt-line[data-jtpath]')].find((l) => l.dataset.jtpath === p);
+      if (peer) peer.classList.add('jc-peer');
+      const bar = other.sec.querySelector('.jt-pathbar');
+      bar.textContent = other.ok ? (peer ? p : `${p} (ไม่มีฝั่งนี้)`) : '';
+    });
+    me.tree.addEventListener('mouseleave', () => { clearPeer(); other.sec.querySelector('.jt-pathbar').textContent = ''; });
+  }
   const cmpStat = document.getElementById('jc-stat');
   const diffList = document.getElementById('jc-difflist');
   const legend = document.getElementById('jc-legend');

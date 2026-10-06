@@ -3,6 +3,7 @@
 //   env -u NODE_OPTIONS PORT=3100 node scripts/dev-tests/json-compare-tabs-test.js
 // เช็ค: 1 jdDiff ถูก · 2 เพิ่ม/สลับ sub-tab ข้อความแยกกัน · 3 compare นับ changed/added/removed
 //   4 tree ไฮไลต์ + คลิกแถวกระโดด · 5 filter chip · 6 swap · 7 reload จำครบ · 8 rename/close · 9 ไม่ overflow / ไม่มี page error
+//   10 hover โชว์ path (editor + tree + ไฮไลต์ key เดียวกันอีกฝั่ง)
 const path = require('path');
 const puppeteer = require(require.resolve('puppeteer-core', { paths: [path.join(__dirname, '..', '..'), process.cwd()] }));
 
@@ -126,6 +127,49 @@ const typeInto = (page, sel, text) => page.evaluate((s, t) => {
   await page.click('.jv-doctab:nth-child(1) .jv-doctab-close'); await sleep(50);
   const r8b = await page.evaluate(() => ({ n: document.querySelectorAll('.jv-doctab').length, view: getComputedStyle(document.getElementById('jv-view-mode')).display }));
   check('8 ปิดหมด → เหลือแท็บ JSON ว่าง 1 อัน', r8b.n === 1 && r8b.view !== 'none', JSON.stringify(r8b));
+
+  // 10) hover โชว์ path — jvPathAt + editor + tree (ทำในแท็บ compare ใหม่)
+  const pa = await page.evaluate(() => {
+    const t = '{\n  "user": {\n    "name": "x",\n    "tags": ["a", "b"]\n  },\n  "n": 1\n}';
+    const at = (needle, d = 1) => window.jtPathStr(window.jvPathAt(t, t.indexOf(needle) + d));
+    return [at('"name"'), at('"x"'), at('"b"'), at('"n"'), at('{', 0), at('"user"', 0)];
+  }).catch((e) => ['ERR ' + e.message]);
+  check('10 jvPathAt ได้ path ถูก', pa.join('|') === 'user.name|user.name|user.tags[1]|n|$|user', pa.join('|'));
+  await page.click('#jv-add-compare'); await sleep(50);
+  await typeInto(page, '.jc-side[data-side="a"] textarea', JSON.stringify(A, null, 2));
+  await typeInto(page, '.jc-side[data-side="b"] textarea', JSON.stringify(B, null, 2)); await sleep(450);
+  // หา pixel ของคำว่า "age" ใน layer ไฮไลต์ฝั่ง A แล้วขยับเมาส์จริงไปตรงนั้น
+  const pt = await page.evaluate(() => {
+    const code = document.querySelector('.jc-side[data-side="a"] .je-highlight code');
+    const w = document.createTreeWalker(code, NodeFilter.SHOW_TEXT);
+    for (let n; (n = w.nextNode());) {
+      const i = n.textContent.indexOf('age'); if (i < 0) continue;
+      const r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + 2);
+      const b = r.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+    }
+    return null;
+  });
+  await page.mouse.move(pt.x, pt.y); await sleep(100);
+  const barA = await page.$eval('.jc-side[data-side="a"] .jt-pathbar', (b) => b.textContent);
+  check('10 hover ใน editor ซ้าย → path', barA === 'user.age', barA);
+  await page.click('#jc-mode-tree'); await sleep(100);
+  const hov = await page.evaluate(() => {
+    const line = [...document.querySelectorAll('.jc-side[data-side="a"] .jt-line')].find((l) => l.dataset.jtpath === 'user.name');
+    line.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    const r1 = {
+      a: document.querySelector('.jc-side[data-side="a"] .jt-pathbar').textContent,
+      b: document.querySelector('.jc-side[data-side="b"] .jt-pathbar').textContent,
+      peer: (document.querySelector('.jc-side[data-side="b"] .jc-peer') || {}).dataset?.jtpath,
+    };
+    const old = [...document.querySelectorAll('.jc-side[data-side="a"] .jt-line')].find((l) => l.dataset.jtpath === 'old');
+    old.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    r1.missing = document.querySelector('.jc-side[data-side="b"] .jt-pathbar').textContent;
+    r1.peerAfter = document.querySelectorAll('.jc-peer').length;
+    return r1;
+  });
+  check('10 hover tree → path ทั้งสองฝั่ง + ไฮไลต์อีกฝั่ง', hov.a === 'user.name' && hov.b === 'user.name' && hov.peer === 'user.name', JSON.stringify(hov));
+  check('10 key ที่มีแค่ซ้าย → ฝั่งขวาบอกว่าไม่มี', hov.missing === 'old (ไม่มีฝั่งนี้)' && hov.peerAfter === 0, JSON.stringify(hov));
+  await page.screenshot({ path: 'json-compare-hover.png' });
 
   // 9) overflow + narrow
   await page.click('#jv-add-compare'); await sleep(50);
