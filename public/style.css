@@ -1835,7 +1835,9 @@ body.mirror-open { padding-right: calc(44px + var(--mirror-w)); transition: none
 .jc-side-label { font-size: 0.82rem; white-space: nowrap; }
 .jc-side[data-side="a"] .jc-side-label { color: var(--red); }
 .jc-side[data-side="b"] .jc-side-label { color: var(--green); }
-.jc-side-head .jt-pathbar { margin-left: auto; }
+.jc-side-head .jt-pathbar { margin-left: 4px; flex: 1; text-align: left; font-size: 0.78rem; color: var(--accent); padding-left: 0; }
+.jc-side-head .jt-pathbar:not(:empty)::before { content: '📍 '; } /* compare: path ต้องอ่านง่าย ไม่ใช่ตัวจิ๋วแบบ Proxy */
+.jc-tree .jt-line.jc-peer { outline: 1px dashed var(--accent); background: rgba(56, 189, 248, 0.10); }
 .jc-open-btn { padding: 2px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text); cursor: pointer; }
 .jc-open-btn:hover { border-color: var(--accent); }
 .jc-editor-host { flex: 1; min-height: 0; display: flex; }
