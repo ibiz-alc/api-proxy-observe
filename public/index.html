@@ -129,30 +129,85 @@
 
   <!-- ============ JSON Viewer ============ -->
   <main id="tab-jsonviewer" class="tab">
-    <div class="jv-toolbar">
-      <button id="jv-open-btn" type="button">📂 เปิดไฟล์</button>
-      <input type="file" id="jv-file" accept=".json,.txt,application/json" style="display:none" />
-      <button id="jv-format-btn" type="button">Format</button>
-      <button id="jv-minify-btn" type="button">Minify</button>
-      <button id="jv-clear-btn" type="button">✕ Clear</button>
-      <span id="jv-stat" class="hint"></span>
+    <div class="jv-docbar">
+      <div id="jv-doctabs" class="jv-doctabs"></div>
+      <button id="jv-add-view" type="button" class="jv-add" title="เพิ่มแท็บ JSON ใหม่ (ทำงานหลายอันพร้อมกัน)">＋ JSON</button>
+      <button id="jv-add-compare" type="button" class="jv-add" title="เพิ่มแท็บเปรียบเทียบ JSON ซ้าย/ขวา">＋ ⇄ Compare</button>
     </div>
-    <div class="jv-layout">
-      <section class="jv-pane">
-        <div id="jv-error" class="jv-error" style="display:none"></div>
-        <div id="jv-editor-host" class="jv-editor-host"></div>
-      </section>
-      <div class="jv-resizer" title="ลากเพื่อปรับความกว้างซ้าย/ขวา · ดับเบิลคลิก = 50/50"></div>
-      <section class="jv-pane jt-pane-host">
-        <div class="jv-searchbar">
-          <input type="text" id="jv-search" placeholder="🔍 ค้นหา key/value" title="กด ⌘F / Ctrl+F เพื่อเข้าช่องนี้ · Enter ไป match ถัดไป" />
-          <span id="jv-search-count" class="hint"></span>
-          <button id="jv-prev-btn" type="button" title="ก่อนหน้า">▲</button>
-          <button id="jv-next-btn" type="button" title="ถัดไป">▼</button>
+    <div id="jv-view-mode" class="jv-mode">
+      <div class="jv-toolbar">
+        <button id="jv-open-btn" type="button">📂 เปิดไฟล์</button>
+        <input type="file" id="jv-file" accept=".json,.txt,application/json" style="display:none" />
+        <button id="jv-format-btn" type="button">Format</button>
+        <button id="jv-minify-btn" type="button">Minify</button>
+        <button id="jv-clear-btn" type="button">✕ Clear</button>
+        <button id="jv-tocompare-btn" type="button" title="เปิดแท็บ Compare ใหม่ โดยเอา JSON นี้เป็นฝั่งซ้าย">⇄ เทียบกับ…</button>
+        <span id="jv-stat" class="hint"></span>
+      </div>
+      <div class="jv-layout">
+        <section class="jv-pane">
+          <div id="jv-error" class="jv-error" style="display:none"></div>
+          <div id="jv-editor-host" class="jv-editor-host"></div>
+        </section>
+        <div class="jv-resizer" title="ลากเพื่อปรับความกว้างซ้าย/ขวา · ดับเบิลคลิก = 50/50"></div>
+        <section class="jv-pane jt-pane-host">
+          <div class="jv-searchbar">
+            <input type="text" id="jv-search" placeholder="🔍 ค้นหา key/value" title="กด ⌘F / Ctrl+F เพื่อเข้าช่องนี้ · Enter ไป match ถัดไป" />
+            <span id="jv-search-count" class="hint"></span>
+            <button id="jv-prev-btn" type="button" title="ก่อนหน้า">▲</button>
+            <button id="jv-next-btn" type="button" title="ถัดไป">▼</button>
+          </div>
+          <div class="jt-pathbar"></div>
+          <div id="jv-tree" class="code-block json jt-scroll"><p class="empty-msg">วาง JSON ฝั่งซ้าย หรือกด 📂 เปิดไฟล์</p></div>
+        </section>
+      </div>
+    </div>
+    <div id="jv-compare-mode" class="jv-mode" style="display:none">
+      <div class="jv-toolbar">
+        <div class="jc-viewtoggle">
+          <button id="jc-mode-edit" type="button" class="subtab-btn">✏️ แก้ไข</button>
+          <button id="jc-mode-tree" type="button" class="subtab-btn">🌳 Tree ไฮไลต์</button>
         </div>
-        <div class="jt-pathbar"></div>
-        <div id="jv-tree" class="code-block json jt-scroll"><p class="empty-msg">วาง JSON ฝั่งซ้าย หรือกด 📂 เปิดไฟล์</p></div>
-      </section>
+        <button id="jc-format-btn" type="button">Format ทั้งคู่</button>
+        <button id="jc-swap-btn" type="button" title="สลับ JSON ซ้าย ↔ ขวา">⇄ สลับ</button>
+        <button id="jc-clear-btn" type="button">✕ Clear</button>
+        <span id="jc-stat" class="hint"></span>
+      </div>
+      <div class="jc-layout">
+        <section class="jv-pane jc-side jt-pane-host" data-side="a">
+          <div class="jc-side-head">
+            <strong class="jc-side-label">◀ ซ้าย (A)</strong>
+            <button type="button" class="jc-open-btn" title="เปิดไฟล์ JSON เข้าฝั่งนี้">📂</button>
+            <input type="file" class="jc-file" accept=".json,.txt,application/json" style="display:none" />
+            <span class="jt-pathbar"></span>
+          </div>
+          <div class="jv-error" style="display:none"></div>
+          <div class="jc-editor-host"></div>
+          <div class="jc-tree code-block json jt-scroll" style="display:none"></div>
+        </section>
+        <div class="jv-resizer jc-resizer" title="ลากเพื่อปรับความกว้างซ้าย/ขวา · ดับเบิลคลิก = 50/50"></div>
+        <section class="jv-pane jc-side jt-pane-host" data-side="b">
+          <div class="jc-side-head">
+            <strong class="jc-side-label">ขวา (B) ▶</strong>
+            <button type="button" class="jc-open-btn" title="เปิดไฟล์ JSON เข้าฝั่งนี้">📂</button>
+            <input type="file" class="jc-file" accept=".json,.txt,application/json" style="display:none" />
+            <span class="jt-pathbar"></span>
+          </div>
+          <div class="jv-error" style="display:none"></div>
+          <div class="jc-editor-host"></div>
+          <div class="jc-tree code-block json jt-scroll" style="display:none"></div>
+        </section>
+      </div>
+      <div class="jc-diff">
+        <div class="jc-legend" id="jc-legend">
+          <span class="jc-legend-title">Key ที่ต่างกัน:</span>
+          <button type="button" class="jc-chip jd-changed" data-type="changed" title="คลิกเพื่อซ่อน/แสดง"><i>~</i> ค่าเปลี่ยน <b>0</b></button>
+          <button type="button" class="jc-chip jd-added" data-type="added" title="คลิกเพื่อซ่อน/แสดง"><i>+</i> มีแค่ขวา <b>0</b></button>
+          <button type="button" class="jc-chip jd-removed" data-type="removed" title="คลิกเพื่อซ่อน/แสดง"><i>−</i> มีแค่ซ้าย <b>0</b></button>
+          <span class="hint">คลิกแถว = กระโดดไปจุดนั้นทั้งสองฝั่ง</span>
+        </div>
+        <div id="jc-difflist" class="jc-difflist"><p class="empty-msg">วาง JSON ทั้งสองฝั่งเพื่อเปรียบเทียบ</p></div>
+      </div>
     </div>
   </main>
 

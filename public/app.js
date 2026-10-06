@@ -4015,7 +4015,8 @@ setupSettings();
 
 // ================= JSON Viewer tab =================
 // วาง/เปิดไฟล์ JSON ฝั่งซ้าย (makeJsonEditor) → parse (debounce) → tree ฝั่งขวา (jsonTree)
-// + ค้นหาใน tree, Format/Minify, แถบ error ชี้บรรทัด, จำข้อความล่าสุดใน localStorage
+// + ค้นหาใน tree, Format/Minify, แถบ error ชี้บรรทัด
+// มี sub-tab หลายเอกสาร (view / compare ซ้าย-ขวา) จำทั้งหมดใน localStorage (jsonViewerDocs)
 const JV_TEXT_KEY = 'jsonViewerText';
 const JV_MAX_PARSE = 5 * 1024 * 1024;  // เกินนี้ไม่ parse — tree เป็น DOM เต็ม จะค้าง
 const JV_MAX_SAVE = 500 * 1024;        // เกินนี้ไม่เขียน localStorage (กัน quota)
@@ -4102,18 +4103,159 @@ function jvErrorPos(msg, text) { // หา line/col ของจุดพัง 
   const line = (before.match(/\n/g) || []).length + 1;
   return { line, col: pos - before.lastIndexOf('\n'), pos };
 }
+// ---- JSON Compare: diff สองก้อนแบบตาม key (object = ตามชื่อ key, array = ตาม index) ----
+// คืน [{type:'changed'|'added'|'removed', path:[...segs], a, b}] — path ใช้ jtPathStr ได้ตรงกับ data-jtpath ของ tree
+function jdDiff(a, b, path = [], out = []) {
+  const isObj = (v) => v !== null && typeof v === 'object';
+  if (isObj(a) && isObj(b) && Array.isArray(a) === Array.isArray(b)) {
+    if (Array.isArray(a)) {
+      const n = Math.max(a.length, b.length);
+      for (let i = 0; i < n; i++) {
+        if (i >= a.length) out.push({ type: 'added', path: [...path, i], b: b[i] });
+        else if (i >= b.length) out.push({ type: 'removed', path: [...path, i], a: a[i] });
+        else jdDiff(a[i], b[i], [...path, i], out);
+      }
+    } else {
+      for (const k of Object.keys(a)) {
+        if (!Object.prototype.hasOwnProperty.call(b, k)) out.push({ type: 'removed', path: [...path, k], a: a[k] });
+        else jdDiff(a[k], b[k], [...path, k], out);
+      }
+      for (const k of Object.keys(b)) {
+        if (!Object.prototype.hasOwnProperty.call(a, k)) out.push({ type: 'added', path: [...path, k], b: b[k] });
+      }
+    }
+  } else if (a !== b) { // ค่า primitive ต่าง หรือเปลี่ยนชนิด (object ↔ array ↔ primitive)
+    out.push({ type: 'changed', path, a, b });
+  }
+  return out;
+}
+window.jdDiff = jdDiff;
+function jdShort(v, max = 80) { // ค่าแบบสั้นสำหรับแถวในรายการ diff
+  if (v === undefined) return '';
+  const s = JSON.stringify(v);
+  return s.length > max ? s.slice(0, max - 1) + '…' : s;
+}
+function jvExpandIn(box, line) { // กางบล็อกบรรพบุรุษที่พับอยู่ (คลิก head — state พับเก็บใน closure ของ jtNode)
+  for (let elx = line.parentElement; elx && elx !== box; elx = elx.parentElement) {
+    if (elx.classList.contains('jt-children') && elx.style.display === 'none') {
+      const head = elx.parentElement.querySelector(':scope > .jt-head');
+      if (head) head.click();
+    }
+  }
+}
+
+// ---- เอกสาร (sub-tab) ของแท็บ JSON: หลายอันพร้อมกัน, แต่ละอันเป็น view (ดู 1 ก้อน) หรือ compare (ซ้าย/ขวา) ----
+const JV_DOCS_KEY = 'jsonViewerDocs';
 function setupJsonViewer() {
   const host = document.getElementById('jv-editor-host');
   if (!host) return;
-  // ตัวลากปรับความกว้าง editor | tree — layout ตัวนี้อยู่ถาวรใน DOM จึง apply ค่าที่จำไว้ครั้งเดียวพอ
-  const jvLayout = document.querySelector('.jv-layout');
-  const jvRz = jvLayout && jvLayout.querySelector('.jv-resizer');
-  if (jvRz) {
-    let jvPct = readSplitPct('jsonViewerSplit');
-    jvLayout.style.setProperty('--jv-l', colLeftCss(jvPct));
-    bindColResizer(jvRz, { cssVar: '--jv-l', storeKey: 'jsonViewerSplit', get: () => jvPct, set: (p) => { jvPct = p; } });
+  // ตัวลากปรับความกว้าง — layout อยู่ถาวรใน DOM จึง apply ค่าที่จำไว้ครั้งเดียวพอ
+  const bindSplit = (layoutSel, cssVar, storeKey) => {
+    const layout = document.querySelector(layoutSel);
+    const rz = layout && layout.querySelector(':scope > .jv-resizer');
+    if (!rz) return;
+    let pct = readSplitPct(storeKey);
+    layout.style.setProperty(cssVar, colLeftCss(pct));
+    bindColResizer(rz, { cssVar, storeKey, get: () => pct, set: (p) => { pct = p; } });
+  };
+  bindSplit('.jv-layout', '--jv-l', 'jsonViewerSplit');
+  bindSplit('.jc-layout', '--jc-l', 'jsonCompareSplit');
+
+  // ===== store ของเอกสาร =====
+  const newId = () => 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  let docs = []; let activeId = null;
+  try {
+    const st = JSON.parse(localStorage.getItem(JV_DOCS_KEY) || 'null');
+    if (st && Array.isArray(st.docs) && st.docs.length) { docs = st.docs; activeId = st.active; }
+  } catch { /* เสีย — เริ่มใหม่ */ }
+  if (!docs.length) docs = [{ id: newId(), name: 'JSON 1', mode: 'view', text: localStorage.getItem(JV_TEXT_KEY) || '' }]; // ย้ายข้อความจากเวอร์ชันเก่า
+  if (!docs.some((d) => d.id === activeId)) activeId = docs[0].id;
+  const activeDoc = () => docs.find((d) => d.id === activeId);
+  let saveTimer = null;
+  const saveDocsNow = () => {
+    clearTimeout(saveTimer);
+    // ข้อความที่ใหญ่เกิน cap ไม่เขียน (กัน quota) — reload แล้วฝั่งนั้นว่าง ดีกว่าได้ของเก่าที่ไม่ตรงกับที่เห็นล่าสุด
+    const cap = (t) => (t && t.length <= JV_MAX_SAVE ? t : '');
+    const out = { active: activeId, docs: docs.map((d) => ({ ...d, text: cap(d.text), textB: d.mode === 'compare' ? cap(d.textB) : undefined })) };
+    try { localStorage.setItem(JV_DOCS_KEY, JSON.stringify(out)); } catch { /* quota เต็ม — ข้าม */ }
+  };
+  const saveDocs = () => { clearTimeout(saveTimer); saveTimer = setTimeout(saveDocsNow, 300); };
+  window.addEventListener('beforeunload', saveDocsNow);
+  const nextName = (prefix) => { let n = 1; while (docs.some((d) => d.name === `${prefix} ${n}`)) n++; return `${prefix} ${n}`; };
+
+  // ===== แถบ sub-tab =====
+  const tabsBox = document.getElementById('jv-doctabs');
+  function renderDocTabs() {
+    tabsBox.replaceChildren(...docs.map((d) => {
+      const name = el('span', { class: 'jv-doctab-name', text: d.name, title: 'ดับเบิลคลิกเพื่อเปลี่ยนชื่อ' });
+      const close = el('span', { class: 'jv-doctab-close', text: '×', title: 'ปิดแท็บนี้' });
+      const tab = el('div', { class: 'jv-doctab' + (d.id === activeId ? ' active' : ''), 'data-id': d.id, role: 'tab' },
+        [el('span', { class: 'jv-doctab-ic', text: d.mode === 'compare' ? '⇄' : '📑' }), name, close]);
+      tab.addEventListener('click', () => switchDoc(d.id));
+      tab.addEventListener('auxclick', (e) => { if (e.button === 1) { e.preventDefault(); closeDoc(d.id); } });
+      close.addEventListener('click', (e) => { e.stopPropagation(); closeDoc(d.id); });
+      name.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        const inp = el('input', { class: 'jv-doctab-rename', type: 'text' });
+        inp.value = d.name;
+        name.replaceWith(inp); inp.focus(); inp.select();
+        let done = false;
+        const commit = (ok) => { if (done) return; done = true; if (ok && inp.value.trim()) d.name = inp.value.trim().slice(0, 40); saveDocs(); renderDocTabs(); };
+        inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') commit(true); else if (ev.key === 'Escape') commit(false); });
+        inp.addEventListener('blur', () => commit(true));
+        inp.addEventListener('click', (ev) => ev.stopPropagation());
+      });
+      return tab;
+    }));
+    const cur = tabsBox.querySelector('.jv-doctab.active');
+    if (cur) cur.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
-  const ed = makeJsonEditor(localStorage.getItem(JV_TEXT_KEY) || '');
+  function flushEditors() { // เก็บข้อความใน editor ลง doc ปัจจุบันก่อนสลับ (parse ยัง debounce อยู่ก็ไม่หาย)
+    const d = activeDoc(); if (!d) return;
+    if (d.mode === 'compare') { d.text = cmp.a.ed.textarea.value; d.textB = cmp.b.ed.textarea.value; } else d.text = ta.value;
+  }
+  function switchDoc(id) {
+    if (id === activeId && tabsBox.children.length) return;
+    flushEditors();
+    activeId = id;
+    loadActive();
+    renderDocTabs(); saveDocs();
+  }
+  function addDoc(mode, text = '', textB = '') {
+    flushEditors();
+    const d = { id: newId(), name: nextName(mode === 'compare' ? 'Compare' : 'JSON'), mode, text, textB, view: 'edit' };
+    const i = docs.findIndex((x) => x.id === activeId);
+    docs.splice(i + 1, 0, d); // แทรกถัดจากแท็บที่เปิดอยู่
+    activeId = d.id;
+    loadActive(); renderDocTabs(); saveDocs();
+  }
+  function closeDoc(id) {
+    flushEditors();
+    const d = docs.find((x) => x.id === id); if (!d) return;
+    if ((d.text || '').trim() || (d.textB || '').trim()) {
+      if (!confirm(`ปิดแท็บ "${d.name}"? ข้อความในแท็บนี้จะหายไป`)) return;
+    }
+    const i = docs.indexOf(d);
+    docs.splice(i, 1);
+    if (!docs.length) docs.push({ id: newId(), name: 'JSON 1', mode: 'view', text: '' });
+    if (id === activeId) { activeId = docs[Math.min(i, docs.length - 1)].id; loadActive(); }
+    renderDocTabs(); saveDocsNow();
+  }
+  document.getElementById('jv-add-view').addEventListener('click', () => addDoc('view'));
+  document.getElementById('jv-add-compare').addEventListener('click', () => addDoc('compare'));
+  const viewBox = document.getElementById('jv-view-mode');
+  const cmpBox = document.getElementById('jv-compare-mode');
+  function loadActive() {
+    const d = activeDoc();
+    const isCmp = d.mode === 'compare';
+    viewBox.style.display = isCmp ? 'none' : '';
+    cmpBox.style.display = isCmp ? '' : 'none';
+    if (isCmp) cmpLoad(d);
+    else { ta.value = d.text || ''; ed.refresh(); ta.scrollTop = 0; ed.wrap.querySelector('.je-highlight').scrollTop = 0; parseNow(); }
+  }
+
+  // ===== โหมด view (ดู JSON ก้อนเดียว): editor ซ้าย → tree ขวา =====
+  const ed = makeJsonEditor('');
   host.appendChild(ed.wrap);
   const ta = ed.textarea;
   const treeBox = document.getElementById('jv-tree');
@@ -4129,8 +4271,8 @@ function setupJsonViewer() {
 
   function parseNow() {
     const text = ta.value;
-    // เกิน cap ต้องล้างค่าเก่าด้วย ไม่งั้น reload แล้วได้ของเก่าที่ไม่ตรงกับที่เห็นล่าสุด
-    try { if (text.length <= JV_MAX_SAVE) localStorage.setItem(JV_TEXT_KEY, text); else localStorage.removeItem(JV_TEXT_KEY); } catch { /* quota เต็ม — ข้าม */ }
+    const d = activeDoc();
+    if (d && d.mode !== 'compare') { d.text = text; saveDocs(); }
     if (!text.trim()) {
       parsed = null; parseOk = false; clearError(); jvClearSearch();
       treeBox.replaceChildren(el('p', { class: 'empty-msg', text: 'วาง JSON ฝั่งซ้าย หรือกด 📂 เปิดไฟล์' }));
@@ -4170,16 +4312,20 @@ function setupJsonViewer() {
   fmtBtn.addEventListener('click', () => { if (parseOk) setText(JSON.stringify(parsed, null, 2)); });
   minBtn.addEventListener('click', () => { if (parseOk) setText(JSON.stringify(parsed)); });
   document.getElementById('jv-clear-btn').addEventListener('click', () => setText(''));
+  document.getElementById('jv-tocompare-btn').addEventListener('click', () => addDoc('compare', parseOk ? JSON.stringify(parsed, null, 2) : ta.value, ''));
+  const readFileInto = (input, onText, onErr) => {
+    input.addEventListener('change', () => {
+      const f = input.files && input.files[0];
+      if (!f) return;
+      if (f.size > JV_MAX_PARSE) { onErr(`ไฟล์ใหญ่เกิน ${Math.round(JV_MAX_PARSE / 1024 / 1024)}MB`); input.value = ''; return; }
+      const r = new FileReader();
+      r.onload = () => { onText(String(r.result)); input.value = ''; };
+      r.readAsText(f);
+    });
+  };
   const fileInput = document.getElementById('jv-file');
   document.getElementById('jv-open-btn').addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', () => {
-    const f = fileInput.files && fileInput.files[0];
-    if (!f) return;
-    if (f.size > JV_MAX_PARSE) { showError(`ไฟล์ใหญ่เกิน ${Math.round(JV_MAX_PARSE / 1024 / 1024)}MB`); fileInput.value = ''; return; }
-    const r = new FileReader();
-    r.onload = () => { setText(String(r.result)); fileInput.value = ''; };
-    r.readAsText(f);
-  });
+  readFileInto(fileInput, setText, showError);
 
   // ===== ค้นหาใน tree: match ทั้ง key/value บนบรรทัด (.jt-line มีเฉพาะข้อความบรรทัดตัวเอง ลูกอยู่ใน .jt-children แยก) =====
   const searchInput = document.getElementById('jv-search');
@@ -4189,21 +4335,13 @@ function setupJsonViewer() {
     hits.forEach((l) => l.classList.remove('jt-hit', 'jt-hit-cur'));
     hits = []; hitIdx = -1; countLbl.textContent = '';
   }
-  function jvExpandTo(line) { // กางบล็อกบรรพบุรุษที่พับอยู่ (คลิก head — state พับเก็บใน closure ของ jtNode)
-    for (let elx = line.parentElement; elx && elx !== treeBox; elx = elx.parentElement) {
-      if (elx.classList.contains('jt-children') && elx.style.display === 'none') {
-        const head = elx.parentElement.querySelector(':scope > .jt-head');
-        if (head) head.click();
-      }
-    }
-  }
   function jvGoto(i) {
     if (!hits.length) return;
     if (hitIdx >= 0 && hits[hitIdx]) hits[hitIdx].classList.remove('jt-hit-cur');
     hitIdx = ((i % hits.length) + hits.length) % hits.length;
     const line = hits[hitIdx];
     line.classList.add('jt-hit-cur');
-    jvExpandTo(line);
+    jvExpandIn(treeBox, line);
     line.scrollIntoView({ block: 'center' });
     countLbl.textContent = `${hitIdx + 1}/${hits.length}`;
   }
@@ -4232,18 +4370,181 @@ function setupJsonViewer() {
   document.getElementById('jv-next-btn').addEventListener('click', () => jvGoto(hitIdx + 1));
   document.getElementById('jv-prev-btn').addEventListener('click', () => jvGoto(hitIdx - 1));
 
-  // Cmd/Ctrl+F ตอนอยู่แท็บ JSON → เข้าช่องค้นหาของเราแทน find bar ของเบราว์เซอร์
+  // Cmd/Ctrl+F ตอนอยู่แท็บ JSON (เอกสารแบบ view) → เข้าช่องค้นหาของเราแทน find bar ของเบราว์เซอร์
   // (find bar ของเบราว์เซอร์หา tree ที่พับอยู่ไม่เจอ และไม่มีตัวนับ/ปุ่ม ▲▼ ให้ไล่ทีละ match)
   // จับทั้ง meta และ ctrl — Mac ใช้ Cmd แต่คนที่ติดมือจาก Windows กด Ctrl
   // กดซ้ำตอนอยู่ในช่องแล้ว = select ข้อความเดิมไว้ให้พิมพ์ทับได้เลย
   window.addEventListener('keydown', (e) => {
     if (!((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f')) return;
     if (!document.getElementById('tab-jsonviewer').classList.contains('active')) return;
+    if (activeDoc().mode === 'compare') return; // compare ไม่มีช่องค้นหา — ปล่อยให้ find bar ของเบราว์เซอร์ทำงาน
     e.preventDefault();
     searchInput.focus();
     searchInput.select();
   });
 
-  parseNow(); // render ค่าที่จำไว้จาก localStorage ตอนเปิดหน้า
+  // ===== โหมด compare: editor A | B → diff ตาม key + tree ไฮไลต์ =====
+  const mkSide = (k) => {
+    const sec = cmpBox.querySelector(`.jc-side[data-side="${k}"]`);
+    const sed = makeJsonEditor('');
+    sec.querySelector('.jc-editor-host').appendChild(sed.wrap);
+    const file = sec.querySelector('.jc-file');
+    sec.querySelector('.jc-open-btn').addEventListener('click', () => file.click());
+    return { sec, ed: sed, err: sec.querySelector('.jv-error'), tree: sec.querySelector('.jc-tree'), file, val: undefined, ok: false };
+  };
+  const cmp = { a: mkSide('a'), b: mkSide('b'), diffs: [], hidden: new Set() };
+  const cmpStat = document.getElementById('jc-stat');
+  const diffList = document.getElementById('jc-difflist');
+  const legend = document.getElementById('jc-legend');
+  const modeEditBtn = document.getElementById('jc-mode-edit');
+  const modeTreeBtn = document.getElementById('jc-mode-tree');
+  const cmpSetText = (s, v) => { s.ed.textarea.value = v; s.ed.refresh(); cmpRun(); };
+  for (const s of [cmp.a, cmp.b]) {
+    let t = null;
+    s.ed.textarea.addEventListener('input', () => { clearTimeout(t); t = setTimeout(cmpRun, 300); });
+    readFileInto(s.file, (txt) => cmpSetText(s, txt), (m) => { s.err.textContent = m; s.err.style.display = ''; });
+  }
+  function cmpParse(s) {
+    const text = s.ed.textarea.value;
+    s.ok = false; s.val = undefined;
+    s.err.style.display = 'none'; s.tree.classList.remove('jv-stale');
+    if (!text.trim()) return 'empty';
+    if (text.length > JV_MAX_PARSE) { s.err.textContent = `ข้อความใหญ่เกิน ${Math.round(JV_MAX_PARSE / 1024 / 1024)}MB`; s.err.style.display = ''; return 'err'; }
+    try { s.val = JSON.parse(text); s.ok = true; return 'ok'; } catch (e) {
+      const p = jvErrorPos(String(e.message || e), text);
+      s.err.textContent = p ? `บรรทัด ${p.line} คอลัมน์ ${p.col}: ${e.message}` : String(e.message || e);
+      s.err.style.display = ''; s.tree.classList.add('jv-stale');
+      return 'err';
+    }
+  }
+  function cmpSetView(view) {
+    const d = activeDoc(); if (d && d.mode === 'compare') { d.view = view; saveDocs(); }
+    const tree = view === 'tree';
+    modeEditBtn.classList.toggle('active', !tree);
+    modeTreeBtn.classList.toggle('active', tree);
+    for (const s of [cmp.a, cmp.b]) { s.ed.wrap.parentElement.style.display = tree ? 'none' : ''; s.tree.style.display = tree ? '' : 'none'; }
+    if (tree) cmpRenderTrees();
+  }
+  modeEditBtn.addEventListener('click', () => cmpSetView('edit'));
+  modeTreeBtn.addEventListener('click', () => cmpSetView('tree'));
+  const isTreeView = () => modeTreeBtn.classList.contains('active');
+  function cmpRun() {
+    const d = activeDoc();
+    if (d && d.mode === 'compare') { d.text = cmp.a.ed.textarea.value; d.textB = cmp.b.ed.textarea.value; saveDocs(); }
+    const ra = cmpParse(cmp.a); const rb = cmpParse(cmp.b);
+    cmp.diffs = cmp.a.ok && cmp.b.ok ? jdDiff(cmp.a.val, cmp.b.val) : [];
+    const counts = { changed: 0, added: 0, removed: 0 };
+    cmp.diffs.forEach((x) => { counts[x.type]++; });
+    legend.querySelectorAll('.jc-chip').forEach((c) => { c.querySelector('b').textContent = counts[c.dataset.type]; });
+    if (cmp.a.ok && cmp.b.ok) {
+      cmpStat.textContent = cmp.diffs.length ? `ต่างกัน ${cmp.diffs.length} จุด` : '✅ เหมือนกันทุก key';
+      cmpStat.className = 'hint ' + (cmp.diffs.length ? 'jc-stat-diff' : 'jc-stat-same');
+    } else {
+      cmpStat.textContent = ra === 'err' || rb === 'err' ? 'JSON ฝั่งใดฝั่งหนึ่งผิดรูปแบบ' : '';
+      cmpStat.className = 'hint';
+    }
+    cmpRenderList(ra, rb);
+    if (isTreeView()) cmpRenderTrees();
+  }
+  const JC_MAX_ROWS = 2000;
+  function cmpRenderList(ra, rb) {
+    if (!(cmp.a.ok && cmp.b.ok)) {
+      const msg = ra === 'empty' || rb === 'empty' ? 'วาง JSON ทั้งสองฝั่งเพื่อเปรียบเทียบ' : 'แก้ JSON ที่ผิดรูปแบบก่อน แล้วจะเปรียบเทียบให้อัตโนมัติ';
+      diffList.replaceChildren(el('p', { class: 'empty-msg', text: msg }));
+      return;
+    }
+    if (!cmp.diffs.length) { diffList.replaceChildren(el('p', { class: 'empty-msg jc-same', text: '✅ ไม่มี key ไหนต่างกัน' })); return; }
+    const shown = cmp.diffs.filter((x) => !cmp.hidden.has(x.type));
+    const sign = { changed: '~', added: '+', removed: '−' };
+    const rows = shown.slice(0, JC_MAX_ROWS).map((x) => {
+      const row = el('div', { class: `jc-row jd-${x.type}`, title: 'คลิกเพื่อกระโดดไปจุดนี้ทั้งสองฝั่ง' }, [
+        el('span', { class: 'jc-badge', text: sign[x.type] }),
+        el('code', { class: 'jc-path', text: jtPathStr(x.path) }),
+        el('span', { class: 'jc-val jc-val-a', text: x.type === 'added' ? '—' : jdShort(x.a) }),
+        el('span', { class: 'jc-arrow', text: '→' }),
+        el('span', { class: 'jc-val jc-val-b', text: x.type === 'removed' ? '—' : jdShort(x.b) }),
+      ]);
+      row.addEventListener('click', () => cmpReveal(x, row));
+      return row;
+    });
+    if (shown.length > JC_MAX_ROWS) rows.push(el('p', { class: 'hint', text: `…แสดง ${JC_MAX_ROWS} จาก ${shown.length} รายการ` }));
+    if (!shown.length) rows.push(el('p', { class: 'empty-msg', text: 'ซ่อนทุกประเภทไว้ — คลิกป้ายด้านบนเพื่อแสดง' }));
+    diffList.replaceChildren(...rows);
+  }
+  legend.querySelectorAll('.jc-chip').forEach((c) => c.addEventListener('click', () => {
+    const t = c.dataset.type;
+    if (cmp.hidden.has(t)) cmp.hidden.delete(t); else cmp.hidden.add(t);
+    c.classList.toggle('off', cmp.hidden.has(t));
+    cmpRenderList(cmp.a.ok ? 'ok' : 'x', cmp.b.ok ? 'ok' : 'x');
+  }));
+  function cmpRenderTrees() {
+    for (const [s, side] of [[cmp.a, 'a'], [cmp.b, 'b']]) {
+      if (!s.ok) {
+        if (!s.tree.firstChild || s.ed.textarea.value.trim() === '') s.tree.replaceChildren(el('p', { class: 'empty-msg', text: s.ed.textarea.value.trim() ? 'JSON ผิดรูปแบบ' : 'ยังไม่มี JSON ฝั่งนี้' }));
+        continue;
+      }
+      s.tree.classList.remove('jv-stale');
+      s.tree.replaceChildren(jsonTree(s.val));
+      // map path → diff ของฝั่งนี้ (ฝั่งซ้ายไม่มี added, ฝั่งขวาไม่มี removed)
+      const mine = new Map(); const anc = new Set();
+      for (const x of cmp.diffs) {
+        if ((side === 'a' && x.type === 'added') || (side === 'b' && x.type === 'removed')) {
+          // ไม่มีในฝั่งนี้ — ทำเครื่องหมายที่ parent ว่าข้างในมีของต่าง
+          for (let i = 0; i < x.path.length; i++) anc.add(jtPathStr(x.path.slice(0, i)));
+          continue;
+        }
+        mine.set(jtPathStr(x.path), x);
+        for (let i = 0; i < x.path.length; i++) anc.add(jtPathStr(x.path.slice(0, i)));
+      }
+      s.tree.querySelectorAll('.jt-line[data-jtpath]').forEach((line) => {
+        const p = line.dataset.jtpath;
+        const x = mine.get(p);
+        if (x) {
+          line.closest('.jt-node').classList.add(`jd-${x.type}`);
+          if (x.type === 'changed') line.title = side === 'a' ? `ขวา (B): ${jdShort(x.b, 200)}` : `ซ้าย (A): ${jdShort(x.a, 200)}`;
+          else line.title = side === 'a' ? 'มีแค่ฝั่งซ้าย' : 'มีแค่ฝั่งขวา';
+        } else if (anc.has(p) && line.classList.contains('jt-head')) line.classList.add('jd-anc');
+      });
+    }
+  }
+  function cmpReveal(x, row) {
+    diffList.querySelectorAll('.jc-row.cur').forEach((r) => r.classList.remove('cur'));
+    if (row) row.classList.add('cur');
+    if (!isTreeView()) cmpSetView('tree');
+    for (const s of [cmp.a, cmp.b]) {
+      // หา path นั้น ถ้าไม่มี (เช่น added ในฝั่งซ้าย) ไล่ขึ้นไปหา parent ที่มี
+      let line = null;
+      const lines = [...s.tree.querySelectorAll('.jt-line[data-jtpath]')];
+      for (let n = x.path.length; n >= 0 && !line; n--) { const p = jtPathStr(x.path.slice(0, n)); line = lines.find((l) => l.dataset.jtpath === p); }
+      if (!line) continue;
+      s.tree.querySelectorAll('.jt-hit-cur').forEach((l) => l.classList.remove('jt-hit-cur'));
+      jvExpandIn(s.tree, line);
+      line.classList.add('jt-hit-cur');
+      line.scrollIntoView({ block: 'center' });
+    }
+  }
+  document.getElementById('jc-format-btn').addEventListener('click', () => {
+    for (const s of [cmp.a, cmp.b]) if (s.ok) { s.ed.textarea.value = JSON.stringify(s.val, null, 2); s.ed.refresh(); }
+    cmpRun();
+  });
+  document.getElementById('jc-swap-btn').addEventListener('click', () => {
+    const ta1 = cmp.a.ed.textarea; const ta2 = cmp.b.ed.textarea;
+    [ta1.value, ta2.value] = [ta2.value, ta1.value];
+    cmp.a.ed.refresh(); cmp.b.ed.refresh(); cmpRun();
+  });
+  document.getElementById('jc-clear-btn').addEventListener('click', () => {
+    cmp.a.ed.textarea.value = ''; cmp.b.ed.textarea.value = '';
+    cmp.a.ed.refresh(); cmp.b.ed.refresh(); cmpSetView('edit'); cmpRun();
+  });
+  function cmpLoad(d) {
+    cmp.a.ed.textarea.value = d.text || ''; cmp.b.ed.textarea.value = d.textB || '';
+    for (const s of [cmp.a, cmp.b]) { s.ed.refresh(); s.ed.textarea.scrollTop = 0; s.tree.replaceChildren(); }
+    modeTreeBtn.classList.toggle('active', d.view === 'tree'); // ให้ cmpRun รู้ว่าต้อง render tree ไหม
+    cmpRun();
+    cmpSetView(d.view === 'tree' ? 'tree' : 'edit');
+  }
+
+  renderDocTabs();
+  loadActive(); // render ค่าที่จำไว้จาก localStorage ตอนเปิดหน้า
 }
 setupJsonViewer();

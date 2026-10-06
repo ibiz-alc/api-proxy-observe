@@ -1781,7 +1781,7 @@ body.mirror-open { padding-right: calc(44px + var(--mirror-w)); transition: none
 .jv-layout {
   display: grid;
   grid-template-columns: var(--jv-l, calc(50% - 5px)) 10px minmax(0, 1fr);
-  height: calc(100vh - 150px);
+  height: calc(100vh - 196px); /* หักแถบ sub-tab (jv-docbar) ด้วย */
   min-height: 320px;
 }
 .jv-pane { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -1804,6 +1804,80 @@ body.mirror-open { padding-right: calc(44px + var(--mirror-w)); transition: none
 #jv-tree.jv-stale { opacity: 0.45; } /* JSON พัง — โชว์ tree เก่าแบบจาง */
 .jt-hit { background: rgba(250, 204, 21, 0.16); border-radius: 4px; }
 .jt-hit-cur { background: rgba(250, 204, 21, 0.36); outline: 1px solid #facc15; }
+
+/* ----- sub-tab ของแท็บ JSON (หลายเอกสารพร้อมกัน) ----- */
+.jv-docbar { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; border-bottom: 1px solid var(--border); padding-bottom: 6px; min-width: 0; }
+.jv-doctabs { display: flex; gap: 4px; overflow-x: auto; min-width: 0; flex: 0 1 auto; scrollbar-width: thin; }
+.jv-doctab {
+  display: flex; align-items: center; gap: 6px; flex-shrink: 0; max-width: 220px;
+  padding: 5px 6px 5px 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--panel); color: var(--muted); cursor: pointer; font-size: 0.82rem; user-select: none;
+}
+.jv-doctab:hover { border-color: var(--accent); color: var(--text); }
+.jv-doctab.active { background: var(--panel-2); border-color: var(--accent); color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
+.jv-doctab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jv-doctab-close { width: 18px; height: 18px; line-height: 18px; text-align: center; border-radius: 4px; color: var(--muted); }
+.jv-doctab-close:hover { background: rgba(248, 113, 113, 0.18); color: var(--red); }
+.jv-doctab-rename { width: 120px; padding: 1px 4px; font-size: 0.82rem; }
+.jv-add { flex-shrink: 0; padding: 5px 10px; border: 1px dashed var(--border); border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; font-size: 0.8rem; white-space: nowrap; }
+.jv-add:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ----- โหมด Compare: editor/tree A | ตัวลาก | B ด้านบน + รายการ key ที่ต่างด้านล่าง ----- */
+#jv-compare-mode { display: flex; flex-direction: column; height: calc(100vh - 196px); min-height: 420px; }
+.jc-viewtoggle { display: flex; gap: 4px; }
+.jc-viewtoggle .subtab-btn { margin: 0; }
+.jc-layout {
+  display: grid;
+  grid-template-columns: var(--jc-l, calc(50% - 5px)) 10px minmax(0, 1fr);
+  flex: 1 1 auto; min-height: 200px;
+}
+.jc-side-head { display: flex; align-items: center; gap: 8px; flex-shrink: 0; min-width: 0; }
+.jc-side-label { font-size: 0.82rem; white-space: nowrap; }
+.jc-side[data-side="a"] .jc-side-label { color: var(--red); }
+.jc-side[data-side="b"] .jc-side-label { color: var(--green); }
+.jc-side-head .jt-pathbar { margin-left: auto; }
+.jc-open-btn { padding: 2px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text); cursor: pointer; }
+.jc-open-btn:hover { border-color: var(--accent); }
+.jc-editor-host { flex: 1; min-height: 0; display: flex; }
+.jc-tree { flex: 1; min-height: 0; overflow: auto; margin: 0; }
+.jc-tree.jv-stale { opacity: 0.45; }
+.jc-stat-diff { color: var(--yellow); }
+.jc-stat-same { color: var(--green); }
+.jc-diff { flex: 0 0 auto; max-height: 34%; min-height: 90px; display: flex; flex-direction: column; margin-top: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+.jc-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: 0.8rem; }
+.jc-legend-title { font-weight: 600; }
+.jc-legend .hint { margin-left: auto; }
+.jc-chip { padding: 2px 10px; border-radius: 999px; border: 1px solid; background: transparent; cursor: pointer; font-size: 0.78rem; color: var(--text); }
+.jc-chip i { font-style: normal; font-weight: 700; margin-right: 2px; }
+.jc-chip.off { opacity: 0.35; text-decoration: line-through; }
+.jc-difflist { overflow: auto; flex: 1; min-height: 0; padding: 4px 0; }
+.jc-difflist .empty-msg { margin: 8px 12px; }
+.jc-row {
+  display: grid; grid-template-columns: 22px minmax(140px, 1.2fr) minmax(0, 1fr) 18px minmax(0, 1fr);
+  gap: 8px; align-items: baseline; padding: 3px 10px; cursor: pointer;
+  font-family: ui-monospace, Menlo, monospace; font-size: 0.8rem;
+}
+.jc-row:hover { background: rgba(255, 255, 255, 0.04); }
+.jc-row.cur { background: rgba(56, 189, 248, 0.12); }
+.jc-badge { text-align: center; font-weight: 700; border-radius: 4px; }
+.jc-path { color: var(--accent); overflow-wrap: anywhere; }
+.jc-val { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jc-val-a { color: #fca5a5; }
+.jc-val-b { color: #86efac; }
+.jc-arrow { color: var(--muted); text-align: center; }
+/* สีของแต่ละประเภท ใช้ร่วมกันทั้ง chip / แถว / tree */
+.jd-changed { --jd: var(--yellow); --jd-bg: rgba(250, 204, 21, 0.14); }
+.jd-added { --jd: var(--green); --jd-bg: rgba(74, 222, 128, 0.14); }
+.jd-removed { --jd: var(--red); --jd-bg: rgba(248, 113, 113, 0.14); }
+.jc-chip.jd-changed, .jc-chip.jd-added, .jc-chip.jd-removed { border-color: var(--jd); background: var(--jd-bg); }
+.jc-row .jc-badge { color: var(--jd); background: var(--jd-bg); }
+.jt-node.jd-changed .jt-line, .jt-node.jd-added .jt-line, .jt-node.jd-removed .jt-line { background: var(--jd-bg); box-shadow: inset 3px 0 0 var(--jd); }
+.jt-line.jd-anc { box-shadow: inset 3px 0 0 rgba(250, 204, 21, 0.45); }
+.jc-tree .jt-line.jt-hit-cur { background: rgba(56, 189, 248, 0.25); outline: 1px solid var(--accent); }
+@media (max-width: 900px) {
+  .jc-row { grid-template-columns: 22px minmax(0, 1fr); }
+  .jc-row .jc-val, .jc-row .jc-arrow { grid-column: 2; }
+}
 
 /* ---------- แท็บ Auth (ถอด JWT จาก header ของ request) ---------- */
 .auth-tab { font-size: 0.88rem; }
