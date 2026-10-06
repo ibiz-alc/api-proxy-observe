@@ -197,6 +197,22 @@ const typeInto = (page, sel, text) => page.evaluate((s, t) => {
   check('11 คลิกแถว diff → แผง Key ปักล่างจอ ไม่เด้ง', stable, `start ${p0.top}-${p0.bottom}/${p0.vh} · ${seen.join(' ')}`);
   check('11 บรรทัดเป้าหมายเห็นในกล่อง tree ทั้งสองฝั่ง', allVisible);
 
+  // 12) ยืดเต็มจอ: ขอบล่างแผง diff (compare) / layout (view) ชิดล่างจอ — เปลี่ยนขนาดหน้าต่างก็ตาม
+  const gaps = [];
+  for (const h of [700, 900, 1100]) {
+    await page.setViewport({ width: 1440, height: h }); await sleep(150);
+    const g = await page.evaluate(() => {
+      const tab = document.getElementById('tab-jsonviewer').getBoundingClientRect();
+      return { cmp: Math.round(tab.bottom - document.querySelector('.jc-diff').getBoundingClientRect().bottom), tabScroll: document.getElementById('tab-jsonviewer').scrollHeight - document.getElementById('tab-jsonviewer').clientHeight };
+    });
+    gaps.push(`${h}:${g.cmp}/${g.tabScroll}`);
+  }
+  await page.setViewport({ width: 1440, height: 900 });
+  check('12 compare ยืดถึงล่างจอ (เหลือแค่ padding ≤ 20px, ไม่ล้น)', gaps.every((x) => { const [c, sc] = x.split(':')[1].split('/').map(Number); return c >= 0 && c <= 20 && sc <= 1; }), gaps.join(' '));
+  await page.click('.jv-doctab:nth-child(1)'); await sleep(100);
+  const gv = await page.evaluate(() => Math.round(document.getElementById('tab-jsonviewer').getBoundingClientRect().bottom - document.querySelector('.jv-layout').getBoundingClientRect().bottom));
+  check('12 view ยืดถึงล่างจอ', gv >= 0 && gv <= 20, String(gv));
+
   // 9) overflow + narrow
   await page.click('#jv-add-compare'); await sleep(50);
   const ov = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
