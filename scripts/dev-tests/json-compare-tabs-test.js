@@ -3,7 +3,7 @@
 //   env -u NODE_OPTIONS PORT=3100 node scripts/dev-tests/json-compare-tabs-test.js
 // เช็ค: 1 jdDiff ถูก · 2 เพิ่ม/สลับ sub-tab ข้อความแยกกัน · 3 compare นับ changed/added/removed
 //   4 tree ไฮไลต์ + คลิกแถวกระโดด · 5 filter chip · 6 swap · 7 reload จำครบ · 8 rename/close · 9 ไม่ overflow / ไม่มี page error
-//   10 hover โชว์ path (editor + tree + ไฮไลต์ key เดียวกันอีกฝั่ง)
+//   10 hover โชว์ path (editor + tree + ไฮไลต์ key เดียวกันอีกฝั่ง) · 11 แผง Key ปักล่างจอไม่เด้งตอนคลิกแถว
 const path = require('path');
 const puppeteer = require(require.resolve('puppeteer-core', { paths: [path.join(__dirname, '..', '..'), process.cwd()] }));
 
@@ -170,6 +170,32 @@ const typeInto = (page, sel, text) => page.evaluate((s, t) => {
   check('10 hover tree → path ทั้งสองฝั่ง + ไฮไลต์อีกฝั่ง', hov.a === 'user.name' && hov.b === 'user.name' && hov.peer === 'user.name', JSON.stringify(hov));
   check('10 key ที่มีแค่ซ้าย → ฝั่งขวาบอกว่าไม่มี', hov.missing === 'old (ไม่มีฝั่งนี้)' && hov.peerAfter === 0, JSON.stringify(hov));
   await page.screenshot({ path: 'json-compare-hover.png' });
+
+  // 11) JSON ยาว: คลิกแถว diff แล้วแผง "Key ที่ต่างกัน" ต้องอยู่ที่เดิม (ไม่เลื่อนหน้า) + บรรทัดเป้าหมายเห็นในกล่อง tree
+  const big = (k) => ({ list: Array.from({ length: 80 }, (_, i) => ({ id: i, v: k === 'a' ? i : (i % 7 ? i : -i) })) });
+  await typeInto(page, '.jc-side[data-side="a"] textarea', JSON.stringify(big('a'), null, 2));
+  await typeInto(page, '.jc-side[data-side="b"] textarea', JSON.stringify(big('b'), null, 2)); await sleep(450);
+  const diffPos = () => page.evaluate(() => {
+    const r = document.querySelector('.jc-diff').getBoundingClientRect();
+    return { top: Math.round(r.top), bottom: Math.round(r.bottom), tabScroll: document.getElementById('tab-jsonviewer').scrollTop, vh: innerHeight };
+  });
+  const p0 = await diffPos();
+  let stable = p0.bottom <= p0.vh && p0.tabScroll === 0; let allVisible = true; const seen = [];
+  const nRows = await page.$$eval('.jc-row', (r) => r.length);
+  for (const i of [0, nRows - 1, 3, 7]) {
+    await page.evaluate((k) => document.querySelectorAll('.jc-row')[k].click(), i); await sleep(120);
+    const p1 = await diffPos();
+    if (p1.top !== p0.top || p1.tabScroll !== 0) stable = false;
+    const vis = await page.evaluate(() => [...document.querySelectorAll('.jc-tree')].every((t) => {
+      const c = t.querySelector('.jt-hit-cur'); if (!c) return false;
+      const b = t.getBoundingClientRect(); const r = c.getBoundingClientRect();
+      return r.top >= b.top - 1 && r.bottom <= b.bottom + 1;
+    }));
+    if (!vis) allVisible = false;
+    seen.push(`${i}:${p1.top}/${p1.tabScroll}`);
+  }
+  check('11 คลิกแถว diff → แผง Key ปักล่างจอ ไม่เด้ง', stable, `start ${p0.top}-${p0.bottom}/${p0.vh} · ${seen.join(' ')}`);
+  check('11 บรรทัดเป้าหมายเห็นในกล่อง tree ทั้งสองฝั่ง', allVisible);
 
   // 9) overflow + narrow
   await page.click('#jv-add-compare'); await sleep(50);

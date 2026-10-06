@@ -4201,6 +4201,10 @@ function bindEditorHoverPath(ed, getBar) {
   });
   ed.textarea.addEventListener('mouseleave', () => { last = null; const bar = getBar(); if (bar) bar.textContent = ''; });
 }
+function jvScrollInBox(box, line) { // เลื่อนเฉพาะกล่อง tree ให้บรรทัดอยู่กลาง — ห้าม scrollIntoView (มันเลื่อนหน้า/แท็บทั้งหน้าตามไปด้วย)
+  const b = box.getBoundingClientRect(); const r = line.getBoundingClientRect();
+  box.scrollTop += (r.top - b.top) - (box.clientHeight - r.height) / 2;
+}
 function jvExpandIn(box, line) { // กางบล็อกบรรพบุรุษที่พับอยู่ (คลิก head — state พับเก็บใน closure ของ jtNode)
   for (let elx = line.parentElement; elx && elx !== box; elx = elx.parentElement) {
     if (elx.classList.contains('jt-children') && elx.style.display === 'none') {
@@ -4409,7 +4413,7 @@ function setupJsonViewer() {
     const line = hits[hitIdx];
     line.classList.add('jt-hit-cur');
     jvExpandIn(treeBox, line);
-    line.scrollIntoView({ block: 'center' });
+    jvScrollInBox(treeBox, line);
     countLbl.textContent = `${hitIdx + 1}/${hits.length}`;
   }
   function jvLineText(l) { // ข้อความจริงของบรรทัด — ตัด summary "N items/keys", ellipsis และ icon 📋 ที่ระบบสร้างเอง
@@ -4606,7 +4610,7 @@ function setupJsonViewer() {
       s.tree.querySelectorAll('.jt-hit-cur').forEach((l) => l.classList.remove('jt-hit-cur'));
       jvExpandIn(s.tree, line);
       line.classList.add('jt-hit-cur');
-      line.scrollIntoView({ block: 'center' });
+      jvScrollInBox(s.tree, line);
     }
   }
   document.getElementById('jc-format-btn').addEventListener('click', () => {
