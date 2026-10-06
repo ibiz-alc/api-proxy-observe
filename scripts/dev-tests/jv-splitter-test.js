@@ -57,7 +57,7 @@ async function drag(page, fromX, toX) {
   const pageErrors = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
   await page.goto(`http://localhost:${PORT}`, { waitUntil: 'networkidle2', timeout: 20000 });
-  await page.evaluate(() => { localStorage.removeItem('jsonViewerSplit'); localStorage.removeItem('jsonViewerText'); });
+  await page.evaluate(() => { localStorage.removeItem('jsonViewerSplit'); localStorage.removeItem('jsonViewerText'); localStorage.removeItem('jsonViewerDocs'); });
   await page.reload({ waitUntil: 'networkidle2' });
   await page.click('button[data-tab="jsonviewer"]');
   await sleep(200);

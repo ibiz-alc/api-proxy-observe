@@ -152,7 +152,7 @@ async function setEditor(page, text) { // วางข้อความใน e
   // 9) layout: ไม่มี horizontal overflow ระดับหน้า
   const r9 = await page.evaluate(() => ({
     overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
-    paneCount: document.querySelectorAll('#tab-jsonviewer .jv-pane').length,
+    paneCount: document.querySelectorAll('#tab-jsonviewer .jv-layout > .jv-pane').length,
   }));
   check('9 ไม่ overflow แนวนอน + สองฝั่งครบ', !r9.overflowX && r9.paneCount === 2);
 
