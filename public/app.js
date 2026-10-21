@@ -4448,10 +4448,11 @@ function setupJsonViewer() {
   window.addEventListener('keydown', (e) => {
     if (!((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f')) return;
     if (!document.getElementById('tab-jsonviewer').classList.contains('active')) return;
-    if (activeDoc().mode === 'compare') return; // compare ไม่มีช่องค้นหา — ปล่อยให้ find bar ของเบราว์เซอร์ทำงาน
     e.preventDefault();
-    searchInput.focus();
-    searchInput.select();
+    // compare มีช่องค้นหาของตัวเอง (ค้นสองฝั่ง) — Mac Chrome กด Ctrl+F ไม่เปิด find bar ของเบราว์เซอร์อยู่แล้ว
+    const box = activeDoc().mode === 'compare' ? document.getElementById('jc-search') : searchInput;
+    box.focus();
+    box.select();
   });
 
   // ===== โหมด compare: editor A | B → diff ตาม key + tree ไฮไลต์ =====
@@ -4514,6 +4515,7 @@ function setupJsonViewer() {
     modeTreeBtn.classList.toggle('active', tree);
     for (const s of [cmp.a, cmp.b]) { s.ed.wrap.parentElement.style.display = tree ? 'none' : ''; s.tree.style.display = tree ? '' : 'none'; }
     if (tree) cmpRenderTrees();
+    if (cSearch.value.trim()) cRunSearch({ scroll: false }); // match เปลี่ยนชุด (บรรทัด tree ↔ ข้อความ editor)
   }
   modeEditBtn.addEventListener('click', () => cmpSetView('edit'));
   modeTreeBtn.addEventListener('click', () => cmpSetView('tree'));
@@ -4535,6 +4537,7 @@ function setupJsonViewer() {
     }
     cmpRenderList(ra, rb);
     if (isTreeView()) cmpRenderTrees();
+    if (cSearch.value.trim()) cRunSearch({ keep: true, scroll: false }); // DOM/ข้อความเปลี่ยน — ค้นใหม่ แต่ไม่ดึง scroll หนีมือตอนพิมพ์
   }
   const JC_MAX_ROWS = 2000;
   function cmpRenderList(ra, rb) {
@@ -4613,6 +4616,82 @@ function setupJsonViewer() {
       jvScrollInBox(s.tree, line);
     }
   }
+  // ===== ค้นหาใน compare (ทั้งสองฝั่ง) =====
+  // tree view: match ทีละบรรทัด .jt-line (แบบเดียวกับแท็บ view) · edit view: match ข้อความดิบใน editor
+  // แล้วระบายด้วย CSS Custom Highlight บน layer ไฮไลต์ (textarea โปร่งใสอยู่บน ใส่ <mark> ไม่ได้ / selection ไม่โชว์ตอนไม่โฟกัส)
+  const cSearch = document.getElementById('jc-search');
+  const cCount = document.getElementById('jc-search-count');
+  const hasHL = typeof CSS !== 'undefined' && CSS.highlights && typeof Highlight !== 'undefined';
+  const JC_MAX_HITS = 5000;
+  let cHits = []; let cIdx = -1;
+  function textRange(code, start, end) { // offset ในข้อความ → Range บน text node ของ layer ไฮไลต์ (match ข้าม span ได้)
+    const w = document.createTreeWalker(code, NodeFilter.SHOW_TEXT);
+    const r = document.createRange();
+    let pos = 0; let gotStart = false;
+    for (let n; (n = w.nextNode());) {
+      const len = n.textContent.length;
+      if (!gotStart && start < pos + len) { r.setStart(n, start - pos); gotStart = true; }
+      if (gotStart && end <= pos + len) { r.setEnd(n, end - pos); return r; }
+      pos += len;
+    }
+    return null;
+  }
+  function cClearMarks() {
+    for (const s of [cmp.a, cmp.b]) s.tree.querySelectorAll('.jt-hit, .jt-hit-cur').forEach((l) => l.classList.remove('jt-hit', 'jt-hit-cur'));
+    if (hasHL) { CSS.highlights.delete('jc-hit'); CSS.highlights.delete('jc-hit-cur'); }
+  }
+  function cRunSearch({ keep = false, scroll = true } = {}) {
+    const prev = cIdx;
+    cClearMarks(); cHits = []; cIdx = -1;
+    const q = cSearch.value.trim().toLowerCase();
+    if (!q) { cCount.textContent = ''; return; }
+    if (isTreeView()) {
+      for (const s of [cmp.a, cmp.b]) {
+        s.tree.querySelectorAll('.jt-line').forEach((line) => {
+          if (cHits.length < JC_MAX_HITS && jvLineText(line).toLowerCase().includes(q)) { line.classList.add('jt-hit'); cHits.push({ s, line }); }
+        });
+      }
+    } else {
+      for (const s of [cmp.a, cmp.b]) {
+        const text = s.ed.textarea.value.toLowerCase();
+        const code = s.ed.wrap.querySelector('.je-highlight code');
+        for (let i = text.indexOf(q); i >= 0 && cHits.length < JC_MAX_HITS; i = text.indexOf(q, i + q.length)) {
+          const range = textRange(code, i, i + q.length);
+          if (range) cHits.push({ s, range });
+        }
+      }
+      if (hasHL && cHits.length) CSS.highlights.set('jc-hit', new Highlight(...cHits.map((h) => h.range)));
+    }
+    if (!cHits.length) { cCount.textContent = 'ไม่พบ'; return; }
+    const at = keep && prev >= 0 ? Math.min(prev, cHits.length - 1) : 0;
+    if (scroll) cGoto(at);
+    else { cIdx = at; cMarkCur(); }
+  }
+  function cMarkCur() {
+    const h = cHits[cIdx]; if (!h) return;
+    cCount.textContent = `${cIdx + 1}/${cHits.length}`;
+    if (h.line) h.line.classList.add('jt-hit-cur');
+    else if (hasHL) CSS.highlights.set('jc-hit-cur', new Highlight(h.range));
+  }
+  function cGoto(i) {
+    if (!cHits.length) return;
+    const old = cHits[cIdx]; if (old && old.line) old.line.classList.remove('jt-hit-cur');
+    cIdx = ((i % cHits.length) + cHits.length) % cHits.length;
+    cMarkCur();
+    const h = cHits[cIdx];
+    if (h.line) { jvExpandIn(h.s.tree, h.line); jvScrollInBox(h.s.tree, h.line); return; }
+    // edit view: เลื่อน textarea ให้ match อยู่กลางกล่อง (layer ไฮไลต์ sync ตาม)
+    const ta2 = h.s.ed.textarea; const hl = h.s.ed.wrap.querySelector('.je-highlight');
+    const rr = h.range.getBoundingClientRect(); const bb = hl.getBoundingClientRect();
+    ta2.scrollTop += (rr.top - bb.top) - (hl.clientHeight - rr.height) / 2;
+    hl.scrollTop = ta2.scrollTop;
+  }
+  let cSearchTimer = null;
+  cSearch.addEventListener('input', () => { clearTimeout(cSearchTimer); cSearchTimer = setTimeout(() => cRunSearch(), 200); });
+  cSearch.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); cGoto(cIdx + (e.shiftKey ? -1 : 1)); } });
+  document.getElementById('jc-next-btn').addEventListener('click', () => cGoto(cIdx + 1));
+  document.getElementById('jc-prev-btn').addEventListener('click', () => cGoto(cIdx - 1));
+
   document.getElementById('jc-format-btn').addEventListener('click', () => {
     for (const s of [cmp.a, cmp.b]) if (s.ok) { s.ed.textarea.value = JSON.stringify(s.val, null, 2); s.ed.refresh(); }
     cmpRun();

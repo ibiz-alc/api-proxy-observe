@@ -4,6 +4,7 @@
 // เช็ค: 1 jdDiff ถูก · 2 เพิ่ม/สลับ sub-tab ข้อความแยกกัน · 3 compare นับ changed/added/removed
 //   4 tree ไฮไลต์ + คลิกแถวกระโดด · 5 filter chip · 6 swap · 7 reload จำครบ · 8 rename/close · 9 ไม่ overflow / ไม่มี page error
 //   10 hover โชว์ path (editor + tree + ไฮไลต์ key เดียวกันอีกฝั่ง) · 11 แผง Key ปักล่างจอไม่เด้งตอนคลิกแถว
+//   12 ยืดเต็มจอ · 13 Ctrl+F ค้นหาใน Compare (edit + tree)
 const path = require('path');
 const puppeteer = require(require.resolve('puppeteer-core', { paths: [path.join(__dirname, '..', '..'), process.cwd()] }));
 
@@ -212,6 +213,49 @@ const typeInto = (page, sel, text) => page.evaluate((s, t) => {
   await page.click('.jv-doctab:nth-child(1)'); await sleep(100);
   const gv = await page.evaluate(() => Math.round(document.getElementById('tab-jsonviewer').getBoundingClientRect().bottom - document.querySelector('.jv-layout').getBoundingClientRect().bottom));
   check('12 view ยืดถึงล่างจอ', gv >= 0 && gv <= 20, String(gv));
+
+  // 13) Ctrl+F ในแท็บ Compare → ช่องค้นหาของ compare, Enter เลื่อนไปทีละ match ทั้ง edit view และ tree view
+  await page.click('#jv-add-compare'); await sleep(50);
+  const bigF = (k) => ({ list: Array.from({ length: 120 }, (_, i) => ({ id: i, name: i % 30 === 0 ? 'needle' + k : 'x' + i })) });
+  await typeInto(page, '.jc-side[data-side="a"] textarea', JSON.stringify(bigF('A'), null, 2));
+  await typeInto(page, '.jc-side[data-side="b"] textarea', JSON.stringify(bigF('B'), null, 2)); await sleep(450);
+  await page.click('#jc-mode-edit'); await sleep(50);
+  await page.keyboard.down('Control'); await page.keyboard.press('f'); await page.keyboard.up('Control');
+  const focused = await page.evaluate(() => document.activeElement.id);
+  check('13 Ctrl+F ใน Compare → โฟกัสช่องค้นหา compare', focused === 'jc-search', focused);
+  await page.keyboard.type('needle'); await sleep(350);
+  const edSnap = () => page.evaluate(() => {
+    const out = { count: document.getElementById('jc-search-count').textContent, hl: !!(CSS.highlights && CSS.highlights.get('jc-hit-cur')) };
+    const cur = CSS.highlights && CSS.highlights.get('jc-hit-cur');
+    const r = cur && [...cur][0];
+    if (r) {
+      const side = r.startContainer.parentElement.closest('.jc-side');
+      const hl = side.querySelector('.je-highlight'); const b = hl.getBoundingClientRect(); const rr = r.getBoundingClientRect();
+      out.side = side.dataset.side; out.visible = rr.top >= b.top && rr.bottom <= b.bottom;
+      out.taScroll = Math.round(side.querySelector('textarea').scrollTop); out.hlScroll = Math.round(hl.scrollTop);
+    }
+    return out;
+  });
+  const es = [await edSnap()];
+  for (let i = 0; i < 4; i++) { await page.keyboard.press('Enter'); await sleep(80); es.push(await edSnap()); }
+  const edOk = es[0].count === '1/8' && es.every((x) => x.hl && x.visible && x.taScroll === x.hlScroll)
+    && es[4].count === '5/8' && es[4].side === 'b' && es[3].taScroll > 0;
+  check('13 edit view: Enter เลื่อน editor ไปทีละ match (ข้ามไปฝั่งขวาได้)', edOk, es.map((x) => `${x.count}:${x.side}:${x.taScroll}:${x.visible}`).join(' '));
+  await page.keyboard.down('Shift'); await page.keyboard.press('Enter'); await page.keyboard.up('Shift'); await sleep(80);
+  const back = (await edSnap()).count;
+  check('13 Shift+Enter = ก่อนหน้า', back === '4/8', back);
+  await page.click('#jc-mode-tree'); await sleep(200);
+  const trSnap = () => page.evaluate(() => {
+    const c = document.querySelector('.jc-tree .jt-hit-cur'); if (!c) return { count: document.getElementById('jc-search-count').textContent };
+    const t = c.closest('.jc-tree'); const b = t.getBoundingClientRect(); const r = c.getBoundingClientRect();
+    return { count: document.getElementById('jc-search-count').textContent, side: c.closest('.jc-side').dataset.side, scroll: Math.round(t.scrollTop), visible: r.top >= b.top && r.bottom <= b.bottom, tabScroll: document.getElementById('tab-jsonviewer').scrollTop };
+  });
+  await page.click('#jc-next-btn'); await sleep(80);
+  const ts = [await trSnap()];
+  for (let i = 0; i < 4; i++) { await page.click('#jc-next-btn'); await sleep(80); ts.push(await trSnap()); }
+  const trOk = ts.every((x) => x.visible && x.tabScroll === 0) && ts.some((x) => x.side === 'b') && ts.some((x) => x.scroll > 0) && /\/8$/.test(ts[0].count);
+  check('13 tree view: ▼ เลื่อน tree ไปทีละ match ทั้งสองฝั่ง ไม่เลื่อนหน้า', trOk, ts.map((x) => `${x.count}:${x.side}:${x.scroll}:${x.visible}`).join(' '));
+  await page.screenshot({ path: 'json-compare-find.png' });
 
   // 9) overflow + narrow
   await page.click('#jv-add-compare'); await sleep(50);

@@ -1830,6 +1830,11 @@ body.mirror-open { padding-right: calc(44px + var(--mirror-w)); transition: none
 .jv-mode > .jv-toolbar { flex-shrink: 0; }
 #jv-compare-mode { min-height: 420px; }
 .jc-viewtoggle { display: flex; gap: 4px; }
+#jv-compare-mode > .jv-toolbar { flex-wrap: wrap; }
+.jc-searchbar { margin-left: auto; flex: 0 1 340px; min-width: 180px; }
+/* match ใน editor (CSS Custom Highlight บน layer ไฮไลต์ใต้ textarea โปร่งใส) */
+::highlight(jc-hit) { background-color: rgba(250, 204, 21, 0.3); }
+::highlight(jc-hit-cur) { background-color: rgba(250, 204, 21, 0.85); color: #0f172a; }
 .jc-viewtoggle .subtab-btn { margin: 0; }
 .jc-layout {
   display: grid;
