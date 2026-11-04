@@ -125,7 +125,17 @@ function showJtMenu(ev, value, path) { // คลิกขวาที่ node �
   const pathBtn = el('button', { class: 'flow-ctx-item', type: 'button', text: '🔗 Copy path' });
   jsonBtn.addEventListener('click', () => { closeJtMenu(); navigator.clipboard.writeText(jtCopyText(value)); });
   pathBtn.addEventListener('click', () => { closeJtMenu(); navigator.clipboard.writeText(jtPathStr(path)); });
-  const menu = el('div', { class: 'flow-ctx-menu' }, [jsonBtn, pathBtn]);
+  const items = [jsonBtn, pathBtn];
+  // ลบ field: เฉพาะ tree ที่ผู้สร้างส่ง onDelete มา (แท็บ JSON — แก้ข้อความต้นทางได้) · body ใน Inspector/Proxy อ่านอย่างเดียว ไม่มีเมนูนี้
+  const root = ev.currentTarget && ev.currentTarget.closest && ev.currentTarget.closest('.jt');
+  if (root && root.jtOnDelete && path.length) {
+    const last = path[path.length - 1];
+    const delBtn = el('button', { class: 'flow-ctx-item jt-ctx-danger', type: 'button', text: `🗑 Delete ${typeof last === 'number' ? `[${last}]` : `"${last}"`}` });
+    delBtn.title = jtPathStr(path);
+    delBtn.addEventListener('click', () => { closeJtMenu(); root.jtOnDelete(path); });
+    items.push(delBtn);
+  }
+  const menu = el('div', { class: 'flow-ctx-menu' }, items);
   document.body.appendChild(menu);
   const mw = menu.offsetWidth || 160, mh = menu.offsetHeight || 64;
   let x = ev.clientX, y = ev.clientY;
@@ -192,8 +202,9 @@ function jtNode(key, value, isIndex, last, path = []) {
   children.addEventListener('mouseout', (e) => { if (e.target === children) children.classList.remove('jt-guide-hot'); });
   return node;
 }
-function jsonTree(value) {
+function jsonTree(value, opts = {}) { // opts.onDelete(path) → เมนูคลิกขวามี "Delete" (ใช้เฉพาะที่แก้ข้อความต้นทางได้)
   const root = el('div', { class: 'jt' }, [jtNode(null, value, false, true, [])]);
+  if (opts.onDelete) root.jtOnDelete = opts.onDelete;
   // hover บรรทัดไหน → โชว์ path ของบรรทัดนั้นบน .jt-pathbar ของ pane เดียวกัน (เช่น หลังปุ่ม Raw)
   // host: .detail-pane (Inspector/Proxy) หรือ .jt-pane-host (แท็บ JSON Viewer)
   const bar = () => { const h = root.closest('.jt-pane-host, .detail-pane'); return h && h.querySelector('.jt-pathbar'); };
@@ -4201,6 +4212,36 @@ function bindEditorHoverPath(ed, getBar) {
   });
   ed.textarea.addEventListener('mouseleave', () => { last = null; const bar = getBar(); if (bar) bar.textContent = ''; });
 }
+// ---- ลบ field จาก tree แท็บ JSON: แก้ object แล้วเขียนข้อความกลับด้วย format เดิม (minify / indent เดิม) ----
+function jvDeleteAt(obj, path) {
+  const parent = path.slice(0, -1).reduce((o, k) => o[k], obj);
+  const k = path[path.length - 1];
+  if (Array.isArray(parent)) parent.splice(k, 1); else delete parent[k];
+}
+function jvStringifyLike(oldText, value) {
+  if (!/\n/.test(oldText.trim())) return JSON.stringify(value); // เดิมเป็นบรรทัดเดียว = minify
+  const m = oldText.match(/\n([ \t]+)\S/);
+  return JSON.stringify(value, null, m ? (m[1][0] === '\t' ? '\t' : m[1].length) : 2);
+}
+function jvReplaceText(ta, text) { // editor มองเห็นอยู่ → execCommand ให้ ⌘Z ย้อนได้ตามปกติ · ซ่อนอยู่ (tree view) → เซ็ตตรงๆ
+  let ok = false;
+  if (ta.offsetParent !== null && document.execCommand) {
+    ta.focus({ preventScroll: true }); ta.select();
+    try { ok = document.execCommand('insertText', false, text) && ta.value === text; } catch { ok = false; }
+  }
+  if (!ok) { ta.value = text; ta.dispatchEvent(new Event('input', { bubbles: true })); }
+}
+let _jvUndoTimer = null;
+function jvUndoToast(msg, onUndo) { // toast มีปุ่ม ↩ ย้อนกลับ (ลบผิดกดคืนได้ แม้แก้ตอนอยู่ tree view ที่ ⌘Z ใช้ไม่ได้)
+  let t = document.getElementById('jv-undo-toast');
+  if (!t) { t = el('div', { class: 'jv-undo-toast', id: 'jv-undo-toast' }); document.body.appendChild(t); }
+  const btn = el('button', { type: 'button', text: '↩ ย้อนกลับ' });
+  btn.addEventListener('click', () => { t.classList.remove('show'); onUndo(); });
+  t.replaceChildren(el('span', { text: msg }), btn);
+  t.classList.add('show');
+  clearTimeout(_jvUndoTimer);
+  _jvUndoTimer = setTimeout(() => t.classList.remove('show'), 6000);
+}
 function jvScrollInBox(box, line) { // เลื่อนเฉพาะกล่อง tree ให้บรรทัดอยู่กลาง — ห้าม scrollIntoView (มันเลื่อนหน้า/แท็บทั้งหน้าตามไปด้วย)
   const b = box.getBoundingClientRect(); const r = line.getBoundingClientRect();
   box.scrollTop += (r.top - b.top) - (box.clientHeight - r.height) / 2;
@@ -4359,7 +4400,7 @@ function setupJsonViewer() {
       parsed = JSON.parse(text); parseOk = true; clearError();
       fmtBtn.disabled = minBtn.disabled = false;
       jvClearSearch(); // tree เก่ากำลังถูกแทน — ล้าง reference ของผลค้นหาก่อน
-      treeBox.replaceChildren(jsonTree(parsed));
+      treeBox.replaceChildren(jsonTree(parsed, { onDelete: viewDelete }));
       const n = treeBox.querySelectorAll('.jt-line').length;
       statLbl.textContent = `${(text.length / 1024).toFixed(1)} KB · ${n} บรรทัด`;
       jvRunSearch(); // ถ้ามีคำค้นค้างอยู่ ให้ค้นใหม่บน tree ใหม่
@@ -4378,6 +4419,17 @@ function setupJsonViewer() {
   }
   let jvTimer = null;
   ta.addEventListener('input', () => { clearTimeout(jvTimer); jvTimer = setTimeout(parseNow, 300); });
+  // ลบ field จากเมนูคลิกขวาใน tree → เขียนข้อความใน editor ใหม่ + parse ทันที (คง scroll ของ tree ไว้)
+  const deleteFieldIn = (getTa, apply, box) => (path) => {
+    const taX = getTa(); const before = taX.value;
+    let v; try { v = JSON.parse(before); } catch { return; }
+    jvDeleteAt(v, path);
+    const st = box().scrollTop;
+    jvReplaceText(taX, jvStringifyLike(before, v));
+    apply(); box().scrollTop = st;
+    jvUndoToast(`🗑 ลบ ${jtPathStr(path)} แล้ว`, () => { const st2 = box().scrollTop; jvReplaceText(taX, before); apply(); box().scrollTop = st2; });
+  };
+  const viewDelete = deleteFieldIn(() => ta, () => { clearTimeout(jvTimer); ed.refresh(); parseNow(); }, () => treeBox);
 
   // toolbar
   fmtBtn.addEventListener('click', () => { if (parseOk) setText(JSON.stringify(parsed, null, 2)); });
@@ -4466,6 +4518,7 @@ function setupJsonViewer() {
     return { sec, ed: sed, err: sec.querySelector('.jv-error'), tree: sec.querySelector('.jc-tree'), file, val: undefined, ok: false };
   };
   const cmp = { a: mkSide('a'), b: mkSide('b'), diffs: [], hidden: new Set() };
+  for (const s of [cmp.a, cmp.b]) s.onDelete = deleteFieldIn(() => s.ed.textarea, () => { clearTimeout(s.timer); s.ed.refresh(); cmpRun(); }, () => s.tree);
   // hover บรรทัดใน tree ฝั่งหนึ่ง → ไฮไลต์ key เดียวกันอีกฝั่ง + โชว์ path บน bar ทั้งสองฝั่ง
   // (bar ฝั่งตัวเอง jsonTree เซ็ตให้อยู่แล้ว · ไม่มีบรรทัดนั้นอีกฝั่ง = key ที่มีแค่ฝั่งเดียว → bar อีกฝั่งบอกว่าไม่มี)
   const clearPeer = () => {
@@ -4491,8 +4544,7 @@ function setupJsonViewer() {
   const modeTreeBtn = document.getElementById('jc-mode-tree');
   const cmpSetText = (s, v) => { s.ed.textarea.value = v; s.ed.refresh(); cmpRun(); };
   for (const s of [cmp.a, cmp.b]) {
-    let t = null;
-    s.ed.textarea.addEventListener('input', () => { clearTimeout(t); t = setTimeout(cmpRun, 300); });
+    s.ed.textarea.addEventListener('input', () => { clearTimeout(s.timer); s.timer = setTimeout(cmpRun, 300); });
     readFileInto(s.file, (txt) => cmpSetText(s, txt), (m) => { s.err.textContent = m; s.err.style.display = ''; });
   }
   function cmpParse(s) {
@@ -4577,7 +4629,7 @@ function setupJsonViewer() {
         continue;
       }
       s.tree.classList.remove('jv-stale');
-      s.tree.replaceChildren(jsonTree(s.val));
+      s.tree.replaceChildren(jsonTree(s.val, { onDelete: s.onDelete }));
       // map path → diff ของฝั่งนี้ (ฝั่งซ้ายไม่มี added, ฝั่งขวาไม่มี removed)
       const mine = new Map(); const anc = new Set();
       for (const x of cmp.diffs) {

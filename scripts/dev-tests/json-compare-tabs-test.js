@@ -5,6 +5,7 @@
 //   4 tree ไฮไลต์ + คลิกแถวกระโดด · 5 filter chip · 6 swap · 7 reload จำครบ · 8 rename/close · 9 ไม่ overflow / ไม่มี page error
 //   10 hover โชว์ path (editor + tree + ไฮไลต์ key เดียวกันอีกฝั่ง) · 11 แผง Key ปักล่างจอไม่เด้งตอนคลิกแถว
 //   12 ยืดเต็มจอ · 13 Ctrl+F ค้นหาใน Compare (edit + tree)
+//   14 คลิกขวา Delete field + ย้อนกลับ
 const path = require('path');
 const puppeteer = require(require.resolve('puppeteer-core', { paths: [path.join(__dirname, '..', '..'), process.cwd()] }));
 
@@ -256,6 +257,72 @@ const typeInto = (page, sel, text) => page.evaluate((s, t) => {
   const trOk = ts.every((x) => x.visible && x.tabScroll === 0) && ts.some((x) => x.side === 'b') && ts.some((x) => x.scroll > 0) && /\/8$/.test(ts[0].count);
   check('13 tree view: ▼ เลื่อน tree ไปทีละ match ทั้งสองฝั่ง ไม่เลื่อนหน้า', trOk, ts.map((x) => `${x.count}:${x.side}:${x.scroll}:${x.visible}`).join(' '));
   await page.screenshot({ path: 'json-compare-find.png' });
+
+  // 14) คลิกขวา → 🗑 Delete field (แท็บ JSON ปกติ + Compare) · ย้อนกลับได้ · body ที่อ่านอย่างเดียวไม่มีเมนูนี้
+  const ctxOn = (sel, p) => page.evaluate((s2, p2) => {
+    const line = [...document.querySelectorAll(s2 + ' .jt-line')].find((l) => l.dataset.jtpath === p2);
+    if (!line) return null;
+    const r = line.getBoundingClientRect();
+    line.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 20, clientY: r.top + 5 }));
+    return [...document.querySelectorAll('.flow-ctx-menu .flow-ctx-item')].map((b) => b.textContent);
+  }, sel, p);
+  const clickDel = () => page.evaluate(() => document.querySelector('.flow-ctx-menu .jt-ctx-danger').click());
+  await page.click('#jv-add-view'); await sleep(50);
+  const src = { user: { name: 'a', age: 1 }, list: [10, 20, 30] };
+  await typeInto(page, '#jv-editor-host textarea', JSON.stringify(src, null, 4)); await sleep(450);
+  const m1 = await ctxOn('#jv-tree', 'user.age');
+  check('14 เมนูคลิกขวามี Delete', !!m1 && m1.length === 3 && m1[2].includes('"age"'), JSON.stringify(m1));
+  await clickDel(); await sleep(100);
+  const v1 = await page.$eval('#jv-editor-host textarea', (t) => t.value);
+  check('14 ลบ key แล้ว editor อัปเดต + คง indent 4 เดิม', v1 === JSON.stringify({ user: { name: 'a' }, list: [10, 20, 30] }, null, 4), v1.replace(/\n/g, '⏎'));
+  const lines14 = await page.$$eval('#jv-tree .jt-line', (l) => l.map((x) => x.dataset.jtpath).filter(Boolean));
+  check('14 tree render ใหม่ทันที (ไม่มี user.age)', !lines14.includes('user.age') && lines14.includes('user.name'), lines14.join(' '));
+  await ctxOn('#jv-tree', 'list[1]'); await clickDel(); await sleep(100);
+  const v2 = JSON.parse(await page.$eval('#jv-editor-host textarea', (t) => t.value));
+  check('14 ลบ array item = splice', JSON.stringify(v2.list) === '[10,30]', JSON.stringify(v2.list));
+  await page.evaluate(() => document.querySelector('#jv-undo-toast button').click()); await sleep(100);
+  const v3 = JSON.parse(await page.$eval('#jv-editor-host textarea', (t) => t.value));
+  check('14 ↩ ย้อนกลับ คืน item ที่ลบ', JSON.stringify(v3.list) === '[10,20,30]', JSON.stringify(v3.list));
+  const rootMenu = await ctxOn('#jv-tree', '$');
+  check('14 root ($) ไม่มี Delete', rootMenu && rootMenu.length === 2, JSON.stringify(rootMenu));
+  await page.keyboard.press('Escape');
+  // minify คงเป็นบรรทัดเดียว
+  await typeInto(page, '#jv-editor-host textarea', '{"a":1,"b":2}'); await sleep(450);
+  await ctxOn('#jv-tree', 'b'); await clickDel(); await sleep(100);
+  check('14 minify คงบรรทัดเดียว', (await page.$eval('#jv-editor-host textarea', (t) => t.value)) === '{"a":1}');
+
+  // compare tree: ลบฝั่ง B แล้ว diff คำนวณใหม่ + tree ไม่เด้ง scroll
+  await page.click('#jv-add-compare'); await sleep(50);
+  const longA = { list: Array.from({ length: 80 }, (_, i) => ({ id: i })), extra: 1 };
+  const longB = { list: Array.from({ length: 80 }, (_, i) => ({ id: i })), extra: 1, only: true };
+  await typeInto(page, '.jc-side[data-side="a"] textarea', JSON.stringify(longA, null, 2));
+  await typeInto(page, '.jc-side[data-side="b"] textarea', JSON.stringify(longB, null, 2)); await sleep(450);
+  await page.click('#jc-mode-tree'); await sleep(150);
+  const before14 = await page.$$eval('.jc-chip b', (b) => b.map((x) => x.textContent).join(','));
+  await page.evaluate(() => { document.querySelector('.jc-side[data-side="b"] .jc-tree').scrollTop = 99999; }); await sleep(50);
+  const stB = await page.$eval('.jc-side[data-side="b"] .jc-tree', (t) => t.scrollTop);
+  const mB = await ctxOn('.jc-side[data-side="b"] .jc-tree', 'only');
+  await clickDel(); await sleep(500); // รอเลย debounce 300ms — ต้องไม่ re-render ซ้ำจน scroll หาย
+  const after14 = await page.evaluate(() => ({
+    counts: [...document.querySelectorAll('.jc-chip b')].map((x) => x.textContent).join(','),
+    stat: document.getElementById('jc-stat').textContent,
+    scroll: document.querySelector('.jc-side[data-side="b"] .jc-tree').scrollTop,
+    textHasOnly: document.querySelector('.jc-side[data-side="b"] textarea').value.includes('"only"'),
+  }));
+  check('14 compare: ลบ field ฝั่งขวา → diff คำนวณใหม่', mB && mB.length === 3 && before14 === '0,1,0' && after14.counts === '0,0,0' && !after14.textHasOnly, `${before14} → ${JSON.stringify(after14)}`);
+  check('14 compare: tree คง scroll หลังลบ', stB > 0 && Math.abs(after14.scroll - stB) < 60, `${stB} → ${after14.scroll}`);
+
+  // body ใน Inspector (bodyBlock) อ่านอย่างเดียว → ไม่มี Delete
+  const roMenu = await page.evaluate(() => {
+    const box = window.bodyBlock ? window.bodyBlock('{"x":1}') : null; if (!box) return null;
+    document.body.appendChild(box);
+    const line = [...box.querySelectorAll('.jt-line')].find((l) => l.dataset.jtpath === 'x');
+    line.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }));
+    const items = [...document.querySelectorAll('.flow-ctx-menu .flow-ctx-item')].map((b) => b.textContent);
+    box.remove(); return items;
+  });
+  check('14 body อ่านอย่างเดียว (Inspector/Proxy) ไม่มี Delete', roMenu && roMenu.length === 2, JSON.stringify(roMenu));
+  await page.keyboard.press('Escape');
 
   // 9) overflow + narrow
   await page.click('#jv-add-compare'); await sleep(50);
