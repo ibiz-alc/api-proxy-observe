@@ -3506,6 +3506,64 @@ async function stConnectDevice(serial, mode) {
   if (r.caMissing) await stInstallCaEmulator(serial);
 }
 
+// ===== ADB ผ่าน Wi-Fi (wireless debugging) — สายหลุดบ่อย → debug/บันทึก traffic ต่อผ่าน Wi-Fi =====
+async function stAdbWifiPost(path, body) {
+  const r = await (await fetch('/api/devices/adb-wifi/' + path, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  })).json();
+  if (!r.ok) throw new Error(r.error || 'ไม่สำเร็จ');
+  return r;
+}
+async function stAdbWifiEnable(serial) {
+  try {
+    const r = await stAdbWifiPost('enable', { serial });
+    alert(`✅ เปิด Debug ผ่าน Wi-Fi แล้ว — ${r.host}\n\nมือถือ ${r.ip} (${r.iface}) ↔ Mac ${r.macIp} (${r.macIface})\n`
+      + 'ถอดสาย USB ได้เลย · ถ้า Wi-Fi หลุด (มือถือหลับ/IP เปลี่ยน) server จะต่อกลับให้เอง\n'
+      + 'ⓘ พอร์ต 5555 เปิดค้างจนกว่ามือถือจะ reboot (ต้องเป็นเครื่องที่เคยกดอนุญาต Mac เครื่องนี้เท่านั้นถึงต่อได้)');
+  } catch (e) { alert('📡 เปิด Debug ผ่าน Wi-Fi ไม่ได้\n\n' + e.message); }
+}
+async function stAdbWifiDisable(id) {
+  if (!confirm('เลิก Debug ผ่าน Wi-Fi ของเครื่องนี้?\n(ถ้าไม่ได้เสียบสาย เครื่องจะหายจากรายการ)')) return;
+  await stAdbWifiPost('disable', { id });
+}
+// การ์ด "ต่อแบบไม่มีสาย" — Android 11+ Wireless debugging (จับคู่ด้วยรหัส แล้วเชื่อมด้วย IP:พอร์ต)
+// ค่าที่พิมพ์ค้างเก็บนอก DOM เพราะ renderStatus สร้างการ์ดใหม่ทั้งหมด
+const stAdbWifiForm = { host: '', pairHost: '', code: '' };
+function renderAdbWifiCard(adbWifiInfo = {}) {
+  const nets = adbWifiInfo.macNets || [];
+  const inp = (key, ph, extra = {}) => {
+    const i = el('input', { type: 'text', class: 'st-url-input st-adbw-input', placeholder: ph, ...extra });
+    i.value = stAdbWifiForm[key];
+    i.addEventListener('input', () => { stAdbWifiForm[key] = i.value.trim(); });
+    return i;
+  };
+  const hostIn = inp('host', 'IP:พอร์ต เช่น 192.168.1.20:5555');
+  const pairIn = inp('pairHost', 'IP:พอร์ตจับคู่');
+  const codeIn = inp('code', 'รหัส 6 หลัก', { inputmode: 'numeric', maxlength: '6' });
+  codeIn.classList.add('st-adbw-code');
+  const connectBtn = stBtn('🔗 เชื่อม', async () => {
+    const r = await stAdbWifiPost('connect', { host: stAdbWifiForm.host });
+    stAdbWifiForm.host = '';
+    showToast(`📡 เชื่อม ${r.host} แล้ว`);
+  });
+  const pairBtn = stBtn('🤝 จับคู่', async () => {
+    const r = await stAdbWifiPost('pair', { host: stAdbWifiForm.pairHost, code: stAdbWifiForm.code });
+    stAdbWifiForm.code = '';
+    if (r.connected) { stAdbWifiForm.pairHost = ''; showToast(`📡 จับคู่และเชื่อม ${r.host} แล้ว`); }
+    else alert('🤝 จับคู่สำเร็จ\n\n' + (r.error || 'ใส่ IP:พอร์ต แล้วกดเชื่อม'));
+  });
+  const details = [
+    'สายชอบหลุด? เสียบสายครั้งเดียวแล้วกด “📡 Debug ผ่าน Wi-Fi” ที่การ์ดมือถือ — จากนั้นถอดสายได้ ทุกอย่าง (บันทึก traffic / auto-reconnect) ไปต่อทาง Wi-Fi',
+    'เงื่อนไข: มือถือกับ Mac ต้องยิงถึงกัน — ① Wi-Fi วงเดียวกัน ② เปิด Hotspot บนมือถือแล้วให้ Mac เกาะ ③ เปิด Internet Sharing บน Mac แล้วให้มือถือเกาะ',
+    'Mac ตอนนี้อยู่วง: ' + (nets.length ? nets.map((n) => `${n.ip}/${n.prefix} (${n.iface})`).join(' · ') : '— ไม่มีเครือข่าย —'),
+    'ไม่มีสายเลย (Android 11+): ตัวเลือกสำหรับนักพัฒนา → การแก้จุดบกพร่องแบบไร้สาย → “จับคู่อุปกรณ์ด้วยรหัสการจับคู่” → ใส่ IP:พอร์ต + รหัส ด้านล่าง',
+  ];
+  const card = stCard('📡', 'ADB ผ่าน Wi-Fi (Wireless debugging)', true, details);
+  card.appendChild(el('div', { class: 'st-actions st-adbw-row' }, [pairIn, codeIn, pairBtn]));
+  card.appendChild(el('div', { class: 'st-actions st-adbw-row' }, [hostIn, connectBtn]));
+  return card;
+}
+
 function stCard(icon, title, up, details, actions = []) {
   const card = el('div', { class: 'st-card ' + (up ? 'ok' : 'bad') }, [
     el('div', { class: 'st-head' }, [
@@ -3784,7 +3842,7 @@ async function renderStatus() {
     statusCards.appendChild(el('p', { class: 'empty-msg', text: 'เช็คสถานะไม่ได้: ' + e.message }));
     return;
   }
-  const { services: sv, devices, iosSims = [], iosProxy = {}, muted, mutedDropped = 0, flows, lanIp } = d;
+  const { services: sv, devices, iosSims = [], iosProxy = {}, muted, mutedDropped = 0, flows, lanIp, adbWifi = {} } = d;
   autoRcMap = d.autoReconnect || {}; // sync สถานะ toggle auto-reconnect จาก server
   statusCards.innerHTML = '';
 
@@ -3876,6 +3934,16 @@ async function renderStatus() {
     } else {
       details.push('ยังไม่ได้เชื่อม proxy' + (lanIp ? ` (Wi-Fi ใช้ Host ${lanIp}:8888)` : ''));
     }
+    // เสียบสายอยู่ไหม — server รุ่นนี้ส่ง usbSerial มา (null = ไม่มีสาย) · ถ้าไม่มีฟิลด์ (ข้อมูลรุ่นเก่า) ดูจาก transport
+    const usbSerial = dev.usbSerial !== undefined ? dev.usbSerial : (dev.transport === 'wifi' ? null : dev.serial);
+    // ทาง adb ที่ต่ออยู่ (สาย / Wi-Fi / ทั้งคู่) — Wi-Fi = ถอดสายแล้วยังใช้งานต่อได้
+    if (!dev.emulator) {
+      const wifiRem = (adbWifi.remembered || []).find((x) => x.id === dev.id);
+      if (dev.wifiSerial && usbSerial) details.push(`📡 adb: สาย USB + Wi-Fi (${dev.wifiSerial}) — ถอดสายได้ ใช้งานต่อทาง Wi-Fi`);
+      else if (dev.wifiSerial) details.push(`📡 adb ผ่าน Wi-Fi (${dev.wifiSerial}) — ไม่ได้เสียบสาย`);
+      else if (wifiRem) details.push(`🔌 adb ผ่านสาย — Wi-Fi (${wifiRem.host}) หลุดอยู่ กำลังต่อกลับให้เอง` + (wifiRem.lastError ? ` · ล่าสุด: ${wifiRem.lastError.split('\n')[0]}` : ''));
+      else details.push('🔌 adb ผ่านสาย USB อย่างเดียว — สายชอบหลุด? กด 📡 Debug ผ่าน Wi-Fi');
+    }
     // สถานะ system CA ของ emulator (จำเป็นต่อการถอดรหัส HTTPS — tmpfs หายทุก reboot)
     if (dev.emulator && dev.systemCa === false) {
       details.push('⚠️ ยังไม่มี system CA — HTTPS จะถอดรหัสไม่ได้ · กด 🔐 หรือกดเชื่อมใหม่ (ติดตั้งให้อัตโนมัติ ~90 วิ)');
@@ -3896,7 +3964,9 @@ async function renderStatus() {
     }
     const acts = [];
     if (!okDev) {
-      acts.push(stBtn('🔌 เชื่อม USB', () => stConnectDevice(dev.serial, 'usb')));
+      // โหมด "usb" = proxy 127.0.0.1 + adb reverse → วิ่งผ่าน adb Wi-Fi ได้ด้วย (ไม่ต้องอยู่วงเดียวกับ proxy LAN)
+      acts.push(stBtn(usbSerial || dev.emulator ? '🔌 เชื่อม USB' : '📡 เชื่อมผ่าน adb', () => stConnectDevice(dev.serial, 'usb'), '',
+        usbSerial ? '' : 'ตั้ง proxy 127.0.0.1 + adb reverse ผ่านทาง adb Wi-Fi (เหมือนโหมด USB แต่ไม่ต้องเสียบสาย)'));
       acts.push(stBtn('📶 เชื่อม Wi-Fi', () => stConnectDevice(dev.serial, 'wifi')));
     } else {
       // กดตัดเอง = ตั้งใจปลด → ฝั่ง server ปิด auto-reconnect ของเครื่องนี้ให้ด้วย (ใน endpoint disconnect)
@@ -3904,7 +3974,7 @@ async function renderStatus() {
       acts.push(stBtn('⛔ ตัดการเชื่อมต่อ', () => stDisconnectDevice(dev.serial), 'stop'));
     }
     // ปุ่มแชร์เน็ตของเครื่องนี้ (แยกรายเครื่อง) — emulator ไม่ต้องมี เพราะใช้เน็ตของ Mac อยู่แล้ว
-    if (!dev.emulator) {
+    if (!dev.emulator && usbSerial) {
       const shareTip = sharing
         ? 'หยุดแชร์เน็ตของเครื่องนี้ — ไม่กระทบการเชื่อม proxy/การบันทึก traffic\n'
           + '(ถ้ากำลังเชื่อม capture อยู่ มือถือจะยังมีเน็ตผ่านทางนั้นต่อไป)'
@@ -3914,17 +3984,26 @@ async function renderStatus() {
           + '• ได้เฉพาะ HTTP/HTTPS ของแอปที่เคารพ system proxy — Play Store/push/DNS/UDP ไม่ได้\n'
           + '• Android จะยังขึ้นว่า “ไม่มีอินเทอร์เน็ต” แม้ใช้งานได้จริง';
       acts.push(stBtn(sharing ? '🌍 หยุดแชร์เน็ต' : '🌍 แชร์เน็ต USB',
-        () => stShareNet(dev.serial, !sharing), sharing ? 'stop' : '', shareTip));
+        () => stShareNet(usbSerial, !sharing), sharing ? 'stop' : '', shareTip));
     }
     // toggle auto-reconnect (เฉพาะ device จริงที่มี serial ต่อผ่าน adb) — โชว์ได้ทุกสถานะเพื่อ pre-arm ไว้ก่อน
-    if (dev.serial) acts.push(stAutoToggle(dev.serial, dev));
+    if (dev.serial) acts.push(stAutoToggle(dev.id || dev.serial, dev));
+    // เปิด/เลิก debug ผ่าน Wi-Fi (เปิดได้เฉพาะตอนเสียบสาย — ต้องสั่ง adb tcpip ผ่านสาย)
+    if (!dev.emulator) {
+      const rem = (adbWifi.remembered || []).find((x) => x.id === dev.id);
+      if (rem) acts.push(stBtn('📡 เลิก Debug Wi-Fi', () => stAdbWifiDisable(dev.id), 'stop', `ตัด adb ทาง Wi-Fi (${rem.host}) และไม่ต่อกลับให้อีก`));
+      else if (dev.wifiSerial) acts.push(stBtn('📡 ตัด adb Wi-Fi', () => stAdbWifiPost('disable', { id: dev.id, host: dev.wifiSerial }), 'stop',
+        `ต่อ Wi-Fi ไว้จากนอกแอป (${dev.wifiSerial}) — กดเพื่อตัด`));
+      else if (usbSerial) acts.push(stBtn('📡 Debug ผ่าน Wi-Fi', () => stAdbWifiEnable(usbSerial), '',
+        'เปิด adb ผ่าน Wi-Fi (adb tcpip + connect) → ถอดสายแล้วยัง debug/บันทึก traffic ต่อได้\nมือถือกับ Mac ต้องอยู่วงเดียวกัน (Wi-Fi เดียวกัน / Hotspot / Internet Sharing)'));
+    }
     // Emulator: ติดตั้ง CA เข้า system store อัตโนมัติ (auto-trust HTTPS ทั้งเครื่อง)
     if (dev.emulator) {
       acts.push(stBtn('🔐 ติดตั้ง CA (Auto)', () => stInstallCaEmulator(dev.serial)));
     }
     // แสดงสถานะการเชื่อมจริง (โหมด proxy) ไม่ใช่ transport ของ adb
     const connLabel = dev.connected
-      ? (dev.mode === 'wifi' ? '📶 WIFI' : '🔌 USB')
+      ? (dev.mode === 'wifi' ? '📶 WIFI' : dev.transport === 'wifi' ? '📡 ADB Wi-Fi' : '🔌 USB')
       : dev.posternRunning ? '📲 POSTERN' : '⚪ ยังไม่เชื่อม';
     statusCards.appendChild(stCard('📱', `${dev.model} (${connLabel})`, okDev, details, acts));
   }
@@ -3953,6 +4032,20 @@ async function renderStatus() {
     const connLabel = active ? '🟢 SIM ต่ออยู่' : '⚪ SIM ยังไม่เชื่อม';
     statusCards.appendChild(stCard('🍎', `${sim.name} (${connLabel})`, active, details, acts));
   }
+
+  // --- เครื่องที่เคย debug ผ่าน Wi-Fi แต่ตอนนี้หาไม่เจอ (ไม่มีสาย + Wi-Fi หลุด) ---
+  for (const rem of adbWifi.remembered || []) {
+    if (devices.some((x) => x.id === rem.id || x.wifiSerial === rem.host)) continue;
+    statusCards.appendChild(stCard('📡', `${rem.model || rem.id} (Wi-Fi หลุด)`, false, [
+      `adb ผ่าน Wi-Fi ${rem.host} ต่อไม่ได้ — server กำลังลองต่อกลับให้เอง`,
+      ...(rem.lastError ? ['ล่าสุด: ' + rem.lastError.split('\n')[0]] : []),
+      'มือถือหลับ/ออกจาก Wi-Fi/reboot? เปิดหน้าจอมือถือ หรือเสียบสายครั้งเดียว (server จะเปิด Wi-Fi ให้ใหม่เอง)',
+    ], [
+      stBtn('🔄 ต่อใหม่', () => stAdbWifiPost('connect', { host: rem.host })),
+      stBtn('🗑 ลืมเครื่องนี้', () => stAdbWifiDisable(rem.id), 'stop'),
+    ]));
+  }
+  statusCards.appendChild(renderAdbWifiCard(adbWifi));
 
   // --- วิธีเชื่อมต่อ: แยกการ์ด Android / iOS ---
   statusCards.appendChild(renderAndroidCard(lanIp, sv.mitmproxy.up));
@@ -3988,7 +4081,11 @@ async function renderStatus() {
 document.getElementById('status-refresh').addEventListener('click', renderStatus);
 document.querySelector('.tab-btn[data-tab="status"]').addEventListener('click', renderStatus);
 setInterval(() => {
-  if (document.getElementById('tab-status').classList.contains('active')) renderStatus();
+  if (!document.getElementById('tab-status').classList.contains('active')) return;
+  // กำลังพิมพ์ในช่องของการ์ด (URL ดักจับเว็บ / IP:พอร์ต adb Wi-Fi) → ข้ามรอบนี้ ไม่งั้นการ์ดถูกสร้างใหม่ โฟกัส/ข้อความหาย
+  const a = document.activeElement;
+  if (a && a.tagName === 'INPUT' && statusCards.contains(a)) return;
+  renderStatus();
 }, 5000);
 renderStatus();
 

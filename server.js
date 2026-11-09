@@ -13,6 +13,7 @@ const { startProxy } = require('./proxy');
 const execFileP = promisify(execFile);
 const ADB = process.env.ADB || 'adb';
 const { createShareProxy } = require('./net-share');
+const adbWifi = require('./adb-wifi');
 const MITM_PORT = 8888;
 // พร็อกซีส่งต่อสำหรับ "แชร์เน็ต" ล้วน ๆ (ไม่ดัก/ไม่บันทึก) — คนละตัวกับ mitmproxy เพื่อให้ปุ่มแชร์เน็ต
 // กับปุ่มเชื่อม proxy (บันทึก traffic) เปิด/ปิดแยกกันได้ · ตั้ง SHARE_PORT ได้เผื่อรันหลาย instance
@@ -1231,16 +1232,53 @@ async function restoreNetShare() {
   }
 }
 
+// ===== ตัวตนของเครื่อง: เครื่องเดียวกันอาจต่อ adb ได้ 2 ทาง (USB + Wi-Fi) → serial คนละตัว =====
+// จับคู่ด้วย ro.serialno แล้วรวมเป็น device เดียว: id = ro.serialno (มือถือจริงปกติตรงกับ serial ของ USB
+// → prefs เก่าที่ key ด้วย serial USB ใช้ต่อได้เลย) · คำสั่ง adb ยิงผ่าน "serial หลัก" = USB ถ้ามี ไม่งั้น Wi-Fi
+const hwSerialCache = new Map(); // adb serial → { hw, at }
+async function hwSerialOf(serial) {
+  const c = hwSerialCache.get(serial);
+  if (c && c.hw && Date.now() - c.at < 60000) return c.hw; // ip:port อาจโดนเครื่องอื่นใช้ทีหลัง → ไม่ cache ถาวร
+  let hw = '';
+  try { hw = (await adb(['-s', serial, 'shell', 'getprop', 'ro.serialno'], 5000)).trim(); } catch { /* ignore */ }
+  hwSerialCache.set(serial, { hw, at: Date.now() });
+  return hw;
+}
+let deviceGroups = new Map(); // id → { usbSerial, wifiSerial } จาก listDevices รอบล่าสุด
+function idForSerial(serial) {
+  for (const [id, g] of deviceGroups) if (id === serial || g.usbSerial === serial || g.wifiSerial === serial) return id;
+  // serial ที่เพิ่งต่อ (ยังไม่ผ่าน listDevices รอบไหน) → ใช้ ro.serialno ที่ cache ไว้ตอนต่อ
+  return (hwSerialCache.get(serial) || {}).hw || serial;
+}
+// serial ของทางอื่นของเครื่องเดียวกัน — reverse tunnel ผูกกับ transport จึงต้องตั้งทุกทาง (ถอดสายแล้ว Wi-Fi รับช่วงได้ทันที)
+function siblingSerials(serial) {
+  const g = deviceGroups.get(idForSerial(serial));
+  return g ? [g.usbSerial, g.wifiSerial].filter((x) => x && x !== serial) : [];
+}
+
 // อ่านรายการ device + สถานะ proxy (global http_proxy ตั้งอยู่ไหม)
 async function listDevices() {
   let out = '';
   try { out = await adb(['devices', '-l']); } catch { return []; }
+  const rows = adbWifi.parseAdbDevices(out).filter((r) => r.state === 'device');
+  await Promise.all(rows.map(async (r) => {
+    r.transport = adbWifi.isWifiSerial(r.serial) ? 'wifi' : 'usb';
+    r.emulator = /^emulator-/.test(r.serial); // emulator → รองรับติดตั้ง CA เข้า system store อัตโนมัติ
+    r.hw = r.emulator ? '' : await hwSerialOf(r.serial);
+  }));
+  const groups = new Map();
+  for (const r of rows) {
+    const id = r.hw || r.serial;
+    const g = groups.get(id) || { id, usb: null, wifi: null, model: '' };
+    if (r.transport === 'wifi') { if (!g.wifi) g.wifi = r; } else if (!g.usb) g.usb = r;
+    g.model = g.model || r.model;
+    groups.set(id, g);
+  }
+  deviceGroups = new Map([...groups.values()].map((g) => [g.id, { usbSerial: g.usb && g.usb.serial, wifiSerial: g.wifi && g.wifi.serial }]));
   const devices = [];
-  for (const line of out.split('\n').slice(1)) {
-    const m = line.match(/^(\S+)\s+device\b(.*)$/);
-    if (!m) continue;
-    const serial = m[1];
-    const model = (m[2].match(/model:(\S+)/) || [])[1] || serial;
+  for (const g of groups.values()) {
+    const primary = g.usb || g.wifi; // มีสายใช้สาย (เร็ว/นิ่งกว่า) · ถอดสาย → ทาง Wi-Fi รับช่วงทันที
+    const serial = primary.serial;
     let proxy = '';
     try { proxy = (await adb(['-s', serial, 'shell', 'settings', 'get', 'global', 'http_proxy'])).trim(); } catch { /* ignore */ }
     // proxy ที่ชี้ไปพอร์ตแชร์เน็ต = ได้เน็ตจาก Mac แต่ไม่ได้บันทึก traffic → ไม่ถือว่า "เชื่อม" capture
@@ -1256,14 +1294,16 @@ async function listDevices() {
       const svc = await adb(['-s', serial, 'shell', 'dumpsys', 'activity', 'services', POSTERN_PKG]);
       posternRunning = /\*\s+ServiceRecord\{[^}]*PosternVpnService/.test(svc);
     } catch { /* ignore */ }
-    // adb-over-wifi serial จะเป็น ip:port → เลือกเงื่อนไข Wi-Fi ให้อัตโนมัติ
-    const transport = /^\d+\.\d+\.\d+\.\d+:\d+$/.test(serial) ? 'wifi' : 'usb';
-    const emulator = /^emulator-/.test(serial); // emulator → รองรับติดตั้ง CA เข้า system store อัตโนมัติ
+    const shareKey = g.usb && netShareMap[g.usb.serial] ? g.usb.serial : serial; // แชร์เน็ตผูกกับสาย USB
     devices.push({
-      serial, model: model.replace(/_/g, ' '), connected, proxy: proxySet ? proxy : null, mode,
-      posternRunning, transport, emulator,
-      netShare: !!netShareMap[serial],                        // ผู้ใช้เปิดแชร์เน็ตไว้ให้เครื่องนี้ไหม
-      shareVia: netShareMap[serial] ? (connected ? 'mitm' : (viaShare ? 'plain' : null)) : null,
+      serial, id: g.id, model: g.model || serial, connected, proxy: proxySet ? proxy : null, mode,
+      posternRunning,
+      transport: primary.transport,                          // ทางที่ใช้สั่ง adb ตอนนี้ (usb | wifi)
+      usbSerial: g.usb ? g.usb.serial : null,
+      wifiSerial: g.wifi ? g.wifi.serial : null,             // ต่อ adb ผ่าน Wi-Fi อยู่ (ip:port หรือชื่อ mDNS)
+      emulator: primary.emulator,
+      netShare: !!netShareMap[shareKey],                     // ผู้ใช้เปิดแชร์เน็ตไว้ให้เครื่องนี้ไหม
+      shareVia: netShareMap[shareKey] ? (connected ? 'mitm' : (viaShare ? 'plain' : null)) : null,
     });
   }
   return devices;
@@ -1282,6 +1322,8 @@ async function resolveTarget(S, mode) {
     return { host: lan, target: `${lan}:${MITM_PORT}` };
   }
   await adb([...S, 'reverse', `tcp:${MITM_PORT}`, `tcp:${MITM_PORT}`]);
+  // เครื่องนี้ต่อ adb ไว้อีกทาง (USB+Wi-Fi) → ตั้ง reverse ทางนั้นด้วย ถอดสายแล้ว traffic ไหลต่อไม่สะดุด
+  for (const sib of siblingSerials(S[1])) await adb(['-s', sib, 'reverse', `tcp:${MITM_PORT}`, `tcp:${MITM_PORT}`]).catch(() => {});
   return { host: '127.0.0.1', target: `127.0.0.1:${MITM_PORT}` };
 }
 
@@ -1374,6 +1416,7 @@ app.post('/api/devices/disconnect', express.json(), async (req, res) => {
       await clearDeviceProxy(serial);
       // ตัด reverse tunnel (USB/emulator) — path ไปหา mitmproxy ขาดทันที
       await adb([...S, 'reverse', '--remove', `tcp:${MITM_PORT}`]).catch(() => {});
+      for (const sib of siblingSerials(serial)) await adb(['-s', sib, 'reverse', '--remove', `tcp:${MITM_PORT}`]).catch(() => {});
       // เปิด "แชร์เน็ต" ไว้ → ตัด capture ต้องไม่ทำให้มือถือเน็ตดับ: สลับไปใช้พร็อกซีส่งต่อแทน
       // (นี่คือเหตุผลที่แยกสองพอร์ต — ปุ่มคนละปุ่ม สถานะคนละอัน)
       if (netShareMap[serial]) {
@@ -1386,7 +1429,7 @@ app.post('/api/devices/disconnect', express.json(), async (req, res) => {
     }
     // ตัดเอง = ตั้งใจปลด → ปิด auto-reconnect ของเครื่องนี้ด้วย
     // ไม่งั้น watcher ฝั่ง server จะเห็นว่า "หลุด" แล้วเชื่อมกลับให้ทันที กลายเป็นปลดไม่ได้
-    setAutoReconnect(serial, false);
+    setAutoReconnect(idForSerial(serial), false);
     // mute ค้าง (จนกว่าจะ connect ใหม่/สั่งปลด) + ล้าง flow list — "ตัดแล้วเงียบ"
     // ถ้าเครื่องยัง cache proxy แล้วยิงต่อ flow จะถูกทิ้ง (นับไว้ที่ mutedDropCount โชว์ใน status)
     muteUntil = Infinity;
@@ -1454,37 +1497,39 @@ async function autoReconnectTick() {
   try {
     const devices = await listDevices();
     const now = Date.now();
-    for (const serial of serials) {
-      const dev = devices.find((x) => x.serial === serial);
+    for (const key of serials) {
+      // key = id ของเครื่อง (ro.serialno) หรือ serial — ถอดสายแล้วเครื่องยังอยู่ทาง Wi-Fi ก็หาเจอ
+      const dev = devices.find((x) => x.id === key || x.serial === key || x.usbSerial === key || x.wifiSerial === key);
       if (!dev) continue; // ถอดสาย/emulator ปิดอยู่ — รอโผล่กลับมาค่อยลอง
+      const serial = dev.serial;
       if (dev.mode === 'usb') dev.reverse = await hasReverseTunnel(serial);
       // emulator reboot → tmpfs หาย system CA หลุด แม้ proxy/reverse ปกติ → ติดตั้งใหม่ให้เอง
       // (auto-reconnect = "ให้ capture ทำงานต่อ" ไม่งั้น HTTPS เงียบทั้งที่ status ขึ้นเขียว)
-      if (devHealthy(dev) && dev.emulator && !(autoCaBackoff[serial] && now < autoCaBackoff[serial])) {
+      if (devHealthy(dev) && dev.emulator && !(autoCaBackoff[key] && now < autoCaBackoff[key])) {
         if ((await hasSystemCa(serial)) === false) {
-          autoCaBackoff[serial] = Date.now() + 5 * 60000; // ลอง install ถี่สุดทุก 5 นาที (ถ้ายังพลาด)
+          autoCaBackoff[key] = Date.now() + 5 * 60000; // ลอง install ถี่สุดทุก 5 นาที (ถ้ายังพลาด)
           try {
             console.log(`[auto-reconnect] ${serial} system CA หาย (น่าจะ reboot) — ติดตั้งใหม่…`);
             await doInstallCaEmulator(serial);
-            delete autoCaBackoff[serial];
+            delete autoCaBackoff[key];
             console.log(`[auto-reconnect] ติดตั้ง system CA ให้ ${serial} สำเร็จ`);
           } catch (e) { console.error(`[auto-reconnect] ติดตั้ง CA ให้ ${serial} ไม่สำเร็จ: ${e.message}`); }
         }
         continue;
       }
-      if (devHealthy(dev)) { delete autoRcBackoff[serial]; continue; }
-      if (autoRcBackoff[serial] && now < autoRcBackoff[serial]) continue;
+      if (devHealthy(dev)) { delete autoRcBackoff[key]; continue; }
+      if (autoRcBackoff[key] && now < autoRcBackoff[key]) continue;
       // re-check pref สดๆ ก่อนยิง — ระหว่าง listDevices (ช้า หลาย adb call) ผู้ใช้อาจกด disconnect
       // ซึ่งลบ pref ไปแล้ว ถ้าใช้ค่าจากตอนต้น tick จะเชื่อมกลับทั้งที่เขาตั้งใจปลด
-      const mode = autoReconnectMap[serial];
+      const mode = autoReconnectMap[key];
       if (!mode) continue;
       try {
         const r = await doConnectDevice(serial, mode);
         if (r.status !== 200) throw new Error(r.body.error || 'connect ไม่สำเร็จ');
-        delete autoRcBackoff[serial];
+        delete autoRcBackoff[key];
         console.log(`[auto-reconnect] เชื่อม ${serial} (${mode}) กลับสำเร็จ`);
       } catch (e) {
-        autoRcBackoff[serial] = Date.now() + 15000; // fail → เว้น 15s ค่อยลองใหม่
+        autoRcBackoff[key] = Date.now() + 15000; // fail → เว้น 15s ค่อยลองใหม่
         console.error(`[auto-reconnect] เชื่อม ${serial} ไม่สำเร็จ: ${e.message}`);
       }
     }
@@ -1492,6 +1537,200 @@ async function autoReconnectTick() {
   finally { autoRcRunning = false; }
 }
 setInterval(autoReconnectTick, 4000);
+
+// ================= ADB ผ่าน Wi-Fi (wireless debugging) — สายชอบหลุด → debug/บันทึก traffic ต่อผ่าน Wi-Fi =================
+// เงื่อนไขเดียว: มือถือกับ Mac ต้องยิงถึงกัน = อยู่ Wi-Fi วงเดียวกัน / Mac เกาะ Hotspot ของมือถือ / มือถือเกาะ
+// Internet Sharing ของ Mac — ทุกแบบใช้กลไกเดียว: หา IP มือถือที่อยู่วงเดียวกับ interface ใดของ Mac
+// จำ endpoint ไว้ที่ data/adb-wifi.json (id → { host, model }) แล้ว watcher ต่อกลับให้เองเมื่อหลุด
+const ADB_WIFI_FILE = path.join(__dirname, 'data', 'adb-wifi.json');
+const ADB_WIFI_PORT = 5555;
+let adbWifiMap = {};
+try { if (fs.existsSync(ADB_WIFI_FILE)) adbWifiMap = JSON.parse(fs.readFileSync(ADB_WIFI_FILE, 'utf8')) || {}; } catch { adbWifiMap = {}; }
+function saveAdbWifi() {
+  try {
+    fs.mkdirSync(path.dirname(ADB_WIFI_FILE), { recursive: true });
+    fs.writeFileSync(ADB_WIFI_FILE, JSON.stringify(adbWifiMap, null, 2));
+  } catch (e) { console.error('[adb-wifi] เขียนไฟล์สถานะไม่ได้:', e.message); }
+}
+const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+function httpErr(status, message, extra = {}) { const e = new Error(message); e.status = status; e.extra = extra; return e; }
+async function adbStateOf(serial) {
+  const rows = adbWifi.parseAdbDevices(await adb(['devices', '-l']));
+  return (rows.find((r) => r.serial === serial) || {}).state || null;
+}
+// adb connect แล้วรอจนพร้อมจริง — exit 0 แม้พลาด จึงต้องอ่านข้อความ · ครั้งแรกมือถือจะถาม "อนุญาต" (unauthorized)
+async function adbConnectHost(host) {
+  let out = '';
+  try { out = await adb(['connect', host], 10000); } catch (e) { out = `${e.stdout || ''} ${e.message}`; }
+  if (!adbWifi.connectOk(out)) return { ok: false, out: out.trim() };
+  for (let i = 0; i < 8; i++) {
+    const st = await adbStateOf(host).catch(() => null);
+    if (st === 'device') return { ok: true };
+    if (st === 'unauthorized') return { ok: false, unauthorized: true, out: 'รอกดอนุญาตบนมือถือ' };
+    await sleepMs(500);
+  }
+  return { ok: false, out: 'เชื่อมแล้วแต่ adb ยังไม่พร้อม (offline)' };
+}
+// reverse ผูกกับ transport — หลัง adbd restart (tcpip) หรือได้ทาง Wi-Fi ใหม่ ต้องตั้งให้ตรงกับ proxy ปัจจุบันของเครื่อง
+async function syncReverses(serials) {
+  if (!serials.length) return;
+  const cur = await currentProxy(serials[0]);
+  const ports = [];
+  if (cur.value === `127.0.0.1:${MITM_PORT}`) ports.push(MITM_PORT);
+  if (cur.share) ports.push(SHARE_PORT);
+  for (const sr of serials) for (const p of ports) await adb(['-s', sr, 'reverse', `tcp:${p}`, `tcp:${p}`]).catch(() => {});
+}
+// เปิด debug ผ่าน Wi-Fi จากเครื่องที่เสียบสายอยู่: เลือก IP ที่ Mac ยิงถึง → adb tcpip → adb connect
+async function doEnableAdbWifi(usbSerial, { port = ADB_WIFI_PORT } = {}) {
+  const S = ['-s', usbSerial];
+  const ips = adbWifi.parseDeviceIps(await adb([...S, 'shell', 'ip -4 -o addr show'], 6000));
+  const nets = adbWifi.macNets();
+  const macList = nets.map((n) => `${n.ip} (${n.iface})`).join(', ') || 'ไม่มี';
+  if (!ips.length) {
+    throw httpErr(409, 'มือถือยังไม่ได้ต่อ Wi-Fi (และไม่ได้เปิด Hotspot) — ต่อ Wi-Fi วงเดียวกับ Mac ก่อน\n'
+      + `หรือเปิด Hotspot บนมือถือแล้วให้ Mac ไปเกาะ · Mac ตอนนี้: ${macList}`, { code: 'nowifi', macIps: nets });
+  }
+  const pick = adbWifi.pickReachableIp(ips, nets);
+  if (!pick) {
+    throw httpErr(409, `มือถือ (${ips.map((x) => `${x.ip} ${x.iface}`).join(', ')}) กับ Mac (${macList}) อยู่คนละวง — ยิงหากันไม่ถึง\n`
+      + 'ทางเลือก: ① ต่อ Wi-Fi เดียวกัน ② เปิด Hotspot บนมือถือแล้วให้ Mac เกาะ ③ เปิด Internet Sharing บน Mac แล้วให้มือถือเกาะ',
+    { code: 'nosamenet', phoneIps: ips, macIps: nets });
+  }
+  const host = `${pick.ip}:${port}`;
+  const id = (await hwSerialOf(usbSerial)) || usbSerial;
+  // ลอง connect เฉยๆ ก่อน — adbd อาจยังฟัง 5555 อยู่แล้ว (เคยเปิดไว้ แค่ Wi-Fi หลุด) ไม่ต้อง restart ให้ USB สะดุด
+  if ((await adbStateOf(host).catch(() => null)) !== 'device' && !(await adbConnectHost(host)).ok) {
+    // tcpip = adbd บนมือถือ restart → ทาง USB หลุดแป๊บนึง และ reverse ทุกตัวหาย (คืนให้ด้านล่าง)
+    await adb([...S, 'tcpip', String(port)], 10000);
+    await adb([...S, 'wait-for-device'], 15000).catch(() => {});
+    let r = { ok: false, out: '' };
+    for (let i = 0; i < 6 && !r.ok && !r.unauthorized; i++) { await sleepMs(700); r = await adbConnectHost(host); }
+    if (!r.ok) {
+      throw httpErr(r.unauthorized ? 409 : 502, r.unauthorized
+        ? 'มือถือถาม "อนุญาตการแก้จุดบกพร่อง" — กดอนุญาต (ติ๊ก “อนุญาตจากคอมพิวเตอร์นี้เสมอ”) แล้วกดใหม่'
+        : `adb connect ${host} ไม่สำเร็จ: ${r.out}\n(Wi-Fi บางที่กันเครื่องคุยกันเอง — AP isolation · ลอง Hotspot แทน)`, { code: r.unauthorized ? 'unauthorized' : 'connect' });
+    }
+  }
+  hwSerialCache.set(host, { hw: id, at: Date.now() });
+  let model = '';
+  try { model = (await adb([...S, 'shell', 'getprop', 'ro.product.model'], 5000)).trim(); } catch { /* ignore */ }
+  adbWifiMap[id] = { host, model: model || (adbWifiMap[id] && adbWifiMap[id].model) || '', at: new Date().toISOString() };
+  saveAdbWifi();
+  await syncReverses([usbSerial, host]);
+  return { id, host, ip: pick.ip, iface: pick.iface, macIp: pick.macIp, macIface: pick.macIface };
+}
+// ไม่มีสายเลย (Android 11+ Wireless debugging): ต่อด้วย IP:พอร์ต ที่หน้า Wireless debugging โชว์
+async function doConnectAdbWifi(hostIn) {
+  const host = /:\d+$/.test(hostIn) ? hostIn : `${hostIn}:${ADB_WIFI_PORT}`;
+  if (!/^\d+\.\d+\.\d+\.\d+:\d+$/.test(host)) throw httpErr(400, 'รูปแบบต้องเป็น IP:พอร์ต เช่น 192.168.1.20:37123');
+  const r = await adbConnectHost(host);
+  if (!r.ok) {
+    throw httpErr(r.unauthorized ? 409 : 502, r.unauthorized
+      ? 'รอกดอนุญาตบนมือถือ แล้วกดเชื่อมอีกครั้ง'
+      : `adb connect ${host} ไม่สำเร็จ: ${r.out}\nAndroid 11+ ที่ไม่เคยจับคู่ ต้อง "จับคู่ด้วยรหัส" ก่อน (พอร์ตจับคู่ ≠ พอร์ตเชื่อม)`, { code: r.unauthorized ? 'unauthorized' : 'connect' });
+  }
+  const id = (await hwSerialOf(host)) || host;
+  let model = '';
+  try { model = (await adb(['-s', host, 'shell', 'getprop', 'ro.product.model'], 5000)).trim(); } catch { /* ignore */ }
+  adbWifiMap[id] = { host, model, at: new Date().toISOString() };
+  saveAdbWifi();
+  await syncReverses([host]);
+  return { id, host };
+}
+
+app.post('/api/devices/adb-wifi/enable', express.json(), async (req, res) => {
+  const { serial } = req.body || {};
+  if (!serial) return res.status(400).json({ ok: false, error: 'ต้องระบุ serial (เครื่องที่เสียบสาย USB อยู่)' });
+  if (adbWifi.isWifiSerial(serial)) return res.status(400).json({ ok: false, error: 'เครื่องนี้ต่อผ่าน Wi-Fi อยู่แล้ว' });
+  try { res.json({ ok: true, ...(await doEnableAdbWifi(serial)) }); }
+  catch (e) { res.status(e.status || 500).json({ ok: false, error: e.message, ...(e.extra || {}) }); }
+});
+app.post('/api/devices/adb-wifi/connect', express.json(), async (req, res) => {
+  const { host } = req.body || {};
+  if (!host) return res.status(400).json({ ok: false, error: 'ต้องระบุ IP:พอร์ต' });
+  try { res.json({ ok: true, ...(await doConnectAdbWifi(String(host).trim())) }); }
+  catch (e) { res.status(e.status || 500).json({ ok: false, error: e.message, ...(e.extra || {}) }); }
+});
+// จับคู่ (Android 11+): IP:พอร์ตจับคู่ + รหัส 6 หลัก จาก "จับคู่อุปกรณ์ด้วยรหัสการจับคู่" → แล้วหาพอร์ตเชื่อมจาก mDNS ต่อให้เลย
+app.post('/api/devices/adb-wifi/pair', express.json(), async (req, res) => {
+  const host = String((req.body || {}).host || '').trim();
+  const code = String((req.body || {}).code || '').trim();
+  if (!/^\d+\.\d+\.\d+\.\d+:\d+$/.test(host) || !/^\d{6}$/.test(code)) {
+    return res.status(400).json({ ok: false, error: 'ต้องใส่ IP:พอร์ตจับคู่ (เช่น 192.168.1.20:41235) และรหัส 6 หลัก' });
+  }
+  let out = '';
+  try { out = await adb(['pair', host, code], 20000); } catch (e) { out = `${e.stdout || ''} ${e.message}`; }
+  if (!adbWifi.pairOk(out)) return res.status(502).json({ ok: false, error: `จับคู่ไม่สำเร็จ: ${out.trim()}\n(รหัสหมดอายุเมื่อปิดหน้าต่างจับคู่บนมือถือ — เปิดใหม่แล้วใช้รหัสใหม่)` });
+  // หา "พอร์ตเชื่อม" ของ IP เดียวกันจาก mDNS (adb อาจต่อให้เองแล้วก็ได้)
+  const ip = host.split(':')[0];
+  for (let i = 0; i < 6; i++) {
+    const svc = adbWifi.parseMdns(await adb(['mdns', 'services'], 5000).catch(() => ''))
+      .find((x) => x.type === 'connect' && x.host.startsWith(ip + ':'));
+    if (svc) {
+      try { return res.json({ ok: true, paired: true, connected: true, ...(await doConnectAdbWifi(svc.host)) }); }
+      catch (e) { return res.json({ ok: true, paired: true, connected: false, error: e.message }); }
+    }
+    await sleepMs(700);
+  }
+  res.json({ ok: true, paired: true, connected: false, error: 'จับคู่แล้ว — ใส่ IP:พอร์ต (ตัวบนสุดของหน้า Wireless debugging) แล้วกดเชื่อม' });
+});
+app.post('/api/devices/adb-wifi/disable', express.json(), async (req, res) => {
+  const { id, host } = req.body || {};
+  // host = ต่อ Wi-Fi ไว้จากนอกแอป (ไม่อยู่ในรายการที่จำ) → ตัดอย่างเดียว
+  const ent = adbWifiMap[id] || (host ? { host } : null);
+  if (!ent) return res.status(404).json({ ok: false, error: 'ไม่พบเครื่องนี้ในรายการ Wi-Fi' });
+  if (adbWifiMap[id]) { delete adbWifiMap[id]; delete adbWifiBackoff[id]; saveAdbWifi(); }
+  await adb(['disconnect', ent.host]).catch(() => {});
+  res.json({ ok: true });
+});
+
+// watcher: endpoint ที่จำไว้หลุด (มือถือหลับ/IP เปลี่ยน/reboot) → ต่อกลับให้เอง
+//   เสียบสายอยู่ → เปิดใหม่ผ่านสาย (ได้ IP ปัจจุบัน + tcpip ใหม่หลัง reboot) · ไม่มีสาย → adb connect ซ้ำ / หาพอร์ตใหม่จาก mDNS
+const adbWifiBackoff = {}; // id → { n, until, err }
+let adbWifiRunning = false;
+async function adbWifiKeepAlive() {
+  const ids = Object.keys(adbWifiMap);
+  if (!ids.length || adbWifiRunning) return;
+  adbWifiRunning = true;
+  try {
+    const rows = adbWifi.parseAdbDevices(await adb(['devices', '-l']));
+    const st = Object.fromEntries(rows.map((r) => [r.serial, r.state]));
+    for (const id of ids) {
+      const ent = adbWifiMap[id];
+      if (!ent) continue;
+      if (st[ent.host] === 'device') { delete adbWifiBackoff[id]; continue; }
+      const b = adbWifiBackoff[id];
+      if (b && Date.now() < b.until) continue;
+      const usb = rows.find((r) => r.state === 'device' && !adbWifi.isWifiSerial(r.serial)
+        && (r.serial === id || (hwSerialCache.get(r.serial) || {}).hw === id));
+      try {
+        if (usb) {
+          await doEnableAdbWifi(usb.serial, { port: +ent.host.split(':')[1] || ADB_WIFI_PORT });
+        } else {
+          if (st[ent.host]) await adb(['disconnect', ent.host]).catch(() => {}); // offline ค้างใน adb → เคลียร์ก่อน
+          let r = await adbConnectHost(ent.host);
+          if (!r.ok) { // Android 11+ เปลี่ยนพอร์ตทุกครั้งที่เปิด Wireless debugging ใหม่ → หาจาก mDNS ด้วย IP เดิม
+            const ip = ent.host.split(':')[0];
+            const svc = adbWifi.parseMdns(await adb(['mdns', 'services'], 5000).catch(() => ''))
+              .find((x) => x.type === 'connect' && x.host.startsWith(ip + ':'));
+            if (svc && svc.host !== ent.host) { r = await adbConnectHost(svc.host); if (r.ok) { ent.host = svc.host; saveAdbWifi(); } }
+          }
+          if (!r.ok) throw new Error(r.out || 'connect ไม่สำเร็จ');
+          await syncReverses([ent.host]);
+        }
+        delete adbWifiBackoff[id];
+        console.log(`[adb-wifi] ต่อ ${id} ผ่าน Wi-Fi กลับแล้ว (${adbWifiMap[id] && adbWifiMap[id].host})`);
+      } catch (e) {
+        const n = (b ? b.n : 0) + 1;
+        // มีสายอยู่แต่เปิดไม่ได้ → อย่า tcpip ถี่ (adbd restart = USB สะดุดทุกครั้ง) เว้น 5 นาที
+        const wait = usb ? 5 * 60000 : Math.min(60000, 10000 * n);
+        adbWifiBackoff[id] = { n, until: Date.now() + wait, err: e.message };
+      }
+    }
+  } catch (e) { console.error('[adb-wifi] รอบนี้ล้ม: ' + e.message); }
+  finally { adbWifiRunning = false; }
+}
+setInterval(adbWifiKeepAlive, 8000);
 
 // ตั้ง/ปลด mute ตรงๆ — จำเป็นสำหรับการเชื่อมต่อแบบ manual (ตั้ง proxy เองบนมือถือ
 // โดยไม่กด connect ในเว็บ): ถ้าก่อนหน้ากด disconnect ไว้ mute จะค้าง true และ server
@@ -2200,8 +2439,17 @@ app.get('/api/status', async (req, res) => {
       muted: isMuted(),
       mutedDropped: mutedDropCount,
       flows: { count: proxyStore.flows.length, lastAt: lastFlowAt },
-      autoReconnect: autoReconnectMap, // serial → 'usb'|'wifi' (ฝั่ง server จัดการเอง)
+      autoReconnect: autoReconnectMap, // id/serial → 'usb'|'wifi' (ฝั่ง server จัดการเอง)
       lanIp: getLanIp(),
+      // adb ผ่าน Wi-Fi: เครื่องที่จำไว้ (ต่ออยู่/หลุด) + วงเน็ตของ Mac (ไว้บอกผู้ใช้ว่ามือถือต้องอยู่วงไหน)
+      adbWifi: {
+        remembered: Object.entries(adbWifiMap).map(([id, e]) => ({
+          id, host: e.host, model: e.model,
+          connected: devices.some((d) => d.wifiSerial === e.host),
+          lastError: adbWifiBackoff[id] ? adbWifiBackoff[id].err : null,
+        })),
+        macNets: adbWifi.macNets(),
+      },
     });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
