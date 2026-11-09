@@ -1923,3 +1923,9 @@ body.mirror-open { padding-right: calc(44px + var(--mirror-w)); transition: none
 .auth-badge.bad { color: var(--red); border-color: rgba(248, 113, 113, 0.4); background: rgba(248, 113, 113, 0.1); }
 .auth-err { color: var(--yellow); }
 .auth-foot { margin-top: 10px; }
+
+/* ---------- Status: การ์ด ADB ผ่าน Wi-Fi (ช่อง IP:พอร์ต / รหัสจับคู่) ---------- */
+.st-adbw-row { flex-wrap: wrap; }
+.st-adbw-input { flex: 1 1 200px; min-width: 0; }
+.st-adbw-input.st-adbw-code::placeholder { letter-spacing: normal; }
+.st-adbw-input.st-adbw-code { flex: 0 0 110px; letter-spacing: 2px; font-family: ui-monospace, Menlo, monospace; }
