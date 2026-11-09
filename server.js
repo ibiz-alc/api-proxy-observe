@@ -12,6 +12,18 @@ const { startProxy } = require('./proxy');
 
 const execFileP = promisify(execFile);
 const ADB = process.env.ADB || 'adb';
+// adb ส่ง pubkey ไปมือถือพร้อม comment "user@$HOSTNAME" และ Android จำทั้งสตริง → ถ้าชื่อเครื่องเปลี่ยน
+// (macOS Bonjour ต่อท้าย -8768/-8303 เองเมื่อชื่อชนในวง) มือถือจะถือเป็นเครื่องใหม่ ถาม "Allow USB debugging?" ซ้ำ
+// ตรึงชื่อจาก HostName/ComputerName ไว้ใน env ให้ adb server ที่ spawn จากที่นี่ใช้ชื่อเดิมเสมอ
+if (process.platform === 'darwin' && !process.env.HOSTNAME) {
+  try {
+    const sc = (k) => require('child_process').execFileSync('scutil', ['--get', k], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    let name = '';
+    try { name = sc('HostName'); } catch {}
+    if (!name) name = sc('ComputerName').replace(/[^A-Za-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') + '.local';
+    if (name && name !== '.local') process.env.HOSTNAME = name;
+  } catch {}
+}
 const { createShareProxy } = require('./net-share');
 const adbWifi = require('./adb-wifi');
 const MITM_PORT = 8888;
